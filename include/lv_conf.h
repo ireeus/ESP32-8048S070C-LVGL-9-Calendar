@@ -44,7 +44,7 @@
    HAL SETTINGS
  *====================*/
 
-#define LV_DEF_REFR_PERIOD  33
+#define LV_DEF_REFR_PERIOD  16
 #define LV_DPI_DEF 130
 
 /*=================
