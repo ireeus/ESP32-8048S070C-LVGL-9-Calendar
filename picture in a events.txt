@@ -6,17 +6,20 @@
 #include <Preferences.h>
 #include <Update.h>
 #include <WiFiClientSecure.h>
-#include <esp_system.h>  // For ESP.restart()
-extern const lv_font_t technology_98;
+
+// Image dimensions
+const int img_width = 200;
+const int img_height = 90;
+
 // Build version
 const String build_version = "1.4";
-int debug =0; // Change to 1 to enable serial prints
+int debug = 1; // Change to 1 to enable serial prints
 // Firmware check interval variable
 const unsigned long firmwareCheckInterval = 100000UL; // 5 minutes in milliseconds
+
 // Forward declarations
 void fetchEvents();
 void updateEventDisplay(lv_obj_t *calendar);
-void blink_time_update_cb(lv_timer_t *timer);
 void fetchWeather();
 void updateWeatherDisplay();
 void wifi_connect_cb(lv_event_t *e);
@@ -41,7 +44,7 @@ void checkFirmwareUpdate();
 void updateFirmware();
 void update_btn_cb(lv_event_t *e);
 void printMemoryUsage();
-void updateDateTimeLabel(); // New function to update date-time label
+void updateDateTimeLabel();
 void show_event_details(int index, bool isReminder);
 void show_event_details_cb(lv_event_t *e);
 void close_event_details_cb(lv_event_t *e);
@@ -51,57 +54,27 @@ void next_month_cb(lv_event_t *e);
 void updateFirmwareButton();
 unsigned long hashString(const String& str);
 void update_today_highlight(lv_obj_t *cal);
-void darkness_slider_cb(lv_event_t *e); // New callback for darkness slider
+void darkness_slider_cb(lv_event_t *e);
 void rearrange_calendar_parts(lv_obj_t *cal);
-void fetchNotifications(); // New function for fetching notifications and displaying image
-void save_settings_cb(lv_event_t *e); // Renamed and modified from location_submit_cb
+void fetchNotifications();
+void save_settings_cb(lv_event_t *e);
 void notification_click_cb(lv_event_t *e);
 void blink_animation_cb(void * var, int32_t v);
 void snooze_reminder_cb(lv_event_t *e);
 const lv_image_dsc_t* getWifiImage();
 void device_id_preview_cb(lv_event_t *e);
-void fetchParcelBoxCredentials(); // New function to fetch parcelbox credentials
-void fetchBankHolidays(); // New function to fetch bank holidays
-void updateHolidayLabel(); // New function to update holiday label
+void fetchParcelBoxCredentials();
+void fetchBankHolidays();
+void updateHolidayLabel();
 void notification_toggle_cb(lv_timer_t *timer);
+void fetchBackgroundFilename();
+void fetchAndSetBackgroundImage();
+void setEventBackground();
+void fetchWeatherLocation();
 
-
-
-
-void blink_time_update_cb(lv_timer_t *timer) {
-  lv_obj_t *colon = (lv_obj_t *)lv_timer_get_user_data(timer);
-  if (!colon) return;
-
-  lv_obj_t *parent = lv_obj_get_parent(colon);
-  if (!parent) return;
-
-  // Access siblings by creation order (0: hours, 1: colon, 2: minutes)
-  lv_obj_t *hours = lv_obj_get_child(parent, 0);
-  lv_obj_t *minutes = lv_obj_get_child(parent, 2);
-  if (!hours || !minutes) return;
-
-  // Toggle colon visibility (1s on, 1s off)
-  static bool visible = true;
-  lv_obj_set_style_text_opa(colon, visible ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
-  visible = !visible;
-
-  // Update time display
-  time_t now_t;
-  time(&now_t);
-  struct tm *timeinfo = localtime(&now_t);
-  char hours_buf[3];
-  strftime(hours_buf, sizeof(hours_buf), "%H", timeinfo);
-  lv_label_set_text(hours, hours_buf);
-
-  char mins_buf[3];
-  strftime(mins_buf, sizeof(mins_buf), "%M", timeinfo);
-  lv_label_set_text(minutes, mins_buf);
-}
-void fetchBackgroundFilename(); // New function to fetch background filename from server
-void fetchAndSetBackgroundImage(); // New function to download and set background image
-void fetchWeatherLocation();// forward declaration for new function
 // Preferences for WiFi, API code, and firmware version
 Preferences preferences;
+
 // LVGL objects
 static lv_obj_t *wifi_setup_screen = nullptr;
 static lv_obj_t *api_code_screen = nullptr;
@@ -109,9 +82,9 @@ static lv_obj_t *location_screen = nullptr;
 static lv_obj_t *settings_popup = nullptr;
 static lv_obj_t *new_event_popup = nullptr;
 static lv_obj_t *keyboard = nullptr;
-static lv_obj_t *date_time_label = nullptr; // Renamed from month_label
+static lv_obj_t *date_time_label = nullptr;
 static lv_obj_t *month_label = nullptr;
-static lv_obj_t *holiday_label = nullptr; // New: Label for holiday description
+static lv_obj_t *holiday_label = nullptr;
 static lv_obj_t *eventContainer = nullptr;
 static lv_obj_t *weatherContainer = nullptr;
 static lv_obj_t *calendar = nullptr;
@@ -122,18 +95,20 @@ static lv_obj_t *update_status_label = nullptr;
 static lv_obj_t *event_details_popup = nullptr;
 static lv_obj_t *firmware_update_btn = nullptr;
 static lv_obj_t *button_bar = nullptr;
-static lv_obj_t *notification_img = nullptr; // New: Object for the notification image
-static lv_obj_t *wifi_icon = nullptr; // New: Object for the WiFi signal icon
+static lv_obj_t *notification_img = nullptr;
+static lv_obj_t *wifi_icon = nullptr;
 static bool notification_visible = false;
 static lv_timer_t *notification_timer = NULL;
-static lv_timer_t *blink_timer = NULL;
-static lv_obj_t *bg_img = nullptr;  // Global for background image
-static int g_ui_darkness = 0; // Global darkness level (0: light, 100: dark)
-static int temp_adjust = 0;// Global temperature adjustment
-static lv_obj_t *build_version_label = nullptr;// Global variable for build version label
-static unsigned long lastHolidayUpdate = 0;
-const unsigned long holidayUpdateInterval = 2592000000UL; // 30 days in milliseconds
+static lv_obj_t *bg_img = nullptr;
+static lv_image_dsc_t bg_dsc = {0};
+static uint8_t* bg_buffer = nullptr;
 
+// Global darkness level (0: light, 100: dark)
+static int g_ui_darkness = 0;
+// Global temperature adjustment
+static int temp_adjust = 0;
+// Global variable for build version label
+static lv_obj_t *build_version_label = nullptr;
 
 // Structure to hold new event UI elements
 struct NewEventUI {
@@ -151,18 +126,15 @@ struct NewEventUI {
   lv_obj_t *end_min_ta;
   lv_obj_t *remind_before_ta;
 };
-// New: Struct for next half-hour weather (only code needed for condition)
-struct NextWeather {
-  int weather_code;
-};
-NextWeather next_weather;
+
 // Structure to hold settings UI elements
 struct SettingsUI {
-  lv_obj_t *location_ta; // For weather location (city name)
-  lv_obj_t *username_ta; // For parcelBox username
-  lv_obj_t *device_id_ta; // For parcelBox device ID
-  lv_obj_t *temp_adjust_ta; // For temperature adjustment
+  lv_obj_t *location_ta;
+  lv_obj_t *username_ta;
+  lv_obj_t *device_id_ta;
+  lv_obj_t *temp_adjust_ta;
 };
+
 // Event structure
 struct Event {
   String summary;
@@ -180,6 +152,7 @@ struct Event {
 };
 Event events[300];
 int numEvents = 0;
+
 // Store unique dates for highlighting
 struct EventDate {
   int year;
@@ -188,6 +161,7 @@ struct EventDate {
 };
 EventDate eventDates[1000];
 int numEventDates = 0;
+
 // Structure for bank holidays
 struct Holiday {
   String title;
@@ -197,8 +171,12 @@ struct Holiday {
 };
 Holiday holidays[100];
 int numHolidays = 0;
+
 // Time zone for London (BST/GMT)
 const char* ntpServer = "pool.ntp.org";
+const long gmtOffset_sec = 0;
+const int daylightOffset_sec = 3600;
+
 // WiFi and API code
 String ssid;
 String password;
@@ -210,45 +188,46 @@ String username;
 String device_id;
 String last_ignored_notification = "";
 String current_notification_text = "";
-String backgroundFilename = ""; // New: Store the background image filename
+String backgroundFilename = "";
+
 // OTA variables
-String currentFirmwareVersion = "1.0.0"; // Loaded from Preferences in setup()
+String currentFirmwareVersion = "1.0.0";
 String latestFirmwareVersion = "";
 String firmwareUrl = "";
 WiFiClientSecure client;
 // Global flag to indicate OTA is in progress
 bool is_ota_updating = false;
-////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Auto-refresh timer
 static unsigned long lastRefreshTime = 0;
 const unsigned long refreshInterval = 60000;
 // Timer for updating date-time label
 static unsigned long lastDateTimeUpdate = 0;
-const unsigned long dateTimeUpdateInterval = 60000; // Update every 1 minute (changed from 1000)
+const unsigned long dateTimeUpdateInterval = 60000;
 // Timer for updating weather
 static unsigned long lastWeatherUpdate = 0;
-const unsigned long weatherUpdateInterval = 900000; // Update every 15min
+const unsigned long weatherUpdateInterval = 900000;
 // Timer for firmware check
 static unsigned long lastFirmwareCheck = 0;
-// New: Timer for notification check
+// Timer for notification check
 static unsigned long lastNotificationCheck = 0;
-const unsigned long notificationInterval = 10000UL; // Check every 10 seconds
-// New: Timer for WiFi icon update
+const unsigned long notificationInterval = 10000UL;
+// Timer for WiFi icon update
 static unsigned long lastWifiUpdate = 0;
-const unsigned long wifiUpdateInterval = 5000UL; // Update every 5 seconds
-// New: Timer for parcelbox credentials fetch
+const unsigned long wifiUpdateInterval = 5000UL;
+// Timer for parcelbox credentials fetch
 static unsigned long lastCredentialsCheck = 0;
-const unsigned long credentialsInterval = 1800000UL; // 30 minutes
+const unsigned long credentialsInterval = 1800000UL;
 // Debounce for touch events
 static unsigned long lastEventTime = 0;
 const unsigned long debounceDelay = 200;
-// New: Timer for background image update (e.g., every hour)
+// Timer for background image update
 static unsigned long lastBackgroundUpdate = 0;
-const unsigned long backgroundUpdateInterval = 3600000UL; // 1 hour
+const unsigned long backgroundUpdateInterval = 3600000UL;
 static unsigned long lastWeatherLocationCheck = 0;
-const unsigned long weatherLocationInterval = 1800000UL; // 30 minutes
-////////////////////////////////////////////////////////////////////////////////////////////////////////
+const unsigned long weatherLocationInterval = 1800000UL;
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Weather data
 struct CurrentWeather {
@@ -259,21 +238,20 @@ struct CurrentWeather {
   int weather_code;
   float wind_speed_10m;
   int wind_direction_10m;
-  float surface_pressure;  // NEW: Atmospheric pressure in hPa
 };
 CurrentWeather current_weather;
 struct DailyWeather {
   int weather_code;
   float temp_max;
   float apparent_max;
-  float temp_min;  // NEW: Added for night/minimum temperature
   float precip_sum;
   float wind_max;
   float humidity_mean;
 };
-DailyWeather forecast[14]; // Increased from 7 to 14 to store subsequent 14 days
-// New: Air Quality data
-int current_aqi = 0; // Current European AQI
+DailyWeather forecast[14];
+// Air Quality data
+int current_aqi = 0;
+
 // Helper function to print memory usage
 void printMemoryUsage() {
   if (debug == 1) {
@@ -282,6 +260,7 @@ void printMemoryUsage() {
                   heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
   }
 }
+
 String getWeatherDescription(int code) {
   switch (code) {
     case 0: return "Clear sky";
@@ -308,7 +287,7 @@ String getWeatherDescription(int code) {
     default: return "Unknown";
   }
 }
-// New: Function to get AQI description and color
+
 String getAqiDescription(int aqi) {
   if (aqi <= 20) return "Very Good";
   else if (aqi <= 40) return "Good";
@@ -317,15 +296,16 @@ String getAqiDescription(int aqi) {
   else if (aqi <= 100) return "Very Poor";
   else return "Extremely Poor";
 }
+
 lv_color_t getAqiColor(int aqi) {
-  if (aqi <= 20) return lv_color_hex(0x00FF00); // Green
-  else if (aqi <= 40) return lv_color_hex(0xFFFF00); // Yellow
-  else if (aqi <= 60) return lv_color_hex(0xFFA500); // Orange
-  else if (aqi <= 80) return lv_color_hex(0xFF0000); // Red
-  else if (aqi <= 100) return lv_color_hex(0x800000); // Maroon
-  else return lv_color_hex(0x4B0082); // Purple
+  if (aqi <= 20) return lv_color_hex(0x00FF00);
+  else if (aqi <= 40) return lv_color_hex(0xFFFF00);
+  else if (aqi <= 60) return lv_color_hex(0xFFA500);
+  else if (aqi <= 80) return lv_color_hex(0xFF0000);
+  else if (aqi <= 100) return lv_color_hex(0x800000);
+  else return lv_color_hex(0x4B0082);
 }
-// Declarations for weather images (assuming conversions are included similarly to the example)
+
 extern const lv_image_dsc_t Clear_sky;
 extern const lv_image_dsc_t Mainly_clear;
 extern const lv_image_dsc_t Partly_cloudy;
@@ -351,14 +331,13 @@ extern const lv_image_dsc_t Unknown;
 extern const lv_image_dsc_t crontab;
 extern const lv_image_dsc_t loading;
 extern const lv_image_dsc_t qr;
-// New: Declaration for the box image (convert your image to C array and include the file)
 extern const lv_image_dsc_t box;
-// New: Declarations for WiFi signal strength icons (convert your images to C arrays and include the files)
-extern const lv_image_dsc_t full; // for max signal
-extern const lv_image_dsc_t medium; // for medium signal
-extern const lv_image_dsc_t average; // for average signal
-extern const lv_image_dsc_t low; // for low signal
-extern const lv_image_dsc_t none; // for no signal
+extern const lv_image_dsc_t full;
+extern const lv_image_dsc_t medium;
+extern const lv_image_dsc_t average;
+extern const lv_image_dsc_t low;
+extern const lv_image_dsc_t none;
+
 const lv_image_dsc_t* getWeatherImage(int code) {
   switch (code) {
     case 0: return &Clear_sky;
@@ -385,7 +364,7 @@ const lv_image_dsc_t* getWeatherImage(int code) {
     default: return &Unknown;
   }
 }
-// Replace the existing getWifiImage() function with this updated version
+
 const lv_image_dsc_t* getWifiImage() {
   if (WiFi.status() != WL_CONNECTED) {
     return &none;
@@ -403,7 +382,7 @@ const lv_image_dsc_t* getWifiImage() {
     return &none;
   }
 }
-// URL encoding function
+
 String URLEncode(const String& str) {
   String encoded = "";
   for (size_t i = 0; i < str.length(); i++) {
@@ -418,6 +397,7 @@ String URLEncode(const String& str) {
   }
   return encoded;
 }
+
 void rearrange_calendar_parts(lv_obj_t *cal) {
   lv_obj_t *header = NULL;
   lv_obj_t *btnm = lv_calendar_get_btnmatrix(cal);
@@ -451,9 +431,9 @@ void rearrange_calendar_parts(lv_obj_t *cal) {
     }
   }
 }
-// Forward declarations (add the following line)
+
 void addEvent(JsonObject eventObj);
-// Modified fetchEvents function
+
 void fetchEvents() {
   if (debug == 1) Serial.println("[APP] Starting event fetch...");
   printMemoryUsage();
@@ -498,7 +478,7 @@ void fetchEvents() {
   http.end();
   printMemoryUsage();
 }
-// New function to fetch notifications and display image if new event
+
 void fetchNotifications() {
   if (debug == 1) Serial.println("[APP] Fetching notifications from https://cloudapps.zapto.org/spb/api.php...");
   if (WiFi.status() != WL_CONNECTED) {
@@ -521,9 +501,8 @@ void fetchNotifications() {
     }
     String title = doc["title"].as<String>();
     String text = doc["text"].as<String>();
-    String cookie = doc["cookie"].as<String>(); // Note: In modified PHP, it's "device_id" now, but assuming "cookie" for compatibility
+    String cookie = doc["cookie"].as<String>();
     String this_notification = title + "_" + text;
-    // Check if valid user and has notification text (indicating new event)
     if (cookie != "unknown" && !text.isEmpty() && this_notification != last_ignored_notification && title != "No Data") {
       if (debug == 1) Serial.println("[APP] New notification event detected, displaying image");
       current_notification_text = this_notification;
@@ -531,8 +510,8 @@ void fetchNotifications() {
         notification_img = lv_img_create(lv_scr_act());
         lv_img_set_src(notification_img, &box);
         lv_img_set_zoom(notification_img, 102);
-        lv_obj_align(notification_img, LV_ALIGN_TOP_RIGHT, -110, -13); // Top-right with padding
-        lv_obj_add_flag(notification_img, LV_OBJ_FLAG_CLICKABLE); // Make the image clickable
+        lv_obj_align(notification_img, LV_ALIGN_TOP_RIGHT, -110, -13);
+        lv_obj_add_flag(notification_img, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_add_event_cb(notification_img, notification_click_cb, LV_EVENT_CLICKED, NULL);
         lv_obj_clear_flag(notification_img, LV_OBJ_FLAG_HIDDEN);
         notification_visible = true;
@@ -550,6 +529,7 @@ void fetchNotifications() {
   }
   http.end();
 }
+
 void notification_click_cb(lv_event_t *e) {
   if (notification_img) {
     if (notification_timer) lv_timer_del(notification_timer);
@@ -558,7 +538,6 @@ void notification_click_cb(lv_event_t *e) {
     notification_img = nullptr;
   }
   last_ignored_notification = current_notification_text;
-  // Mark as read
   HTTPClient http;
   String url = "https://cloudapps.zapto.org/spb/api.php?device_id=" + device_id + "&username=" + username + "&id_read_status=1";
   if (debug == 1) Serial.println("[DEBUG] Starting mark as read process");
@@ -575,9 +554,11 @@ void notification_click_cb(lv_event_t *e) {
   http.end();
   if (debug == 1) Serial.println("[DEBUG] HTTP client ended");
 }
+
 void blink_animation_cb(void * var, int32_t v) {
   lv_obj_set_style_img_opa((lv_obj_t *)var, v, 0);
 }
+
 void notification_toggle_cb(lv_timer_t *timer) {
   if (notification_visible) {
     lv_obj_add_flag(notification_img, LV_OBJ_FLAG_HIDDEN);
@@ -589,13 +570,13 @@ void notification_toggle_cb(lv_timer_t *timer) {
     lv_timer_set_period(timer, 2000);
   }
 }
+
 void fetchWeather() {
   if (debug == 1) Serial.println("[APP] Fetching weather...");
   if (WiFi.status() != WL_CONNECTED) {
     if (debug == 1) Serial.println("[APP] WiFi not connected");
     return;
   }
-  // First, geocode if lat/lon not set
   if (lat.isEmpty() || lon.isEmpty()) {
     HTTPClient httpGeo;
     String geoUrl = "https://geocoding-api.open-meteo.com/v1/search?name=" + location + "&count=1&language=en&format=json";
@@ -622,97 +603,47 @@ void fetchWeather() {
     if (debug == 1) Serial.println("[APP] Failed to geocode location");
     return;
   }
-  
-  
-// Get current weather and minutely_15 forecast from Open-Meteo (UPDATED: Added temperature_2m_min and surface_pressure)
-HTTPClient http;
-String url = "https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lon + 
-             "&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m,wind_direction_10m,surface_pressure" +  // UPDATED: Added surface_pressure
-             "&minutely_15=temperature_2m,relative_humidity_2m,weather_code,precipitation,wind_speed_10m" +  // NEW: 15-min data for ~half-hour forecast
-             "&daily=weather_code,temperature_2m_max,temperature_2m_min,apparent_temperature_max,precipitation_sum,wind_speed_10m_max,relative_humidity_2m_mean" +  // UPDATED: Added temperature_2m_min
-             "&forecast_minutely_15=96" +  // NEW: 96 timesteps = 24 hours of 15-min data
-             "&timezone=auto&forecast_days=14";  // UPDATED: forecast_days=14 for consistency
-http.begin(url);
-int httpCode = http.GET();
-if (httpCode == HTTP_CODE_OK) {
-  String payload = http.getString();
-  JsonDocument doc;
-  DeserializationError error = deserializeJson(doc, payload);
-  if (error) {
-    if (debug == 1) Serial.println("[APP] Weather JSON parsing failed: " + String(error.c_str()));
-    return;
-  }
-  JsonObject current = doc["current"];
-  current_weather.temperature_2m = current["temperature_2m"].as<float>();
-  current_weather.relative_humidity_2m = current["relative_humidity_2m"].as<float>();
-  current_weather.apparent_temperature = current["apparent_temperature"].as<float>();
-  current_weather.precipitation = current["precipitation"].as<float>();
-  current_weather.weather_code = current["weather_code"].as<int>();
-  current_weather.wind_speed_10m = current["wind_speed_10m"].as<float>();
-  current_weather.wind_direction_10m = current["wind_direction_10m"].as<int>();
-  current_weather.surface_pressure = current["surface_pressure"].as<float>();  // NEW: Parse surface pressure
-  if (debug == 1) Serial.println("[APP] Fetched current weather including pressure: " + String(current_weather.surface_pressure) + " hPa");
-    
-	
-	
-    // NEW: Parse minutely_15 for next ~30 min weather code
-    JsonObject minutely15 = doc["minutely_15"];
-    if (!minutely15.isNull()) {
-      JsonArray m_time = minutely15["time"];
-      JsonArray m_code = minutely15["weather_code"];
-      time_t now_t;
-      time(&now_t);
-      struct tm target_tm = *localtime(&now_t);
-      target_tm.tm_min += 30;
-      target_tm.tm_sec = 0;
-      time_t target_time = mktime(&target_tm);  // Normalize to next half-hour
-      int next_index = -1;
-      time_t closest_time = 0;
-      for (size_t i = 0; i < m_time.size(); ++i) {
-        const char* time_str = m_time[i].as<const char*>();
-        struct tm parse_tm = {0};
-        if (strptime(time_str, "%Y-%m-%dT%H:%M", &parse_tm) != NULL) {
-          parse_tm.tm_sec = 0;
-          time_t parse_time = mktime(&parse_tm);
-          if (parse_time >= target_time && (next_index == -1 || parse_time < closest_time)) {
-            next_index = i;
-            closest_time = parse_time;
-          }
-        }
-      }
-      if (next_index != -1) {
-        next_weather.weather_code = m_code[next_index].as<int>();
-        if (debug == 1) Serial.println("[APP] Next ~30 min weather code: " + String(next_weather.weather_code));
-      } else {
-        next_weather.weather_code = current_weather.weather_code;  // Fallback
-      }
-    } else {
-      next_weather.weather_code = current_weather.weather_code;  // Fallback if no minutely data
+  HTTPClient http;
+  String url = "https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lon + "&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m,wind_direction_10m&daily=weather_code,temperature_2m_max,apparent_temperature_max,precipitation_sum,wind_speed_10m_max,relative_humidity_2m_mean&timezone=auto&forecast_days=14";
+  http.begin(url);
+  int httpCode = http.GET();
+  if (httpCode == HTTP_CODE_OK) {
+    String payload = http.getString();
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, payload);
+    if (error) {
+      if (debug == 1) Serial.println("[APP] Weather JSON parsing failed: " + String(error.c_str()));
+      return;
     }
-    
+    JsonObject current = doc["current"];
+    current_weather.temperature_2m = current["temperature_2m"].as<float>();
+    current_weather.relative_humidity_2m = current["relative_humidity_2m"].as<float>();
+    current_weather.apparent_temperature = current["apparent_temperature"].as<float>();
+    current_weather.precipitation = current["precipitation"].as<float>();
+    current_weather.weather_code = current["weather_code"].as<int>();
+    current_weather.wind_speed_10m = current["wind_speed_10m"].as<float>();
+    current_weather.wind_direction_10m = current["wind_direction_10m"].as<int>();
+    if (debug == 1) Serial.println("[APP] Fetched current weather");
     JsonObject daily = doc["daily"];
     JsonArray weather_codes = daily["weather_code"];
     JsonArray temp_max = daily["temperature_2m_max"];
-    JsonArray temp_min = daily["temperature_2m_min"];  // NEW: Parse min temps
     JsonArray apparent_max = daily["apparent_temperature_max"];
     JsonArray precip_sum = daily["precipitation_sum"];
     JsonArray wind_max = daily["wind_speed_10m_max"];
     JsonArray humidity_mean = daily["relative_humidity_2m_mean"];
-    for (int i = 0; i < 14; i++) { // Increased from 7 to 14 to process and store all requested days
+    for (int i = 0; i < 14; i++) {
       forecast[i].weather_code = weather_codes[i].as<int>();
       forecast[i].temp_max = temp_max[i].as<float>();
-      forecast[i].temp_min = temp_min[i].as<float>();  // NEW: Store min temp
       forecast[i].apparent_max = apparent_max[i].as<float>();
       forecast[i].precip_sum = precip_sum[i].as<float>();
       forecast[i].wind_max = wind_max[i].as<float>();
       forecast[i].humidity_mean = humidity_mean[i].as<float>();
     }
-    if (debug == 1) Serial.println("[APP] Fetched 14-day forecast with min/max temps"); // Updated log message
+    if (debug == 1) Serial.println("[APP] Fetched 14-day forecast weather codes");
   } else {
     if (debug == 1) Serial.println("[APP] Weather request failed: " + String(httpCode));
   }
   http.end();
-  // Fetch air quality (unchanged)
   HTTPClient http_aq;
   String aq_url = "https://air-quality-api.open-meteo.com/v1/air-quality?latitude=" + lat + "&longitude=" + lon + "&current=european_aqi&timezone=auto";
   http_aq.begin(aq_url);
@@ -751,53 +682,45 @@ void updateWeatherDisplay() {
     lv_obj_invalidate(weatherContainer);
   }
   lv_obj_set_scrollbar_mode(weatherContainer, LV_SCROLLBAR_MODE_OFF);
-  // Calculate grayscale based on darkness
   uint8_t gray = 255 - (g_ui_darkness * 255 / 100);
   lv_color_t weather_bg_color = lv_color_make(gray, gray, gray);
   lv_obj_set_style_bg_color(weatherContainer, weather_bg_color, 0);
   lv_color_t main_text_color = (g_ui_darkness > 50) ? lv_color_hex(0xFFFFFF) : lv_color_hex(0x636e72);
   lv_color_t temp_text_color = (g_ui_darkness > 50) ? lv_color_hex(0xFFFFFF) : lv_color_hex(0x2d3436);
-  // Weather image (CHANGED: Use next_weather.weather_code for next half-hour condition)
   lv_obj_t *weather_img = lv_img_create(weatherContainer);
-  lv_img_set_src(weather_img, getWeatherImage(next_weather.weather_code));
-  lv_obj_align(weather_img, LV_ALIGN_CENTER, 0, -80);
-  // Temperature label (UNCHANGED: Current temperature)
+  lv_img_set_src(weather_img, getWeatherImage(current_weather.weather_code));
+  lv_obj_align(weather_img, LV_ALIGN_CENTER, 0, -75);
   lv_obj_t *temp_label = lv_label_create(weatherContainer);
   lv_label_set_text(temp_label, (String(current_weather.temperature_2m + temp_adjust, 1) + "°C").c_str());
   lv_obj_set_style_text_font(temp_label, &lv_font_montserrat_24, 0);
   lv_obj_set_style_text_color(temp_label, temp_text_color, 0);
-  lv_obj_align(temp_label, LV_ALIGN_CENTER, 0, -25);
-  // AQI label on the right side of the image and temperature (UNCHANGED)
+  lv_obj_align(temp_label, LV_ALIGN_CENTER, 0, -20);
   lv_obj_t *aqi_label_local = lv_label_create(weatherContainer);
   lv_label_set_text(aqi_label_local, ("AQI: " + getAqiDescription(current_aqi)).c_str());
   lv_obj_set_style_text_font(aqi_label_local, &lv_font_montserrat_14, 0);
   lv_obj_set_style_text_color(aqi_label_local, getAqiColor(current_aqi), 0);
-  lv_obj_align(aqi_label_local, LV_ALIGN_CENTER, 120, -85); // Moved to right side, symmetric with description
-  // Description (CHANGED: Use next_weather.weather_code for next half-hour condition)
-  String desc = getWeatherDescription(next_weather.weather_code);
+  lv_obj_align(aqi_label_local, LV_ALIGN_CENTER, 120, -75);
+  String desc = getWeatherDescription(current_weather.weather_code);
   lv_obj_t *desc_label = lv_label_create(weatherContainer);
   lv_label_set_text(desc_label, desc.c_str());
   lv_obj_set_style_text_font(desc_label, &lv_font_montserrat_14, 0);
   lv_obj_set_style_text_color(desc_label, main_text_color, 0);
-  lv_obj_align(desc_label, LV_ALIGN_CENTER, -145, -60);
-  // Header container for location (UNCHANGED)
+  lv_obj_align(desc_label, LV_ALIGN_CENTER, -150, -50);
   lv_obj_t *header_cont = lv_obj_create(weatherContainer);
   lv_obj_set_size(header_cont, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
   lv_obj_set_flex_flow(header_cont, LV_FLEX_FLOW_ROW);
-  lv_obj_align(header_cont, LV_ALIGN_CENTER, -160, -85);
+  lv_obj_align(header_cont, LV_ALIGN_CENTER, -150, -75);
   lv_obj_set_style_bg_opa(header_cont, LV_OPA_TRANSP, 0);
   lv_obj_set_style_border_width(header_cont, 0, 0);
   lv_obj_set_style_pad_all(header_cont, 0, 0);
   lv_obj_set_style_pad_column(header_cont, 3, 0);
-  // Location
   lv_obj_t *loc_label = lv_label_create(header_cont);
   lv_label_set_text(loc_label, location.c_str());
   lv_obj_set_style_text_color(loc_label, main_text_color, 0);
   lv_obj_set_style_text_font(loc_label, &lv_font_montserrat_14, 0);
   lv_obj_align(loc_label, LV_ALIGN_CENTER, 0, -10);
-  // Buttons container (UNCHANGED: Uses current_weather values)
   lv_obj_t *buttons_cont = lv_obj_create(weatherContainer);
-  lv_obj_set_size(buttons_cont, 380, 55);
+  lv_obj_set_size(buttons_cont, 380, 48);
   lv_obj_align(buttons_cont, LV_ALIGN_CENTER, 0, 30);
   lv_obj_set_flex_flow(buttons_cont, LV_FLEX_FLOW_ROW);
   lv_obj_set_flex_align(buttons_cont, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -805,46 +728,42 @@ void updateWeatherDisplay() {
   lv_obj_set_style_border_width(buttons_cont, 0, 0);
   lv_obj_set_style_pad_all(buttons_cont, 0, 0);
   lv_obj_set_scrollbar_mode(buttons_cont, LV_SCROLLBAR_MODE_OFF);
-  // Humidity (UPDATED: Dark text color)
   lv_obj_t *hum_cont = lv_obj_create(buttons_cont);
-  lv_obj_set_size(hum_cont, 108, 55);
+  lv_obj_set_size(hum_cont, 108, 48);
   lv_obj_set_style_bg_color(hum_cont, lv_color_hex(0x00b894), 0);
   lv_obj_set_style_bg_grad_color(hum_cont, lv_color_hex(0x00a085), 0);
   lv_obj_set_style_bg_grad_dir(hum_cont, LV_GRAD_DIR_HOR, 0);
   lv_obj_set_style_radius(hum_cont, 10, 0);
   lv_obj_t *hum_val = lv_label_create(hum_cont);
-  lv_label_set_text(hum_val, ("Hum\n" + String((int)current_weather.relative_humidity_2m) + "%").c_str());
+  lv_label_set_text(hum_val, ("Hum\n" + String(current_weather.relative_humidity_2m) + "%").c_str());
   lv_obj_set_style_text_font(hum_val, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(hum_val, lv_color_hex(0x000000), 0);  // UPDATED: Dark color
+  lv_obj_set_style_text_color(hum_val, lv_color_hex(0xFFFFFF), 0);
   lv_obj_set_scrollbar_mode(hum_val, LV_SCROLLBAR_MODE_OFF);
   lv_obj_center(hum_val);
-  // Wind (UPDATED: Dark text color)
   lv_obj_t *wind_cont = lv_obj_create(buttons_cont);
-  lv_obj_set_size(wind_cont, 108, 50);
+  lv_obj_set_size(wind_cont, 108, 48);
   lv_obj_set_style_bg_color(wind_cont, lv_color_hex(0xfd79a8), 0);
   lv_obj_set_style_bg_grad_color(wind_cont, lv_color_hex(0xe84393), 0);
   lv_obj_set_style_bg_grad_dir(wind_cont, LV_GRAD_DIR_HOR, 0);
   lv_obj_set_style_radius(wind_cont, 10, 0);
   lv_obj_t *wind_val = lv_label_create(wind_cont);
-  lv_label_set_text(wind_val, ("Wind\n" + String((int)current_weather.wind_speed_10m) + " km/h").c_str());
+  lv_label_set_text(wind_val, ("Wind\n" + String(round(current_weather.wind_speed_10m)) + " km/h").c_str());
   lv_obj_set_style_text_font(wind_val, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(wind_val, lv_color_hex(0x000000), 0);  // UPDATED: Dark color
+  lv_obj_set_style_text_color(wind_val, lv_color_hex(0xFFFFFF), 0);
   lv_obj_set_scrollbar_mode(wind_val, LV_SCROLLBAR_MODE_OFF);
   lv_obj_center(wind_val);
-// Pressure (REPLACED: Atmospheric pressure in hPa instead of precipitation)
-lv_obj_t *pressure_cont = lv_obj_create(buttons_cont);
-lv_obj_set_size(pressure_cont, 108, 50);
-lv_obj_set_style_bg_color(pressure_cont, lv_color_hex(0x55a3ff), 0);
-lv_obj_set_style_bg_grad_color(pressure_cont, lv_color_hex(0x007acc), 0);
-lv_obj_set_style_bg_grad_dir(pressure_cont, LV_GRAD_DIR_HOR, 0);
-lv_obj_set_style_radius(pressure_cont, 10, 0);
-lv_obj_t *pressure_val = lv_label_create(pressure_cont);
-lv_label_set_text(pressure_val, ("Pressure\n" + String((int)current_weather.surface_pressure) + " hPa").c_str());
-lv_obj_set_style_text_font(pressure_val, &lv_font_montserrat_14, 0);
-lv_obj_set_style_text_color(pressure_val, lv_color_hex(0x000000), 0);  // Dark color
-lv_obj_set_scrollbar_mode(pressure_val, LV_SCROLLBAR_MODE_OFF);
-lv_obj_center(pressure_val);
-  // Forecast container (UPDATED: 7-day daily forecast with max/min temperatures)
+  lv_obj_t *precip_cont = lv_obj_create(buttons_cont);
+  lv_obj_set_size(precip_cont, 108, 48);
+  lv_obj_set_style_bg_color(precip_cont, lv_color_hex(0x55a3ff), 0);
+  lv_obj_set_style_bg_grad_color(precip_cont, lv_color_hex(0x007acc), 0);
+  lv_obj_set_style_bg_grad_dir(precip_cont, LV_GRAD_DIR_HOR, 0);
+  lv_obj_set_style_radius(precip_cont, 10, 0);
+  lv_obj_t *precip_val = lv_label_create(precip_cont);
+  lv_label_set_text(precip_val, ("Precip\n" + String(current_weather.precipitation) + " mm").c_str());
+  lv_obj_set_style_text_font(precip_val, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(precip_val, lv_color_hex(0xFFFFFF), 0);
+  lv_obj_set_scrollbar_mode(precip_val, LV_SCROLLBAR_MODE_OFF);
+  lv_obj_center(precip_val);
   lv_obj_t *forecast_cont = lv_obj_create(weatherContainer);
   lv_obj_set_size(forecast_cont, 350, 80);
   lv_obj_align(forecast_cont, LV_ALIGN_CENTER, 0, 90);
@@ -877,9 +796,7 @@ lv_obj_center(pressure_val);
     lv_img_set_src(forecast_img, getWeatherImage(forecast[i].weather_code));
     lv_img_set_zoom(forecast_img, 128);
     lv_obj_t *temp_label = lv_label_create(day_cont);
-    // UPDATED: Format as "max°/min°" (e.g., "7°/-1°")
-    String temp_text = String(forecast[i].temp_max + temp_adjust, 0) + "°/" + String(forecast[i].temp_min + temp_adjust, 0) + "°";
-    lv_label_set_text(temp_label, temp_text.c_str());
+    lv_label_set_text(temp_label, (String(forecast[i].temp_max + temp_adjust, 0) + "°C").c_str());
     lv_obj_set_style_text_font(temp_label, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(temp_label, temp_text_color, 0);
     lv_obj_set_scrollbar_mode(day_cont, LV_SCROLLBAR_MODE_OFF);
@@ -897,25 +814,15 @@ bool isDateHighlightable(int year, int month, int day) {
   if (debug == 1) Serial.println("[APP] Date " + String(year) + "-" + String(month) + "-" + String(day) + " is NOT highlightable");
   return false;
 }
-// Note: To resolve the display issue with the DS-Digital font, edit DS-Digital.c and change .line_height = 41 to .line_height = 64;
-// This addresses a potential bug in the LVGL font converter for v8. Ensure DS-Digital.c is included in your build.
 
-void updateEventDisplay(lv_obj_t *calendar) {
+void updateEventDisplay(lv_obj_t * calendar) {
   if (debug == 1) Serial.println("[APP] Updating event display...");
   printMemoryUsage();
-
-  // NEW: Delete timer before cleaning to avoid dangling references
-  if (blink_timer) {
-    lv_timer_del(blink_timer);
-    blink_timer = NULL;
-  }
-
-  // Initialize or clean event container
   if (!eventContainer) {
     eventContainer = lv_obj_create(lv_scr_act());
     lv_obj_set_size(eventContainer, 400, 175);
     lv_obj_align(eventContainer, LV_ALIGN_TOP_RIGHT, -10, 50);
-    lv_obj_set_style_bg_color(eventContainer, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(eventContainer, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(eventContainer, 0, 0);
     lv_obj_set_scrollbar_mode(eventContainer, LV_SCROLLBAR_MODE_OFF);
     if (debug == 1) Serial.println("[APP] Created eventContainer");
@@ -923,8 +830,7 @@ void updateEventDisplay(lv_obj_t *calendar) {
     lv_obj_clean(eventContainer);
     lv_obj_invalidate(eventContainer);
   }
-
-  // Set highlighted dates on calendar (unchanged)
+  setEventBackground();
   if (debug == 1) Serial.println("[APP] Setting highlighted dates...");
   lv_calendar_date_t highlighted_dates[1000];
   int highlight_count = 0;
@@ -945,53 +851,8 @@ void updateEventDisplay(lv_obj_t *calendar) {
   } else {
     if (debug == 1) Serial.println("[APP] Error: Calendar object is null in updateEventDisplay");
   }
-
-  int y_offset = -10;
-  int total_displayed = 0;
-  time_t now;
-  time(&now);
-  struct tm *nowTm = localtime(&now);
-  time_t todayStart = mktime(nowTm);
-  todayStart -= todayStart % 86400; // Start of today
-  time_t todayEnd = todayStart + 86400 - 1; // End of today
-
-  // Step 1: Display ongoing events (unchanged)
-  for (int i = 0; i < numEvents; i++) {
-    if (events[i].start_time < todayStart && events[i].end_time > now) {
-      // This is an ongoing event
-      lv_obj_t *event_cont = lv_obj_create(eventContainer);
-      lv_obj_set_size(event_cont, 381, 30); // 50% height
-      lv_obj_align(event_cont, LV_ALIGN_TOP_MID, 0, y_offset);
-      // Apply gray semi-transparent background
-      lv_obj_set_style_bg_color(event_cont, lv_color_hex(0x808080), 0);
-      lv_obj_set_style_bg_opa(event_cont, LV_OPA_70, 0); // 50% opacity
-      lv_obj_set_style_radius(event_cont, 10, 0);
-      lv_obj_set_style_pad_all(event_cont, 5, 0);
-      lv_obj_set_user_data(event_cont, (void*)(intptr_t)i);
-      lv_obj_add_event_cb(event_cont, show_event_details_cb, LV_EVENT_PRESSED, NULL);
-
-      // Title with remaining days (faded yellow)
-      String summary = events[i].summary;
-      if (summary.length() > 55) summary = summary.substring(10, 55) + "...";
-      // Calculate remaining days
-      int remaining_days = ceil((events[i].end_time - now) / 86400.0); // Round up to include partial days
-      if (remaining_days < 0) remaining_days = 0; // Ensure non-negative
-      summary += " (" + String(remaining_days) + " days)";
-      lv_obj_t *title_label = lv_label_create(event_cont);
-      lv_label_set_text(title_label, summary.c_str());
-      lv_obj_set_style_text_color(title_label, lv_color_hex(0xFFFF99), 0); // Faded yellow
-      lv_obj_set_style_text_font(title_label, &lv_font_montserrat_14, 0);
-      lv_obj_set_style_text_align(title_label, LV_TEXT_ALIGN_LEFT, 0);
-      lv_label_set_long_mode(title_label, LV_LABEL_LONG_WRAP);
-      lv_obj_set_width(title_label, lv_pct(100));
-      lv_obj_align(title_label, LV_ALIGN_TOP_LEFT, -10, 0);
-
-      y_offset += 35; // Adjusted for smaller height
-      total_displayed++;
-    }
-  }
-
-  // Step 2: Display today's events (unchanged)
+  int y_offset = 10;
+  int displayed = 0;
   for (int i = 0; i < numEvents; i++) {
     if (events[i].isToday) {
       lv_obj_t *event_cont = lv_obj_create(eventContainer);
@@ -1004,15 +865,12 @@ void updateEventDisplay(lv_obj_t *calendar) {
       lv_obj_set_style_pad_all(event_cont, 5, 0);
       lv_obj_set_user_data(event_cont, (void*)(intptr_t)i);
       lv_obj_add_event_cb(event_cont, show_event_details_cb, LV_EVENT_PRESSED, NULL);
-
       String summary = events[i].summary;
       if (summary.length() > 55) summary = summary.substring(0, 55) + "...";
       String description = events[i].description;
       if (description.length() > 55) description = description.substring(0, 55) + "...";
       String start_time_str = events[i].start.substring(11, 16);
       String end_time_str = events[i].end.substring(11, 16);
-
-      // Title label (blue)
       lv_obj_t *title_label = lv_label_create(event_cont);
       lv_label_set_text(title_label, summary.c_str());
       lv_obj_set_style_text_color(title_label, lv_color_hex(0x0000FF), 0);
@@ -1021,8 +879,6 @@ void updateEventDisplay(lv_obj_t *calendar) {
       lv_label_set_long_mode(title_label, LV_LABEL_LONG_WRAP);
       lv_obj_set_width(title_label, lv_pct(100));
       lv_obj_align(title_label, LV_ALIGN_TOP_LEFT, 0, 0);
-
-      // Time row
       lv_obj_t *time_base = nullptr;
       if (events[i].isAllDay) {
         lv_obj_t *all_day_label = lv_label_create(event_cont);
@@ -1055,8 +911,6 @@ void updateEventDisplay(lv_obj_t *calendar) {
         lv_obj_align_to(end_time_label, to_label, LV_ALIGN_OUT_RIGHT_MID, 0, 0);
         time_base = from_label;
       }
-
-      // Description (if present)
       if (description.length() > 0) {
         lv_obj_t *desc_label = lv_label_create(event_cont);
         lv_label_set_text(desc_label, description.c_str());
@@ -1067,152 +921,125 @@ void updateEventDisplay(lv_obj_t *calendar) {
         lv_obj_set_width(desc_label, lv_pct(100));
         lv_obj_align_to(desc_label, time_base, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 0);
       }
-
-      y_offset += 70; // Adjusted for height
-      total_displayed++;
+      y_offset += 75;
+      displayed++;
     }
   }
-
-
-  // Step 3: Display upcoming events
-  int upcoming_count = 0;
+  lv_obj_t *upcomingLabel = lv_label_create(eventContainer);
+  lv_label_set_text(upcomingLabel, "");
+  lv_obj_set_style_text_font(upcomingLabel, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(upcomingLabel, lv_color_hex(0x800000), 0);
+  lv_obj_align(upcomingLabel, LV_ALIGN_TOP_LEFT, 10, y_offset);
+  y_offset += 25;
+  int upcomingCount = 0;
+  time_t now;
+  time(&now);
+  struct tm *nowTm = localtime(&now);
+  time_t todayStart = mktime(nowTm);
+  todayStart -= todayStart % 86400;
   for (int i = 0; i < numEvents; i++) {
-    if (!events[i].isToday && events[i].start_time >= todayStart) {
-      upcoming_count++;
-    }
-  }
-
-  if (upcoming_count > 0) {
-    // Upcoming label
-    lv_obj_t *upcoming_label = lv_label_create(eventContainer);
-    lv_label_set_text(upcoming_label, "Due in more than 3 days");
-    lv_obj_set_style_text_font(upcoming_label, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(upcoming_label, lv_color_hex(0xCAE4CA), 0);
-    lv_obj_align(upcoming_label, LV_ALIGN_TOP_LEFT, 10, y_offset);
-    y_offset += 25;
-
-    // Display upcoming events (similar to today's, but with date)
-    for (int i = 0; i < numEvents; i++) {
-      if (!events[i].isToday && events[i].start_time >= todayStart) {
-        lv_obj_t *event_cont = lv_obj_create(eventContainer);
-        lv_obj_set_size(event_cont, 361, 65);
-        lv_obj_align(event_cont, LV_ALIGN_TOP_MID, 0, y_offset);
-        lv_obj_set_style_bg_color(event_cont, lv_color_hex(0x74b9ff), 0); // Light blue for upcoming
-        lv_obj_set_style_bg_grad_color(event_cont, lv_color_hex(0x0984e3), 0);
-        lv_obj_set_style_bg_grad_dir(event_cont, LV_GRAD_DIR_HOR, 0);
-        lv_obj_set_style_radius(event_cont, 10, 0);
-        lv_obj_set_style_pad_all(event_cont, 5, 0);
-        lv_obj_set_user_data(event_cont, (void*)(intptr_t)i);
-        lv_obj_add_event_cb(event_cont, show_event_details_cb, LV_EVENT_PRESSED, NULL);
-
-        String summary = events[i].summary;
-        if (summary.length() > 55) summary = summary.substring(0, 55) + "...";
-        String start_date_str = events[i].start.substring(0, 10); // YYYY-MM-DD
-
-        // Title label (blue)
-        lv_obj_t *title_label = lv_label_create(event_cont);
-        lv_label_set_text(title_label, summary.c_str());
-        lv_obj_set_style_text_color(title_label, lv_color_hex(0x0000FF), 0);
-        lv_obj_set_style_text_font(title_label, &lv_font_montserrat_14, 0);
-        lv_obj_set_style_text_align(title_label, LV_TEXT_ALIGN_LEFT, 0);
-        lv_label_set_long_mode(title_label, LV_LABEL_LONG_WRAP);
-        lv_obj_set_width(title_label, lv_pct(100));
-        lv_obj_align(title_label, LV_ALIGN_TOP_LEFT, 0, 0);
-
-        // Date row
-        lv_obj_t *date_label = lv_label_create(event_cont);
-        lv_label_set_text(date_label, ("On " + start_date_str).c_str());
-        lv_obj_set_style_text_color(date_label, lv_color_hex(0x800000), 0);
-        lv_obj_set_style_text_font(date_label, &lv_font_montserrat_14, 0);
-        lv_obj_set_style_text_align(date_label, LV_TEXT_ALIGN_LEFT, 0);
-        lv_obj_align_to(date_label, title_label, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 0);
-
-        y_offset += 70;
-        total_displayed++;
+    if (!events[i].isToday) {
+      String startDate = events[i].start;
+      if (startDate.length() > 10) startDate = startDate.substring(0, 10);
+      struct tm timeinfo = {0};
+      int year, month, day;
+      if (sscanf(startDate.c_str(), "%d-%d-%d", &year, &month, &day) == 3) {
+        timeinfo.tm_year = year - 1900;
+        timeinfo.tm_mon = month - 1;
+        timeinfo.tm_mday = day;
+        time_t eventTime = mktime(&timeinfo);
+        if (eventTime >= todayStart) {
+          int days = (eventTime - todayStart) / 86400;
+          lv_obj_t *event_cont = lv_obj_create(eventContainer);
+          lv_obj_set_size(event_cont, 361, 65);
+          lv_obj_align(event_cont, LV_ALIGN_TOP_MID, 0, y_offset);
+          lv_obj_set_user_data(event_cont, (void*)(intptr_t)i);
+          lv_obj_add_event_cb(event_cont, show_event_details_cb, LV_EVENT_PRESSED, NULL);
+          if (days <= 3) {
+            lv_obj_set_style_bg_color(event_cont, lv_color_hex(0xa29bfe), 0);
+            lv_obj_set_style_bg_grad_color(event_cont, lv_color_hex(0x6c5ce7), 0);
+          } else {
+            lv_obj_set_style_bg_color(event_cont, lv_color_hex(0x00b894), 0);
+            lv_obj_set_style_bg_grad_color(event_cont, lv_color_hex(0x00a085), 0);
+          }
+          lv_obj_set_style_bg_grad_dir(event_cont, LV_GRAD_DIR_HOR, 0);
+          lv_obj_set_style_radius(event_cont, 10, 0);
+          lv_obj_set_style_pad_all(event_cont, 5, 0);
+          String summary = events[i].summary;
+          if (summary.length() > 55) summary = summary.substring(0, 55) + "...";
+          String description = events[i].description;
+          if (description.length() > 55) description = description.substring(0, 55) + "...";
+          String start_time_str = events[i].start.substring(11, 16);
+          String end_time_str = events[i].end.substring(11, 16);
+          String timeText = events[i].isAllDay ? "All day" : "from " + start_time_str + " to " + end_time_str;
+          lv_obj_t *title_label = lv_label_create(event_cont);
+          lv_label_set_text(title_label, summary.c_str());
+          lv_obj_set_style_text_color(title_label, lv_color_hex(0x0000FF), 0);
+          lv_obj_set_style_text_font(title_label, &lv_font_montserrat_14, 0);
+          lv_obj_set_style_text_align(title_label, LV_TEXT_ALIGN_LEFT, 0);
+          lv_label_set_long_mode(title_label, LV_LABEL_LONG_WRAP);
+          lv_obj_set_width(title_label, lv_pct(100));
+          lv_obj_align(title_label, LV_ALIGN_TOP_LEFT, 0, 0);
+          lv_obj_t *date_label = lv_label_create(event_cont);
+          lv_label_set_text(date_label, (startDate + ", ").c_str());
+          lv_obj_set_style_text_color(date_label, lv_color_hex(0x800000), 0);
+          lv_obj_set_style_text_font(date_label, &lv_font_montserrat_14, 0);
+          lv_obj_align_to(date_label, title_label, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 0);
+          lv_obj_t *time_base = nullptr;
+          if (events[i].isAllDay) {
+            lv_obj_t *all_day_label = lv_label_create(event_cont);
+            lv_label_set_text(all_day_label, "All day");
+            lv_obj_set_style_text_color(all_day_label, lv_color_hex(0x800000), 0);
+            lv_obj_set_style_text_font(all_day_label, &lv_font_montserrat_14, 0);
+            lv_obj_align_to(all_day_label, date_label, LV_ALIGN_OUT_RIGHT_MID, 0, 0);
+            time_base = all_day_label;
+          } else {
+            lv_obj_t *from_label = lv_label_create(event_cont);
+            lv_label_set_text(from_label, "from ");
+            lv_obj_set_style_text_color(from_label, lv_color_hex(0x800000), 0);
+            lv_obj_set_style_text_font(from_label, &lv_font_montserrat_14, 0);
+            lv_obj_align_to(from_label, date_label, LV_ALIGN_OUT_RIGHT_MID, 0, 0);
+            lv_obj_t *start_time_label = lv_label_create(event_cont);
+            lv_label_set_text(start_time_label, start_time_str.c_str());
+            lv_obj_set_style_text_color(start_time_label, lv_color_hex(0x800000), 0);
+            lv_obj_set_style_text_font(start_time_label, &lv_font_montserrat_14, 0);
+            lv_obj_align_to(start_time_label, from_label, LV_ALIGN_OUT_RIGHT_MID, 0, 0);
+            lv_obj_t *to_label = lv_label_create(event_cont);
+            lv_label_set_text(to_label, " to ");
+            lv_obj_set_style_text_color(to_label, lv_color_hex(0x800000), 0);
+            lv_obj_set_style_text_font(to_label, &lv_font_montserrat_14, 0);
+            lv_obj_align_to(to_label, start_time_label, LV_ALIGN_OUT_RIGHT_MID, 0, 0);
+            lv_obj_t *end_time_label = lv_label_create(event_cont);
+            lv_label_set_text(end_time_label, end_time_str.c_str());
+            lv_obj_set_style_text_color(end_time_label, lv_color_hex(0x800000), 0);
+            lv_obj_set_style_text_font(end_time_label, &lv_font_montserrat_14, 0);
+            lv_obj_align_to(end_time_label, to_label, LV_ALIGN_OUT_RIGHT_MID, 0, 0);
+            time_base = from_label;
+          }
+          if (description.length() > 0) {
+            lv_obj_t *desc_label = lv_label_create(event_cont);
+            lv_label_set_text(desc_label, description.c_str());
+            lv_obj_set_style_text_color(desc_label, lv_color_hex(0x2A2A2A), 0);
+            lv_obj_set_style_text_font(desc_label, &lv_font_montserrat_14, 0);
+            lv_obj_set_style_text_align(desc_label, LV_TEXT_ALIGN_LEFT, 0);
+            lv_label_set_long_mode(desc_label, LV_LABEL_LONG_WRAP);
+            lv_obj_set_width(desc_label, lv_pct(100));
+            lv_obj_align_to(desc_label, date_label, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 0);
+          }
+          y_offset += 75;
+          upcomingCount++;
+        }
       }
     }
   }
-
-
-  // NEW: Handle timer deletion for events case (safe, though already deleted earlier)
-  if (total_displayed > 0) {
-    if (blink_timer) {
-      lv_timer_del(blink_timer);
-      blink_timer = NULL;
-    }
+  if (displayed == 0 && upcomingCount == 0) {
+    lv_obj_t *noEventsLabel = lv_label_create(eventContainer);
+    lv_label_set_text(noEventsLabel, "No events");
+    lv_obj_set_style_text_font(noEventsLabel, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(noEventsLabel, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_align(noEventsLabel, LV_ALIGN_TOP_LEFT, 10, y_offset);
   }
-
-// Display large time if no events displayed (MODIFIED for dynamic alignment)
-if (total_displayed == 0) {
-  struct tm *timeinfo = localtime(&now);
-  char hours_buf[3];
-  strftime(hours_buf, sizeof(hours_buf), "%H", timeinfo);
-  char mins_buf[3];
-  strftime(mins_buf, sizeof(mins_buf), "%M", timeinfo);
-
-  // Hours label
-  lv_obj_t *large_time_hours = lv_label_create(eventContainer);
-  lv_label_set_text(large_time_hours, hours_buf);
-  lv_obj_set_style_text_font(large_time_hours, &technology_98, 0);
-  lv_obj_set_style_text_color(large_time_hours, lv_color_hex(0xFF0000), 0);
-  lv_obj_set_style_text_align(large_time_hours, LV_TEXT_ALIGN_CENTER, 0);
-  lv_label_set_long_mode(large_time_hours, LV_LABEL_LONG_CLIP);
-
-  // Colon label
-  lv_obj_t *large_time_colon = lv_label_create(eventContainer);
-  lv_label_set_text(large_time_colon, ":");
-  lv_obj_set_style_text_font(large_time_colon, &technology_98, 0);
-  lv_obj_set_style_text_color(large_time_colon, lv_color_hex(0xFF0000), 0);
-  lv_obj_set_style_text_align(large_time_colon, LV_TEXT_ALIGN_CENTER, 0);
-  lv_obj_set_style_text_opa(large_time_colon, LV_OPA_COVER, 0);  // Start visible
-  lv_label_set_long_mode(large_time_colon, LV_LABEL_LONG_CLIP);
-
-  // Minutes label
-  lv_obj_t *large_time_minutes = lv_label_create(eventContainer);
-  lv_label_set_text(large_time_minutes, mins_buf);
-  lv_obj_set_style_text_font(large_time_minutes, &technology_98, 0);
-  lv_obj_set_style_text_color(large_time_minutes, lv_color_hex(0xFF0000), 0);
-  lv_obj_set_style_text_align(large_time_minutes, LV_TEXT_ALIGN_CENTER, 0);
-  lv_label_set_long_mode(large_time_minutes, LV_LABEL_LONG_CLIP);
-
-// Dynamically calculate alignments based on text widths
-lv_point_t hours_size, colon_size, minutes_size;
-lv_text_get_size(&hours_size, hours_buf, &technology_98, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-lv_text_get_size(&colon_size, ":", &technology_98, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-lv_text_get_size(&minutes_size, mins_buf, &technology_98, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-
-lv_coord_t total_width = hours_size.x + colon_size.x + minutes_size.x;
-lv_coord_t half_width = total_width / 2;
-
-lv_coord_t hours_x = -half_width + (hours_size.x / 2);
-lv_coord_t colon_x = hours_x + hours_size.x + (colon_size.x / 2) - 25;  // Reduced space by 15px
-lv_coord_t mins_x = colon_x + colon_size.x + (minutes_size.x / 2)-2;
-
-lv_obj_align(large_time_hours, LV_ALIGN_CENTER, hours_x, 0);
-lv_obj_align(large_time_colon, LV_ALIGN_CENTER, colon_x, 0);
-lv_obj_align(large_time_minutes, LV_ALIGN_CENTER, mins_x, 0);
-
-// Force layout update to ensure immediate rendering
-lv_obj_update_layout(eventContainer);
-
-  // "No events" label (unchanged, but adjust y_offset if needed for visibility)
-  lv_obj_t *noEventsLabel = lv_label_create(eventContainer);
-  lv_label_set_text(noEventsLabel, "No events");
-  lv_obj_set_style_text_font(noEventsLabel, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(noEventsLabel, lv_color_hex(0xFFFFFF), 0);
-  lv_obj_align(noEventsLabel, LV_ALIGN_TOP_LEFT, 10, y_offset + 20);  // Minor adjustment: +20 to avoid overlap with time if y_offset=-10
-
-  // Create/start blink and time-update timer (pass colon as user data)
-  blink_timer = lv_timer_create(blink_time_update_cb, 1000, NULL);
-  lv_timer_set_user_data(blink_timer, large_time_colon);
-
-  if (debug == 1) {
-    Serial.printf("[APP] No events: Dynamic offsets - hours_x=%d, colon_x=%d, mins_x=%d (total_width=%d)\n",
-                  hours_x, colon_x, mins_x, total_width);
-    Serial.println("[APP] No events: Displaying large red time " + String(hours_buf) + ":" + String(mins_buf) + " with blinking colon");
-  }
-}
-
+  if (debug == 1) Serial.println("[APP] Event display updated: " + String(displayed) + " today, " + String(upcomingCount) + " upcoming");
 }
 
 void wifi_connect_cb(lv_event_t * e) {
@@ -1262,6 +1089,7 @@ void wifi_connect_cb(lv_event_t * e) {
     lv_obj_align(error_label, LV_ALIGN_TOP_MID, 0, 200);
   }
 }
+
 void api_code_submit_cb(lv_event_t * e) {
   if (debug == 1) Serial.println("[APP] API code submit button clicked");
   lv_obj_t *api_ta = (lv_obj_t*)lv_event_get_user_data(e);
@@ -1280,6 +1108,7 @@ void api_code_submit_cb(lv_event_t * e) {
     setup_calendar();
   }
 }
+
 void location_submit_cb(lv_event_t * e) {
   if (debug == 1) Serial.println("[APP] Location submit button clicked");
   lv_obj_t *location_ta = (lv_obj_t*)lv_event_get_user_data(e);
@@ -1321,6 +1150,7 @@ void location_submit_cb(lv_event_t * e) {
   }
   setup_calendar();
 }
+
 void wifi_logout_cb(lv_event_t * e) {
   if (debug == 1) Serial.println("[APP] WiFi logout button clicked");
   preferences.begin("wifi", false);
@@ -1331,7 +1161,6 @@ void wifi_logout_cb(lv_event_t * e) {
   if (wifi_setup_screen) {
     lv_obj_del(wifi_setup_screen);
     wifi_setup_screen = nullptr;
-	lv_obj_del(wifi_setup_screen);  // This will cascade-delete children, including QR
   }
   if (settings_popup) {
     lv_obj_add_flag(settings_popup, LV_OBJ_FLAG_HIDDEN);
@@ -1340,6 +1169,7 @@ void wifi_logout_cb(lv_event_t * e) {
   }
   show_wifi_setup_screen();
 }
+
 void api_logout_cb(lv_event_t * e) {
   if (debug == 1) Serial.println("[APP] API logout button clicked");
   preferences.begin("api", false);
@@ -1353,6 +1183,7 @@ void api_logout_cb(lv_event_t * e) {
   }
   show_api_code_screen();
 }
+
 void keyboard_event_cb(lv_event_t * e) {
     lv_event_code_t code = lv_event_get_code(e);
     lv_obj_t *ta = (lv_obj_t*)lv_event_get_user_data(e);
@@ -1364,7 +1195,6 @@ void keyboard_event_cb(lv_event_t * e) {
             lv_obj_align(keyboard, LV_ALIGN_BOTTOM_MID, 0, 0);
             lv_obj_clear_flag(keyboard, LV_OBJ_FLAG_HIDDEN);
             lv_obj_move_foreground(keyboard);
-            // Adjust parent container (popup/screen) to ensure textarea is above keyboard
             lv_obj_t *par = lv_obj_get_parent(ta);
             if (par) {
                 lv_coord_t kb_h = lv_obj_get_height(keyboard);
@@ -1375,7 +1205,7 @@ void keyboard_event_cb(lv_event_t * e) {
                 lv_coord_t ta_bottom = ta_coords.y2;
                 lv_coord_t kb_top = scr_h - kb_h;
                 if (ta_bottom > kb_top) {
-                    lv_coord_t overlap = ta_bottom - kb_top + 20; // 20px gap
+                    lv_coord_t overlap = ta_bottom - kb_top + 20;
                     lv_coord_t par_y = lv_obj_get_y(par);
                     lv_obj_set_y(par, par_y - overlap);
                 }
@@ -1387,7 +1217,6 @@ void keyboard_event_cb(lv_event_t * e) {
         if (keyboard) {
             lv_keyboard_set_textarea(keyboard, nullptr);
             lv_obj_add_flag(keyboard, LV_OBJ_FLAG_HIDDEN);
-            // Reset parent to centered position if applicable
             lv_obj_t *par = lv_obj_get_parent(ta);
             if (par && (par == settings_popup || par == new_event_popup || par == location_screen || par == api_code_screen || par == wifi_setup_screen)) {
                 lv_obj_align(par, LV_ALIGN_CENTER, 0, 0);
@@ -1395,6 +1224,7 @@ void keyboard_event_cb(lv_event_t * e) {
         }
     }
 }
+
 void show_wifi_setup_screen() {
   if (debug == 1) Serial.println("[APP] Showing WiFi setup screen...");
   wifi_setup_screen = lv_obj_create(lv_scr_act());
@@ -1445,26 +1275,7 @@ void show_wifi_setup_screen() {
     lv_obj_add_flag(keyboard, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_style_text_font(keyboard, &lv_font_montserrat_14, 0);
   }
- // UPDATED: Add QR code image under the UI, positioned at y-offset -10
-  lv_obj_t *qr_img = lv_img_create(wifi_setup_screen);  // Create on the screen container
-  lv_img_set_src(qr_img, &qr);
-  lv_img_set_zoom(qr_img, 120);  // Scale for visibility (adjust as needed)
-  lv_obj_align(qr_img, LV_ALIGN_BOTTOM_MID, 0, 90);  // Position under buttons/text areas
-  lv_obj_set_style_img_recolor(qr_img, lv_color_hex(0xFFFFFF), 0);  // Ensure white for dark background
-
-  // NEW: Add instructional text label above the QR for context and guidance
-  lv_obj_t *instruction_label = lv_label_create(wifi_setup_screen);
-  lv_label_set_text(instruction_label, "Register on crontech.uk to use CronTab. Scan the QR code for quick setup.");
-  lv_obj_set_style_text_color(instruction_label, lv_color_hex(0xFFFFFF), 0);
-  lv_obj_set_style_text_font(instruction_label, &lv_font_montserrat_14, 0);
-  lv_label_set_long_mode(instruction_label, LV_LABEL_LONG_WRAP);  // Enable text wrapping for longer sentences
-  lv_obj_set_width(instruction_label, 600);  // Set a reasonable width for wrapping on 800px screen
-  lv_obj_align_to(instruction_label, qr_img, LV_ALIGN_OUT_TOP_MID, 0, 70);  // Position 20px above QR
-
-  if (debug == 1) Serial.println("[APP] WiFi setup screen shown with QR code and instructional text");;
-
 }
-
 
 void show_api_code_screen() {
   if (debug == 1) Serial.println("[APP] Showing API code screen...");
@@ -1492,24 +1303,8 @@ void show_api_code_screen() {
     lv_obj_add_flag(keyboard, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_style_text_font(keyboard, &lv_font_montserrat_14, 0);
   }
- // UPDATED: Add QR code image under the UI, positioned at y-offset -10
-  lv_obj_t *qr_img = lv_img_create(api_code_screen);  // Create on the screen container
-  lv_img_set_src(qr_img, &qr);
-  lv_img_set_zoom(qr_img, 150);  // Scale for visibility (adjust as needed)
-  lv_obj_align(qr_img, LV_ALIGN_BOTTOM_MID, 0, 50);  // Position under buttons/text areas
-  lv_obj_set_style_img_recolor(qr_img, lv_color_hex(0xFFFFFF), 0);  // Ensure white for dark background
-
-  // NEW: Add instructional text label above the QR for context and guidance
-  lv_obj_t *instruction_label = lv_label_create(api_code_screen);
-  lv_label_set_text(instruction_label, "Scan QR for quick API code.");
-  lv_obj_set_style_text_color(instruction_label, lv_color_hex(0xFFFFFF), 0);
-  lv_obj_set_style_text_font(instruction_label, &lv_font_montserrat_14, 0);
-  lv_label_set_long_mode(instruction_label, LV_LABEL_LONG_WRAP);  // Enable text wrapping for longer sentences
-  lv_obj_set_width(instruction_label, 600);  // Set a reasonable width for wrapping on 800px screen
-  lv_obj_align_to(instruction_label, qr_img, LV_ALIGN_OUT_TOP_MID, 0, -100);  // Position 20px above QR
-
-  if (debug == 1) Serial.println("[APP] API code screen shown with QR code and instructional text");
 }
+
 void show_location_screen() {
   if (debug == 1) Serial.println("[APP] Showing location screen...");
   location_screen = lv_obj_create(lv_scr_act());
@@ -1537,6 +1332,7 @@ void show_location_screen() {
     lv_obj_set_style_text_font(keyboard, &lv_font_montserrat_14, 0);
   }
 }
+
 void close_settings_cb(lv_event_t * e) {
   if (settings_popup) {
     lv_obj_add_flag(settings_popup, LV_OBJ_FLAG_HIDDEN);
@@ -1544,11 +1340,12 @@ void close_settings_cb(lv_event_t * e) {
     settings_popup = nullptr;
   }
 }
+
 void factory_reset_cb(lv_event_t *e);
 void show_settings_popup() {
     if (debug == 1) Serial.println("[APP] Showing settings popup...");
     settings_popup = lv_obj_create(lv_scr_act());
-    lv_obj_set_size(settings_popup, 550, 300); // Reduced size for compactness (from 600x380)
+    lv_obj_set_size(settings_popup, 550, 300);
     lv_obj_align(settings_popup, LV_ALIGN_CENTER, 0, 0);
     lv_obj_set_style_bg_color(settings_popup, lv_color_hex(0x000000), 0);
     lv_obj_set_style_border_color(settings_popup, lv_color_hex(0xFFFFFF), 0);
@@ -1557,15 +1354,12 @@ void show_settings_popup() {
     lv_obj_set_scrollbar_mode(settings_popup, LV_SCROLLBAR_MODE_AUTO);
     lv_obj_set_scroll_snap_y(settings_popup, LV_SCROLL_SNAP_CENTER);
     int y_offset = 10;
-    // QR Code Image (50% smaller, moved up by 100px)
     lv_obj_t *qr_img = lv_img_create(settings_popup);
     lv_img_set_src(qr_img, &qr);
-    lv_obj_align(qr_img, LV_ALIGN_TOP_MID, 0, y_offset - 120); // Move up by 100px
-    lv_img_set_zoom(qr_img, 148); // 50% scale (128 = 50% of 256)
-    y_offset += 80; // Adjust for smaller image (~80px original height / 2)
-    // Additional shift for subsequent elements
-    y_offset += 50; // Shift all following elements down by 50px
-    // UI Darkness Slider
+    lv_obj_align(qr_img, LV_ALIGN_TOP_MID, 0, y_offset - 120);
+    lv_img_set_zoom(qr_img, 148);
+    y_offset += 80;
+    y_offset += 50;
     lv_obj_t *darkness_label = lv_label_create(settings_popup);
     lv_label_set_text(darkness_label, "UI Brightness:");
     lv_obj_align(darkness_label, LV_ALIGN_TOP_LEFT, 20, y_offset);
@@ -1574,20 +1368,18 @@ void show_settings_popup() {
     lv_obj_t *darkness_slider = lv_slider_create(settings_popup);
     lv_slider_set_range(darkness_slider, 0, 100);
     lv_slider_set_value(darkness_slider, g_ui_darkness, LV_ANIM_OFF);
-    lv_obj_set_width(darkness_slider, 200); // Reduced width to fit smaller popup
+    lv_obj_set_width(darkness_slider, 200);
     lv_obj_align(darkness_slider, LV_ALIGN_TOP_MID, 0, y_offset + 20);
     lv_obj_add_event_cb(darkness_slider, darkness_slider_cb, LV_EVENT_VALUE_CHANGED, NULL);
     y_offset += 60;
-    // Firmware Version (restored to top)
     lv_obj_t *version_settings_label = lv_label_create(settings_popup);
     lv_label_set_text(version_settings_label, ("Firmware: " + currentFirmwareVersion).c_str());
     lv_obj_align(version_settings_label, LV_ALIGN_TOP_MID, 0, y_offset);
     lv_obj_set_style_text_font(version_settings_label, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(version_settings_label, lv_color_hex(0xFFFFFF), 0);
     y_offset += 30;
-    // Weather Location
     lv_obj_t *weather_cont = lv_obj_create(settings_popup);
-    lv_obj_set_size(weather_cont, 450, 90); // Reduced width to fit smaller popup
+    lv_obj_set_size(weather_cont, 450, 90);
     lv_obj_align(weather_cont, LV_ALIGN_TOP_MID, 0, y_offset);
     lv_obj_set_style_bg_color(weather_cont, lv_color_hex(0x55a3ff), 0);
     lv_obj_set_style_bg_grad_color(weather_cont, lv_color_hex(0x007acc), 0);
@@ -1615,15 +1407,14 @@ void show_settings_popup() {
     lv_textarea_set_one_line(location_ta, true);
     lv_textarea_set_placeholder_text(location_ta, "City");
     lv_textarea_set_text(location_ta, location.c_str());
-    lv_obj_set_width(location_ta, 180); // Reduced width to fit smaller popup
+    lv_obj_set_width(location_ta, 180);
     lv_obj_set_style_text_font(location_ta, &lv_font_montserrat_14, 0);
     lv_obj_set_user_data(location_ta, (void*)0);
     lv_obj_add_event_cb(location_ta, keyboard_event_cb, LV_EVENT_FOCUSED, location_ta);
     lv_obj_add_event_cb(location_ta, keyboard_event_cb, LV_EVENT_DEFOCUSED, location_ta);
     y_offset += 90;
-    // ParcelBox
     lv_obj_t *parcelbox_cont = lv_obj_create(settings_popup);
-    lv_obj_set_size(parcelbox_cont, 450, 100); // Reduced size to fit smaller popup
+    lv_obj_set_size(parcelbox_cont, 450, 100);
     lv_obj_align(parcelbox_cont, LV_ALIGN_TOP_MID, 0, y_offset);
     lv_obj_set_style_bg_color(parcelbox_cont, lv_color_hex(0x00b894), 0);
     lv_obj_set_style_bg_grad_color(parcelbox_cont, lv_color_hex(0x00a085), 0);
@@ -1651,7 +1442,7 @@ void show_settings_popup() {
     lv_textarea_set_one_line(username_ta, true);
     lv_textarea_set_placeholder_text(username_ta, "Username");
     lv_textarea_set_text(username_ta, username.c_str());
-    lv_obj_set_width(username_ta, 180); // Reduced width to fit smaller popup
+    lv_obj_set_width(username_ta, 180);
     lv_obj_set_style_text_font(username_ta, &lv_font_montserrat_14, 0);
     lv_obj_set_user_data(username_ta, (void*)0);
     lv_obj_add_event_cb(username_ta, keyboard_event_cb, LV_EVENT_FOCUSED, username_ta);
@@ -1670,7 +1461,7 @@ void show_settings_popup() {
     lv_textarea_set_one_line(device_id_ta, true);
     lv_textarea_set_placeholder_text(device_id_ta, "Device ID");
     lv_textarea_set_text(device_id_ta, device_id.c_str());
-    lv_obj_set_width(device_id_ta, 180); // Reduced width to fit smaller popup
+    lv_obj_set_width(device_id_ta, 180);
     lv_obj_set_style_text_font(device_id_ta, &lv_font_montserrat_14, 0);
     lv_obj_set_user_data(device_id_ta, (void*)0);
     lv_obj_add_event_cb(device_id_ta, keyboard_event_cb, LV_EVENT_FOCUSED, device_id_ta);
@@ -1688,8 +1479,7 @@ void show_settings_popup() {
     lv_obj_set_style_text_font(preview_label, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(preview_label, lv_color_hex(0xFFFF00), 0);
     lv_obj_add_event_cb(device_id_ta, device_id_preview_cb, LV_EVENT_VALUE_CHANGED, preview_label);
-    y_offset += 110; // Reduced to fit smaller popup
-    // Temperature Adjustment
+    y_offset += 110;
     lv_obj_t *temp_cont = lv_obj_create(settings_popup);
     lv_obj_set_size(temp_cont, 450, 90);
     lv_obj_align(temp_cont, LV_ALIGN_TOP_MID, 0, y_offset);
@@ -1725,66 +1515,64 @@ void show_settings_popup() {
     lv_obj_add_event_cb(temp_adjust_ta, keyboard_event_cb, LV_EVENT_FOCUSED, temp_adjust_ta);
     lv_obj_add_event_cb(temp_adjust_ta, keyboard_event_cb, LV_EVENT_DEFOCUSED, temp_adjust_ta);
     y_offset += 90;
-    // Buttons
     lv_obj_t *wifi_logout_btn = lv_button_create(settings_popup);
     lv_obj_add_event_cb(wifi_logout_btn, wifi_logout_cb, LV_EVENT_PRESSED, NULL);
     lv_obj_align(wifi_logout_btn, LV_ALIGN_TOP_LEFT, 20, y_offset);
-    lv_obj_set_size(wifi_logout_btn, 90, 40); // Reduced size to fit smaller popup
+    lv_obj_set_size(wifi_logout_btn, 90, 40);
     lv_obj_set_style_bg_color(wifi_logout_btn, lv_color_hex(0x333333), 0);
     lv_obj_t *wifi_logout_label = lv_label_create(wifi_logout_btn);
     lv_label_set_text(wifi_logout_label, "WiFi Logout");
     lv_obj_center(wifi_logout_label);
-    lv_obj_set_style_text_font(wifi_logout_label, &lv_font_montserrat_14, 0); // Smaller font
+    lv_obj_set_style_text_font(wifi_logout_label, &lv_font_montserrat_14, 0);
     lv_obj_t *api_logout_btn = lv_button_create(settings_popup);
     lv_obj_add_event_cb(api_logout_btn, api_logout_cb, LV_EVENT_PRESSED, NULL);
     lv_obj_align(api_logout_btn, LV_ALIGN_TOP_RIGHT, -20, y_offset);
-    lv_obj_set_size(api_logout_btn, 90, 40); // Reduced size to fit smaller popup
+    lv_obj_set_size(api_logout_btn, 90, 40);
     lv_obj_set_style_bg_color(api_logout_btn, lv_color_hex(0x333333), 0);
     lv_obj_t *api_logout_label = lv_label_create(api_logout_btn);
     lv_label_set_text(api_logout_label, "API Logout");
     lv_obj_center(api_logout_label);
-    lv_obj_set_style_text_font(api_logout_label, &lv_font_montserrat_14, 0); // Smaller font
+    lv_obj_set_style_text_font(api_logout_label, &lv_font_montserrat_14, 0);
     lv_obj_t *submit_btn = lv_button_create(settings_popup);
     lv_obj_align(submit_btn, LV_ALIGN_TOP_LEFT, 20, y_offset + 40);
-    lv_obj_set_size(submit_btn, 90, 40); // Reduced size to fit smaller popup
+    lv_obj_set_size(submit_btn, 90, 40);
     lv_obj_add_event_cb(submit_btn, save_settings_cb, LV_EVENT_PRESSED, NULL);
     lv_obj_t *submit_label = lv_label_create(submit_btn);
     lv_label_set_text(submit_label, "Save");
     lv_obj_center(submit_label);
-    lv_obj_set_style_text_font(submit_label, &lv_font_montserrat_14, 0); // Smaller font
+    lv_obj_set_style_text_font(submit_label, &lv_font_montserrat_14, 0);
     lv_obj_t *close_btn = lv_button_create(settings_popup);
     lv_obj_align(close_btn, LV_ALIGN_TOP_RIGHT, -20, y_offset + 40);
-    lv_obj_set_size(close_btn, 90, 40); // Reduced size to fit smaller popup
+    lv_obj_set_size(close_btn, 90, 40);
     lv_obj_set_style_bg_color(close_btn, lv_color_hex(0xFF0000), 0);
     lv_obj_add_event_cb(close_btn, close_settings_cb, LV_EVENT_PRESSED, NULL);
     lv_obj_t *close_label = lv_label_create(close_btn);
     lv_label_set_text(close_label, "Close");
     lv_obj_center(close_label);
-    lv_obj_set_style_text_font(close_label, &lv_font_montserrat_14, 0); // Smaller font
+    lv_obj_set_style_text_font(close_label, &lv_font_montserrat_14, 0);
     lv_obj_t *factory_reset_btn = lv_button_create(settings_popup);
     lv_obj_add_event_cb(factory_reset_btn, factory_reset_cb, LV_EVENT_PRESSED, NULL);
     lv_obj_align(factory_reset_btn, LV_ALIGN_TOP_MID, 0, y_offset + 40);
-    lv_obj_set_size(factory_reset_btn, 70, 20); // Reduced size to fit smaller popup
+    lv_obj_set_size(factory_reset_btn, 70, 20);
     lv_obj_set_style_bg_color(factory_reset_btn, lv_color_hex(0xFF0000), 0);
     lv_obj_t *factory_reset_label = lv_label_create(factory_reset_btn);
     lv_label_set_text(factory_reset_label, "Reset");
     lv_obj_center(factory_reset_label);
-    lv_obj_set_style_text_font(factory_reset_label, &lv_font_montserrat_14, 0); // Smaller font
-    y_offset += 80; // Adjusted for smaller buttons
+    lv_obj_set_style_text_font(factory_reset_label, &lv_font_montserrat_14, 0);
+    y_offset += 80;
     SettingsUI *sui = new SettingsUI();
     sui->location_ta = location_ta;
     sui->username_ta = username_ta;
     sui->device_id_ta = device_id_ta;
     sui->temp_adjust_ta = temp_adjust_ta;
-    // Update the event callback for submit_btn to use the SettingsUI structure
     lv_obj_add_event_cb(submit_btn, save_settings_cb, LV_EVENT_PRESSED, sui);
-    // Keyboard setup with dynamic positioning
     if (!keyboard) {
       keyboard = lv_keyboard_create(lv_scr_act());
       lv_obj_add_flag(keyboard, LV_OBJ_FLAG_HIDDEN);
-      lv_obj_set_style_text_font(keyboard, &lv_font_montserrat_14, 0); // Smaller font to match
+      lv_obj_set_style_text_font(keyboard, &lv_font_montserrat_14, 0);
     }
 }
+
 void factory_reset_cb(lv_event_t *e) {
   const char* namespaces[] = {"wifi", "api", "location", "firmware", "ui", "cloudapps", "event_states"};
   for (int i = 0; i < 7; i++) {
@@ -1800,6 +1588,7 @@ void factory_reset_cb(lv_event_t *e) {
   }
   ESP.restart();
 }
+
 void settings_btn_cb(lv_event_t * e) {
   if (debug == 1) Serial.println("[APP] Settings button clicked");
   lv_event_code_t code = lv_event_get_code(e);
@@ -1813,10 +1602,12 @@ void settings_btn_cb(lv_event_t * e) {
     }
   }
 }
+
 void new_event_btn_cb(lv_event_t * e) {
   if (debug == 1) Serial.println("[APP] New event button clicked");
   show_new_event_popup();
 }
+
 void show_new_event_popup(lv_calendar_date_t *selected_date) {
   new_event_popup = lv_obj_create(lv_scr_act());
   lv_obj_set_size(new_event_popup, 600, 400);
@@ -1831,7 +1622,7 @@ void show_new_event_popup(lv_calendar_date_t *selected_date) {
   lv_obj_set_width(ui->title_ta, 500);
   lv_obj_align(ui->title_ta, LV_ALIGN_TOP_MID, 0, 20);
   lv_obj_set_style_text_font(ui->title_ta, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(ui->title_ta, lv_color_hex(0x333333), 0); // Darker text
+  lv_obj_set_style_text_color(ui->title_ta, lv_color_hex(0x333333), 0);
   lv_obj_set_user_data(ui->title_ta, (void*)0);
   lv_obj_add_event_cb(ui->title_ta, keyboard_event_cb, LV_EVENT_FOCUSED, ui->title_ta);
   lv_obj_add_event_cb(ui->title_ta, keyboard_event_cb, LV_EVENT_DEFOCUSED, ui->title_ta);
@@ -1841,7 +1632,7 @@ void show_new_event_popup(lv_calendar_date_t *selected_date) {
   lv_obj_set_size(ui->desc_ta, 500, 80);
   lv_obj_align(ui->desc_ta, LV_ALIGN_TOP_MID, 0, 70);
   lv_obj_set_style_text_font(ui->desc_ta, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(ui->desc_ta, lv_color_hex(0x333333), 0); // Darker text
+  lv_obj_set_style_text_color(ui->desc_ta, lv_color_hex(0x333333), 0);
   lv_obj_set_user_data(ui->desc_ta, (void*)0);
   lv_obj_add_event_cb(ui->desc_ta, keyboard_event_cb, LV_EVENT_FOCUSED, ui->desc_ta);
   lv_obj_add_event_cb(ui->desc_ta, keyboard_event_cb, LV_EVENT_DEFOCUSED, ui->desc_ta);
@@ -1884,7 +1675,7 @@ void show_new_event_popup(lv_calendar_date_t *selected_date) {
   lv_label_set_text(remind_label, "Remind before (5m,2h,1d):");
   lv_obj_align(remind_label, LV_ALIGN_TOP_LEFT, 50, 170);
   lv_obj_set_style_text_font(remind_label, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(remind_label, lv_color_hex(0xFFFFFF), 0); // Brighter text
+  lv_obj_set_style_text_color(remind_label, lv_color_hex(0xFFFFFF), 0);
   ui->remind_before_ta = lv_textarea_create(new_event_popup);
   lv_textarea_set_one_line(ui->remind_before_ta, true);
   lv_textarea_set_max_length(ui->remind_before_ta, 4);
@@ -1900,7 +1691,7 @@ void show_new_event_popup(lv_calendar_date_t *selected_date) {
   lv_label_set_text(start_label, "Start:");
   lv_obj_align(start_label, LV_ALIGN_TOP_LEFT, 50, 210);
   lv_obj_set_style_text_font(start_label, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(start_label, lv_color_hex(0xFFFFFF), 0); // Brighter text
+  lv_obj_set_style_text_color(start_label, lv_color_hex(0xFFFFFF), 0);
   char buf[5];
   ui->start_year_ta = lv_textarea_create(new_event_popup);
   lv_textarea_set_one_line(ui->start_year_ta, true);
@@ -1966,7 +1757,7 @@ void show_new_event_popup(lv_calendar_date_t *selected_date) {
   lv_label_set_text(end_label, "End:");
   lv_obj_align(end_label, LV_ALIGN_TOP_LEFT, 50, 260);
   lv_obj_set_style_text_font(end_label, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(end_label, lv_color_hex(0xFFFFFF), 0); // Brighter text
+  lv_obj_set_style_text_color(end_label, lv_color_hex(0xFFFFFF), 0);
   ui->end_year_ta = lv_textarea_create(new_event_popup);
   lv_textarea_set_one_line(ui->end_year_ta, true);
   lv_textarea_set_max_length(ui->end_year_ta, 4);
@@ -2052,6 +1843,7 @@ void show_new_event_popup(lv_calendar_date_t *selected_date) {
     lv_obj_set_style_text_font(keyboard, &lv_font_montserrat_14, 0);
   }
 }
+
 void new_event_submit_cb(lv_event_t * e) {
   if (debug == 1) Serial.println("[APP] New event submit button clicked");
   NewEventUI *ui = (NewEventUI*)lv_event_get_user_data(e);
@@ -2181,7 +1973,7 @@ void new_event_submit_cb(lv_event_t * e) {
   int httpCode = http.GET();
   if (httpCode == HTTP_CODE_OK) {
     String response = http.getString();
-    if (debug == 1) Serial.println("[APP] Event submission response response: " + response);
+    if (debug == 1) Serial.println("[APP] Event submission response: " + response);
     fetchEvents();
     updateEventDisplay(calendar);
   } else {
@@ -2201,6 +1993,7 @@ void new_event_submit_cb(lv_event_t * e) {
   lv_obj_del(new_event_popup);
   new_event_popup = nullptr;
 }
+
 void new_event_cancel_cb(lv_event_t * e) {
   if (debug == 1) Serial.println("[APP] New event cancel button clicked");
   NewEventUI *ui = (NewEventUI*)lv_event_get_user_data(e);
@@ -2211,6 +2004,7 @@ void new_event_cancel_cb(lv_event_t * e) {
   lv_obj_del(new_event_popup);
   new_event_popup = nullptr;
 }
+
 void updateDateTimeLabel() {
   if (!date_time_label) {
     if (debug == 1) Serial.println("[APP] Error: date_time_label is null in updateDateTimeLabel");
@@ -2223,17 +2017,15 @@ void updateDateTimeLabel() {
     return;
   }
   char date_time_str[32];
-  strftime(date_time_str, sizeof(date_time_str), "%H:%M", &timeinfo); // Include seconds for 1-second precision
+  strftime(date_time_str, sizeof(date_time_str), "%H:%M", &timeinfo);
   lv_label_set_text(date_time_label, date_time_str);
   if (debug == 1) {Serial.println("[APP] Updated date-time label to: " + String(date_time_str));}
   lv_obj_invalidate(lv_scr_act());
 }
-// Existing constant remains as is (do not redefine)
-// const unsigned long dateTimeUpdateInterval = 60000; // Already defined earlier; keep for 1-minute notifications
-// New constants and variables for separate 1-second date-time refresh
-const unsigned long timeLabelUpdateInterval = 1000; // Update every 1 second
+
+const unsigned long timeLabelUpdateInterval = 1000;
 static unsigned long lastTimeLabelUpdate = 0;
-// Updated updateMonthLabel function
+
 void updateMonthLabel(lv_obj_t *calendar) {
   if (!calendar) {
     if (debug == 1) Serial.println("[APP] Error: Calendar object is null in updateMonthLabel");
@@ -2271,7 +2063,7 @@ void updateMonthLabel(lv_obj_t *calendar) {
   if (debug == 1) Serial.println("[APP] Updated build version label to: Build: " + String(build_version));
   lv_obj_invalidate(lv_scr_act());
 }
-// New function to update holiday label
+
 void updateHolidayLabel() {
   if (!holiday_label) {
     if (debug == 1) Serial.println("[APP] Error: holiday_label is null");
@@ -2284,68 +2076,40 @@ void updateHolidayLabel() {
   }
   int year = showed->year;
   int month = showed->month;
+  String h_str = "Bank Holidays: ";
   bool has_holiday = false;
-  String content_str = "";
   for (int i = 0; i < numHolidays; i++) {
     if (holidays[i].year == year && holidays[i].month == month) {
       has_holiday = true;
-      String processed_title = holidays[i].title;
-      processed_title.replace("'", " ");  // Replace apostrophe with space to avoid glyph issues
-      if (content_str != "") content_str += ", ";
-      content_str += processed_title + " (" + String(holidays[i].day) + ")";
+      if (h_str != "Bank Holidays: ") h_str += ", ";
+      h_str += holidays[i].title + " (" + String(holidays[i].day) + ")";
     }
   }
-
-  // Enable markup recoloring on the label
-  lv_label_set_recolor(holiday_label, true);
-
-  // Configure for full visibility: full width, left alignment, and wrapping
-  lv_obj_set_width(holiday_label, LV_PCT(100));
-  lv_obj_set_style_text_align(holiday_label, LV_TEXT_ALIGN_LEFT, 0);
-  lv_label_set_long_mode(holiday_label, LV_LABEL_LONG_WRAP);
-
-  String full_text;
-  if (!has_holiday) {
-    // Green markup for the entire no-holidays message
-    full_text = String("#05750a No bank holidays this month #");
-  } else {
-    // Orange markup for prefix, maroon for content
-    full_text = String("#050975 Bank Holidays: # #a8020a ") + content_str + " #";
-  }
-
-  // Set the marked-up text
-  lv_label_set_text(holiday_label, full_text.c_str());
-
-  // Invalidate for redraw
+  if (!has_holiday) h_str = "No bank holidays this month";
+  lv_label_set_text(holiday_label, h_str.c_str());
   lv_obj_invalidate(lv_scr_act());
-  if (debug == 1) Serial.println("[APP] Holiday label updated with markup: " + full_text);
 }
 
 void checkFirmwareUpdate() {
   if (debug == 1) Serial.println("[OTA] Starting firmware update check...");
   printMemoryUsage();
-  // Check WiFi status
   if (WiFi.status() != WL_CONNECTED) {
     if (debug == 1) Serial.println("[OTA] WiFi not connected (status: " + String(WiFi.status()) + "), skipping update check");
     return;
   }
   if (debug == 1) Serial.println("[OTA] WiFi connected, IP: " + WiFi.localIP().toString());
-  // Perform HTTP request
-  if (debug == 1) Serial.println("[OTA] Fetching version.json from https://crontech.uk/update/version.json");
-  client.setInsecure(); // For testing; use CA certificate in production
+  client.setInsecure();
   HTTPClient http;
   String url = "https://crontech.uk/update/version.json";
   http.begin(client, url);
   if (debug == 1) Serial.println("[OTA] HTTP request initiated");
   int httpCode = http.GET();
-  // Check HTTP response
   if (httpCode != HTTP_CODE_OK) {
     if (debug == 1) Serial.println("[OTA] HTTP request failed with code: " + String(httpCode));
     http.end();
     return;
   }
   if (debug == 1) Serial.println("[OTA] HTTP request successful (200 OK)");
-  // Parse JSON response
   String payload = http.getString();
   if (debug == 1) Serial.println("[OTA] Response payload: " + payload);
   JsonDocument doc;
@@ -2356,7 +2120,6 @@ void checkFirmwareUpdate() {
     return;
   }
   if (debug == 1) Serial.println("[OTA] JSON parsing successful");
-  // Extract version and URL
   latestFirmwareVersion = doc["version"].as<String>();
   firmwareUrl = doc["url"].as<String>();
   if (debug == 1) Serial.println("[OTA] Current firmware version: " + currentFirmwareVersion);
@@ -2365,19 +2128,18 @@ void checkFirmwareUpdate() {
   printMemoryUsage();
   http.end();
 }
+
 void updateFirmware() {
   if (debug == 1) Serial.println("[OTA] Starting firmware update...");
   printMemoryUsage();
-  // Proceed with actual firmware update
-  if (debug == 1) Serial.println("[OTA] Starting actual firmware download...");
-  client.setInsecure(); // For testing; use CA certificate in production
+  client.setInsecure();
   HTTPClient http;
   http.begin(client, firmwareUrl);
   int httpCode = http.GET();
   if (httpCode != HTTP_CODE_OK) {
     if (debug == 1) Serial.println("[OTA] Failed to download firmware: HTTP " + String(httpCode));
     http.end();
-    is_ota_updating = false; // Reset flag on failure
+    is_ota_updating = false;
     return;
   }
   int contentLength = http.getSize();
@@ -2385,13 +2147,13 @@ void updateFirmware() {
   if (contentLength <= 0) {
     if (debug == 1) Serial.println("[OTA] Invalid content length");
     http.end();
-    is_ota_updating = false; // Reset flag on failure
+    is_ota_updating = false;
     return;
   }
   if (!Update.begin(contentLength)) {
     if (debug == 1) Serial.println("[OTA] Not enough space for update");
     http.end();
-    is_ota_updating = false; // Reset flag on failure
+    is_ota_updating = false;
     return;
   }
   WiFiClient *stream = http.getStreamPtr();
@@ -2404,26 +2166,27 @@ void updateFirmware() {
       if (Update.write(buff, c) != c) {
         if (debug == 1) Serial.println("[OTA] Error writing to flash");
         http.end();
-        is_ota_updating = false; // Reset flag on failure
+        is_ota_updating = false;
         return;
       }
       written += c;
+      delay(1);
+    } else {
       delay(1);
     }
   }
   if (written != contentLength) {
     if (debug == 1) Serial.println("[OTA] Incomplete download");
     http.end();
-    is_ota_updating = false; // Reset flag on failure
+    is_ota_updating = false;
     return;
   }
   if (!Update.end(true)) {
     if (debug == 1) Serial.println("[OTA] Error finalizing update");
     http.end();
-    is_ota_updating = false; // Reset flag on failure
+    is_ota_updating = false;
     return;
   }
-  // Save new firmware version
   preferences.begin("firmware", false);
   preferences.putString("version", latestFirmwareVersion);
   preferences.end();
@@ -2433,69 +2196,63 @@ void updateFirmware() {
   ESP.restart();
   http.end();
 }
-// Modified update_btn_cb function
+
 void update_btn_cb(lv_event_t *e) {
   if (debug == 1) Serial.println("[OTA] Update button clicked");
   if (firmware_update_btn) {
-    lv_obj_add_flag(firmware_update_btn, LV_OBJ_FLAG_HIDDEN); // Hide update button
+    lv_obj_add_flag(firmware_update_btn, LV_OBJ_FLAG_HIDDEN);
     if (debug == 1) Serial.println("[OTA] Update button hidden before popup");
   }
-  // Create full-screen black popup with square corners
   update_popup = lv_obj_create(lv_scr_act());
-  lv_obj_set_size(update_popup, 800, 480); // Full screen
+  lv_obj_set_size(update_popup, 800, 480);
   lv_obj_align(update_popup, LV_ALIGN_CENTER, 0, 0);
-  lv_obj_set_style_bg_color(update_popup, lv_color_hex(0x000000), 0); // Black background
-  lv_obj_set_style_border_width(update_popup, 0, 0); // No border
-  lv_obj_set_style_radius(update_popup, 0, 0); // Square corners (no rounded corners)
-  // Create "Update Now" button
+  lv_obj_set_style_bg_color(update_popup, lv_color_hex(0x000000), 0);
+  lv_obj_set_style_border_width(update_popup, 0, 0);
+  lv_obj_set_style_radius(update_popup, 0, 0);
   lv_obj_t *update_now_btn = lv_button_create(update_popup);
   lv_obj_align(update_now_btn, LV_ALIGN_CENTER, 0, 0);
   lv_obj_set_size(update_now_btn, 140, 40);
-  lv_obj_set_style_bg_color(update_now_btn, lv_color_hex(0x00008B), 0); // Dark blue, darker than default button
+  lv_obj_set_style_bg_color(update_now_btn, lv_color_hex(0x00008B), 0);
   lv_obj_add_event_cb(update_now_btn, [](lv_event_t *e) {
     if (debug == 1) Serial.println("[OTA] Update Now button clicked");
-    // Change button to red and set text to "Updating ..."
     lv_obj_t *btn = (lv_obj_t*)lv_event_get_target(e);
     lv_obj_set_style_bg_color(btn, lv_color_hex(0xFF0000), 0);
     lv_obj_t *label = lv_obj_get_child(btn, 0);
     lv_label_set_text(label, "Updating ...");
-    // Set OTA flag to pause screen refreshes
     is_ota_updating = true;
     if (debug == 1) Serial.println("[OTA] OTA flag set; screen refresh paused.");
-    loop_display(); // Refresh display to show changes
-    // Countdown 5 seconds
+    loop_display();
     for (int i = 5; i >= 1; i--) {
       lv_label_set_text_fmt(label, "Updating ... %d", i);
-      loop_display(); // Refresh display
+      loop_display();
       delay(1000);
     }
-    // Hide and delete popup
     if (update_popup) {
-      lv_obj_add_flag(update_popup, LV_OBJ_FLAG_HIDDEN); // Hide popup
-      lv_obj_del(update_popup); // Delete popup to free memory
+      lv_obj_add_flag(update_popup, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_del(update_popup);
       update_popup = nullptr;
       if (debug == 1) Serial.println("[OTA] Update popup removed");
     }
-    updateFirmware(); // Proceed with firmware update
+    updateFirmware();
   }, LV_EVENT_PRESSED, NULL);
   lv_obj_t *update_now_label = lv_label_create(update_now_btn);
   lv_label_set_text(update_now_label, "Update Now");
   lv_obj_center(update_now_label);
   lv_obj_set_style_text_font(update_now_label, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(update_now_label, lv_color_hex(0xFFFFFF), 0); // White text for contrast
+  lv_obj_set_style_text_color(update_now_label, lv_color_hex(0xFFFFFF), 0);
   if (debug == 1) Serial.println("[OTA] Update popup created with Update Now button");
 }
+
 static int showed_year;
 static int showed_month;
+
 void snooze_reminder_cb(lv_event_t *e) {
   int index = (intptr_t)lv_event_get_user_data(e);
   time(&events[index].last_reminder_time);
   if (debug == 1) Serial.printf("[DEBUG] Snooze reminder for event %d: updated last_reminder_time to %ld\n", index, events[index].last_reminder_time);
-  // Generate short key using hash
   String full_id = events[index].start + "_" + events[index].summary;
   unsigned long hash = hashString(full_id);
-  String base_key = "e" + String(hash % 100000000); // "e" + up to 8 digits (9 chars total)
-  // Save to preferences
+  String base_key = "e" + String(hash % 100000000);
   preferences.begin("event_states", false);
   preferences.putInt((base_key + "c").c_str(), events[index].reminder_count);
   preferences.putLong((base_key + "l").c_str(), events[index].last_reminder_time);
@@ -2503,6 +2260,7 @@ void snooze_reminder_cb(lv_event_t *e) {
   preferences.end();
   close_event_details_cb(e);
 }
+
 void prev_month_cb(lv_event_t *e) {
   const lv_calendar_date_t * showed = lv_calendar_get_showed_date(calendar);
   showed_month = showed->month;
@@ -2515,11 +2273,10 @@ void prev_month_cb(lv_event_t *e) {
   lv_calendar_set_showed_date(calendar, showed_year, showed_month);
   rearrange_calendar_parts(calendar);
   updateMonthLabel(calendar);
-  fetchBankHolidays();
   updateHolidayLabel();
   update_today_highlight(calendar);
-  
 }
+
 void next_month_cb(lv_event_t *e) {
   const lv_calendar_date_t * showed = lv_calendar_get_showed_date(calendar);
   showed_month = showed->month;
@@ -2532,10 +2289,10 @@ void next_month_cb(lv_event_t *e) {
   lv_calendar_set_showed_date(calendar, showed_year, showed_month);
   rearrange_calendar_parts(calendar);
   updateMonthLabel(calendar);
-  fetchBankHolidays();
   updateHolidayLabel();
   update_today_highlight(calendar);
 }
+
 void updateFirmwareButton() {
   if (latestFirmwareVersion != "" && latestFirmwareVersion != currentFirmwareVersion) {
     if (!firmware_update_btn) {
@@ -2547,7 +2304,7 @@ void updateFirmwareButton() {
       lv_obj_center(update_label);
       lv_obj_set_style_text_font(update_label, &lv_font_montserrat_14, 0);
       lv_obj_set_size(firmware_update_btn, 40, 40);
-      lv_obj_move_to_index(firmware_update_btn, 1); // Insert after settings button
+      lv_obj_move_to_index(firmware_update_btn, 1);
     }
   } else {
     if (firmware_update_btn) {
@@ -2556,33 +2313,31 @@ void updateFirmwareButton() {
     }
   }
 }
+
 void darkness_slider_cb(lv_event_t *e) {
   lv_obj_t *slider = (lv_obj_t*)lv_event_get_target(e);
   g_ui_darkness = lv_slider_get_value(slider);
-  // Calculate grayscale
   uint8_t gray = 255 - (g_ui_darkness * 255 / 100);
   lv_color_t bg_color = lv_color_make(gray, gray, gray);
   lv_color_t text_color = (g_ui_darkness > 50) ? lv_color_white() : lv_color_black();
-  // Apply to main screen
   lv_obj_set_style_bg_color(lv_scr_act(), bg_color, 0);
   lv_obj_set_style_bg_opa(lv_scr_act(), LV_OPA_100, 0);
-  // Apply to labels and calendar text
   if (month_label) lv_obj_set_style_text_color(month_label, text_color, 0);
   if (date_time_label) lv_obj_set_style_text_color(date_time_label, text_color, 0);
   if (calendar) {
     lv_obj_set_style_text_color(calendar, text_color, LV_PART_ITEMS | LV_STATE_DEFAULT);
   }
-  // Redraw weather and events to apply changes
   updateWeatherDisplay();
   updateEventDisplay(calendar);
-  // Save to preferences
   preferences.begin("ui", false);
   preferences.putInt("ui_darkness", g_ui_darkness);
   preferences.end();
 }
+
 void setup_calendar() {
   if (debug == 1) Serial.println("[APP] Setting up calendar...");
   if (debug == 1) Serial.println("[APP] Initializing NTP...");
+  configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
   if (debug == 1) Serial.println("[APP] Waiting for NTP time sync...");
   struct tm timeinfo;
   if (!getLocalTime(&timeinfo)) {
@@ -2595,7 +2350,6 @@ void setup_calendar() {
   setup_display();
   lv_obj_set_scrollbar_mode(lv_scr_act(), LV_SCROLLBAR_MODE_OFF);
   if (debug == 1) Serial.println("[APP] Display setup complete");
-  // Apply initial darkness
   uint8_t gray = 255 - (g_ui_darkness * 255 / 100);
   lv_color_t bg_color = lv_color_make(gray, gray, gray);
   lv_color_t text_color = (g_ui_darkness > 50) ? lv_color_white() : lv_color_black();
@@ -2616,7 +2370,7 @@ void setup_calendar() {
   lv_anim_set_var(&a, loading_img);
   lv_anim_set_values(&a, 0, 3600);
   lv_anim_set_exec_cb(&a, (lv_anim_exec_xcb_t) lv_img_set_angle);
-  lv_anim_set_time(&a, 2500); //time to rotate the clock
+  lv_anim_set_time(&a, 2500);
   lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
   lv_anim_start(&a);
   loop_display();
@@ -2637,7 +2391,7 @@ void setup_calendar() {
     return;
   }
   lv_obj_set_size(calendar, 350, 350);
-  lv_obj_align(calendar, LV_ALIGN_TOP_LEFT, 10, 60); // Restored original position
+  lv_obj_align(calendar, LV_ALIGN_TOP_LEFT, 10, 60);
   showed_year = timeinfo.tm_year + 1900;
   showed_month = timeinfo.tm_mon + 1;
   lv_calendar_set_showed_date(calendar, showed_year, showed_month);
@@ -2658,16 +2412,15 @@ void setup_calendar() {
   rearrange_calendar_parts(calendar);
   if (debug == 1) Serial.println("[APP] Creating build version label...");
   build_version_label = lv_label_create(lv_scr_act());
-  //Build version
   lv_label_set_text(build_version_label, ("V." + String(build_version)).c_str());
   lv_obj_set_style_text_font(build_version_label, &lv_font_montserrat_14, 0);
   lv_obj_set_style_text_color(build_version_label, text_color, 0);
-  lv_obj_align(build_version_label, LV_ALIGN_BOTTOM_LEFT, 10, -10); // Moved to bottom left
+  lv_obj_align(build_version_label, LV_ALIGN_BOTTOM_LEFT, 10, -10);
   if (debug == 1) Serial.println("[APP] Creating month label...");
   month_label = lv_label_create(lv_scr_act());
   lv_obj_set_style_text_font(month_label, &lv_font_montserrat_24, 0);
   lv_obj_set_style_text_color(month_label, text_color, 0);
-  lv_obj_align_to(month_label, calendar, LV_ALIGN_OUT_TOP_MID, -150, -5); // Restored original position
+  lv_obj_align_to(month_label, calendar, LV_ALIGN_OUT_TOP_MID, -150, -5);
   if (debug == 1) Serial.println("[APP] Creating holiday label...");
   holiday_label = lv_label_create(lv_scr_act());
   lv_obj_set_style_text_font(holiday_label, &lv_font_montserrat_14, 0);
@@ -2683,7 +2436,6 @@ void setup_calendar() {
   updateDateTimeLabel();
   updateMonthLabel(calendar);
   updateHolidayLabel();
-  update_today_highlight(calendar);
   if (debug == 1) Serial.println("[APP] Fetching bank holidays...");
   fetchBankHolidays();
   if (debug == 1) Serial.println("[APP] Fetching initial events...");
@@ -2745,6 +2497,7 @@ void setup_calendar() {
   lv_obj_set_style_bg_color(lv_scr_act(), original_bg_color, LV_PART_MAIN);
   lv_tick_inc(5);
 }
+
 void button_event_cb(lv_event_t * e) {
   if (debug == 1) Serial.println("[APP] Refresh button clicked");
   lv_obj_t * btn = (lv_obj_t*)lv_event_get_target(e);
@@ -2791,6 +2544,7 @@ void calendar_event_cb(lv_event_t * e) {
   updateMonthLabel(calendar);
   show_new_event_popup(&date);
 }
+
 void update_today_highlight(lv_obj_t *cal) {
   lv_obj_t *btnm = lv_calendar_get_btnmatrix(cal);
   if (!btnm) return;
@@ -2807,12 +2561,13 @@ void update_today_highlight(lv_obj_t *cal) {
     first_day.tm_mday = 1;
     mktime(&first_day);
     int first_wday = first_day.tm_wday;
-    uint32_t btn_id = first_wday + (cur_day - 1) + 7; // Add 7 to ignore the header row offset
+    uint32_t btn_id = first_wday + (cur_day - 1) + 7;
     if (btn_id < 42) {
       lv_btnmatrix_set_btn_ctrl(btnm, btn_id, LV_BTNMATRIX_CTRL_CUSTOM_1);
     }
   }
 }
+
 void fetchWeatherLocation() {
   if (debug == 1) Serial.println("[APP] Fetching weather location...");
   if (WiFi.status() != WL_CONNECTED) {
@@ -2848,35 +2603,7 @@ void fetchWeatherLocation() {
   }
   http.end();
 }
-// Replace the existing timezone constants with a proper DST-aware string
-// Remove these lines:
-// const long gmtOffset_sec = 0;
-// const int daylightOffset_sec = 3600;
 
-// Updated initTime() function with correct configTime usage and TZ setting for automatic DST
-void initTime() {
-  if (debug == 1) Serial.println("[APP] Initializing time with automatic DST support...");
-  // First, sync time in UTC
-  configTime(0, 0, ntpServer);
-  struct tm timeinfo;
-  if (!getLocalTime(&timeinfo)) {
-    if (debug == 1) Serial.println("[APP] Failed to obtain initial time from NTP");
-    return;
-  }
-  if (debug == 1) Serial.println("[APP] Initial UTC time obtained from NTP");
-  // Now set the UK timezone string for automatic GMT/BST handling
-  setenv("TZ", "GMT0BST,M3.5.0/1,M10.5.0", 1);
-  tzset();
-  // Verify local time after TZ set
-  if (getLocalTime(&timeinfo)) {
-    if (debug == 1) Serial.println("[APP] Local time after TZ set: " + String(timeinfo.tm_year + 1900) + "-" + 
-                                   String(timeinfo.tm_mon + 1) + "-" + String(timeinfo.tm_mday) + " " + 
-                                   String(timeinfo.tm_hour) + ":" + String(timeinfo.tm_min) + ":" + String(timeinfo.tm_sec));
-  } else {
-    if (debug == 1) Serial.println("[APP] Failed to obtain local time after TZ set");
-  }
-}
-// Modified setup() function: Add the initTime() call after successful WiFi connection
 void setup() {
   Serial.begin(115200);
   delay(1000);
@@ -2907,8 +2634,6 @@ void setup() {
     }
     if (WiFi.status() == WL_CONNECTED) {
       if (debug == 1) Serial.println("[APP] WiFi connected! IP: " + WiFi.localIP().toString());
-      // NEW: Initialize time with automatic DST after WiFi connects
-      initTime();
       preferences.begin("api", false);
       apiCode = preferences.getString("apiCode", "");
       preferences.end();
@@ -2917,7 +2642,7 @@ void setup() {
         show_api_code_screen();
       } else {
         fetchParcelBoxCredentials();
-        fetchWeatherLocation(); // Added
+        fetchWeatherLocation();
         preferences.begin("location", false);
         location = preferences.getString("location", "");
         lat = preferences.getString("lat", "");
@@ -2932,11 +2657,7 @@ void setup() {
           setup_display();
           show_location_screen();
         } else {
-			setup_calendar();
-			fetchBankHolidays();
-			updateHolidayLabel();
-			lastHolidayUpdate = millis();
-		  
+          setup_calendar();
         }
       }
     } else {
@@ -2946,46 +2667,13 @@ void setup() {
   }
 }
 
-
-
-///////////////////////////////////////////////////////////////////////
-
 void loop() {
   if (!is_ota_updating) {
-    // Normal LVGL update cycle
     loop_display();
     lv_tick_inc(5);
-    
-    // Scheduled restart logic: Trigger at midnight on Sundays or the 1st of each month
-    static int prev_sec = -1;  // Track previous second to avoid multi-trigger at exact midnight
-    time_t now_t;
-    time(&now_t);
-    struct tm *timeinfo = localtime(&now_t);
-    if (timeinfo->tm_hour == 0 && timeinfo->tm_min == 0 && timeinfo->tm_sec == 0 &&
-        (timeinfo->tm_wday == 0 || timeinfo->tm_mday == 1) &&
-        prev_sec != 0) {  // Ensure it's the transition to midnight
-      if (debug == 1) {
-        String msg = String("[APP] Scheduled restart triggered: ") + (timeinfo->tm_wday == 0 ? "Sunday midnight" : "1st of month midnight");
-        Serial.println(msg);
-      }
-      ESP.restart();
-    }
-    prev_sec = timeinfo->tm_sec;  // Update tracker
-    
     delay(5);
   } else {
-    // OTA mode: Skip LVGL, handle OTA periodically (though blocking in this case)
-    delay(100); // Longer delay to reduce CPU usage during OTA
-    // Since updateFirmware is blocking and ends with restart, no further handling needed here
-    // For non-blocking OTA, add: handle_ota_progress();
-    // Check if OTA completed (not applicable in blocking mode, but placeholder)
-    // if (ota_update_completed()) {
-    //   is_ota_updating = false;
-    //   // Re-enable display if quiesced
-    //   // display_power_up();
-    //   reset_update_ui(); // Reset UI if needed
-    //   if (debug == 1) Serial.println("[APP] OTA completed; resuming screen refresh.");
-    // }
+    delay(100);
   }
   unsigned long currentTime = millis();
   if (currentTime - lastRefreshTime >= refreshInterval && calendar && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
@@ -3049,16 +2737,11 @@ void loop() {
     fetchAndSetBackgroundImage();
     lastBackgroundUpdate = currentTime;
   }
-  if (currentTime - lastHolidayUpdate >= holidayUpdateInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
-  fetchBankHolidays();
-  updateHolidayLabel();
-  lastHolidayUpdate = currentTime;
-}
 }
 
 void show_event_details(int index, bool isReminder) {
   if (event_details_popup) {
-    return; // Avoid multiple popups
+    return;
   }
   if (index < 0 || index >= numEvents) {
     if (debug == 1) Serial.println("[APP] Invalid event index for details popup");
@@ -3070,271 +2753,141 @@ void show_event_details(int index, bool isReminder) {
   lv_obj_set_style_bg_color(event_details_popup, lv_color_hex(0x000000), 0);
   lv_obj_set_style_border_color(event_details_popup, lv_color_hex(0xFFFFFF), 0);
   lv_obj_set_style_border_width(event_details_popup, 2, 0);
-  // Event details container
-  lv_obj_t *event_info_cont = lv_obj_create(event_details_popup);
-  lv_obj_set_size(event_info_cont, 680, 150);
-  lv_obj_align(event_info_cont, LV_ALIGN_TOP_MID, 0, 10);
-  lv_obj_set_style_bg_color(event_info_cont, lv_color_hex(0xF0F0F0), 0);
-  lv_obj_set_style_bg_opa(event_info_cont, LV_OPA_COVER, 0);
-  lv_obj_set_style_border_width(event_info_cont, 0, 0);
-  lv_obj_set_style_pad_all(event_info_cont, 10, 0);
-  lv_obj_set_style_pad_row(event_info_cont, 5, 0);
-  lv_obj_set_scrollbar_mode(event_info_cont, LV_SCROLLBAR_MODE_OFF);
-  // Title
-  lv_obj_t *title_label = lv_label_create(event_info_cont);
+  lv_obj_t *title_label = lv_label_create(event_details_popup);
   lv_label_set_text(title_label, events[index].summary.c_str());
-  lv_obj_align(title_label, LV_ALIGN_TOP_MID, 0, 0);
+  lv_obj_align(title_label, LV_ALIGN_TOP_MID, 0, 10);
   lv_obj_set_style_text_font(title_label, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(title_label, lv_color_hex(0x000000), 0);
-  // Description
-  lv_obj_t *desc_label = lv_label_create(event_info_cont);
+  lv_obj_set_style_text_color(title_label, lv_color_hex(0xFFFFFF), 0);
+  lv_obj_t *desc_label = lv_label_create(event_details_popup);
   lv_label_set_text(desc_label, events[index].description.c_str());
   lv_label_set_long_mode(desc_label, LV_LABEL_LONG_WRAP);
-  lv_obj_set_width(desc_label, 650);
-  lv_obj_align_to(desc_label, title_label, LV_ALIGN_OUT_BOTTOM_MID, 0, 10);
+  lv_obj_set_width(desc_label, 400);
+  lv_obj_align(desc_label, LV_ALIGN_TOP_MID, 0, 50);
   lv_obj_set_style_text_font(desc_label, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(desc_label, lv_color_hex(0x000000), 0);
-  // Start
-  lv_obj_t *start_label = lv_label_create(event_info_cont);
+  lv_obj_set_style_text_color(desc_label, lv_color_hex(0xFFFFFF), 0);
+  lv_obj_t *start_label = lv_label_create(event_details_popup);
   lv_label_set_text(start_label, ("Start: " + events[index].start).c_str());
-  lv_obj_align_to(start_label, desc_label, LV_ALIGN_OUT_BOTTOM_MID, 0, 10);
+  lv_obj_align_to(start_label, desc_label, LV_ALIGN_OUT_BOTTOM_MID, 0, 20);
   lv_obj_set_style_text_font(start_label, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(start_label, lv_color_hex(0x000000), 0);
-  // End
-  lv_obj_t *end_label = lv_label_create(event_info_cont);
+  lv_obj_set_style_text_color(start_label, lv_color_hex(0xFFFFFF), 0);
+  lv_obj_t *end_label = lv_label_create(event_details_popup);
   lv_label_set_text(end_label, ("End: " + events[index].end).c_str());
-  lv_obj_align_to(end_label, start_label, LV_ALIGN_OUT_BOTTOM_MID, 0, 5);
+  lv_obj_align_to(end_label, start_label, LV_ALIGN_OUT_BOTTOM_MID, 0, 10);
   lv_obj_set_style_text_font(end_label, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(end_label, lv_color_hex(0x000000), 0);
-  // Determine the event's start date
-  struct tm event_start_tm = {0};
-  String event_start_str = events[index].start; // e.g., "2025-10-25" or "2025-10-25 14:00"
-  if (!event_start_str.isEmpty()) {
-    // Parse the date (assuming format "YYYY-MM-DD" or "YYYY-MM-DD HH:MM")
-    if (strptime(event_start_str.c_str(), "%Y-%m-%d %H:%M", &event_start_tm) == NULL) {
-      // Try parsing without time if the above fails
-      strptime(event_start_str.c_str(), "%Y-%m-%d", &event_start_tm);
-    }
+  lv_obj_set_style_text_color(end_label, lv_color_hex(0xFFFFFF), 0);
+  lv_obj_t *forecast_cont = lv_obj_create(event_details_popup);
+  lv_obj_set_size(forecast_cont, 680, 150);
+  lv_obj_align_to(forecast_cont, end_label, LV_ALIGN_OUT_BOTTOM_MID, 0, 20);
+  lv_obj_set_flex_flow(forecast_cont, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(forecast_cont, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  lv_obj_set_style_bg_opa(forecast_cont, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(forecast_cont, 0, 0);
+  lv_obj_set_style_pad_all(forecast_cont, 5, 0);
+  lv_obj_set_style_pad_column(forecast_cont, 5, 0);
+  lv_obj_set_scrollbar_mode(forecast_cont, LV_SCROLLBAR_MODE_AUTO);
+  time_t now;
+  time(&now);
+  struct tm now_tm;
+  getLocalTime(&now_tm);
+  struct tm today = now_tm;
+  today.tm_hour = 0;
+  today.tm_min = 0;
+  today.tm_sec = 0;
+  time_t today_start = mktime(&today);
+  time_t max_forecast_time = today_start + 7 * 86400;
+  struct tm event_start_day = *localtime(&events[index].start_time);
+  event_start_day.tm_hour = 0;
+  event_start_day.tm_min = 0;
+  event_start_day.tm_sec = 0;
+  time_t event_start_day_start = mktime(&event_start_day);
+  struct tm event_end_day = *localtime(&events[index].end_time);
+  event_end_day.tm_hour = 0;
+  event_end_day.tm_min = 0;
+  event_end_day.tm_sec = 0;
+  time_t event_end_day_start = mktime(&event_end_day);
+  if (event_end_day_start > max_forecast_time) {
+    event_end_day_start = max_forecast_time;
   }
-  event_start_tm.tm_hour = 0;
-  event_start_tm.tm_min = 0;
-  event_start_tm.tm_sec = 0;
-  event_start_tm.tm_isdst = -1;
-  time_t event_start_day = mktime(&event_start_tm);
-  // Parse end date similarly to check for single-day event
-  struct tm event_end_tm = {0};
-  String event_end_str = events[index].end;
-  if (!event_end_str.isEmpty()) {
-    if (strptime(event_end_str.c_str(), "%Y-%m-%d %H:%M", &event_end_tm) == NULL) {
-      strptime(event_end_str.c_str(), "%Y-%m-%d", &event_end_tm);
-    }
+  bool isMultiDay = (event_end_day_start > event_start_day_start);
+  if (isMultiDay) {
+    lv_obj_set_size(forecast_cont, 680, 80);
+    lv_obj_set_style_pad_column(forecast_cont, 2, 0);
   }
-  event_end_tm.tm_hour = 0;
-  event_end_tm.tm_min = 0;
-  event_end_tm.tm_sec = 0;
-  event_end_tm.tm_isdst = -1;
-  time_t event_end_day = mktime(&event_end_tm);
-  bool is_single_day = (event_start_day == event_end_day);
-  // Calculate number of event days
-  long full_duration_sec = (long)events[index].end_time - (long)events[index].start_time;
-  int num_event_days_full = (full_duration_sec / 86400L) + 1;
-  // Get today's start
-  time_t now_t;
-  time(&now_t);
-  struct tm today_tm = {0};
-  getLocalTime(&today_tm);
-  today_tm.tm_hour = 0;
-  today_tm.tm_min = 0;
-  today_tm.tm_sec = 0;
-  today_tm.tm_isdst = -1;
-  time_t today_start = mktime(&today_tm);
-  // Determine display parameters
-  time_t display_start_day;
-  int num_display_days;
-  if (now_t > events[index].start_time) {
-    // Ongoing or past
-    long remaining_sec = (long)events[index].end_time - now_t;
-    if (remaining_sec >= 0) {
-      num_display_days = (remaining_sec / 86400L) + 1;
-      display_start_day = today_start;
-    } else {
-      num_display_days = 0;
-      display_start_day = 0; // Irrelevant
-    }
-  } else {
-    // Future
-    num_display_days = num_event_days_full;
-    display_start_day = event_start_day;
-  }
-  // Weather section: Single-day vs Multi-day layout
-  if (is_single_day && num_display_days >= 1) {
-    // Single-day wider layout
-    lv_obj_t *weather_cont = lv_obj_create(event_details_popup);
-    lv_obj_set_size(weather_cont, 680, 120);
-    lv_obj_align_to(weather_cont, event_info_cont, LV_ALIGN_OUT_BOTTOM_MID, 0, 10);
-    lv_obj_set_flex_flow(weather_cont, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(weather_cont, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_bg_color(weather_cont, lv_color_white(), 0);
-    lv_obj_set_style_bg_opa(weather_cont, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(weather_cont, 0, 0);
-    lv_obj_set_style_pad_all(weather_cont, 5, 0);
-    lv_obj_set_style_pad_column(weather_cont, 10, 0);
-    lv_obj_set_scrollbar_mode(weather_cont, LV_SCROLLBAR_MODE_OFF);
-
-    // Calculate f_index for the single event day
-    time_t event_day = event_start_day;
-    int f_index = (int)((event_day - today_start) / 86400);
-    bool has_forecast = (f_index >= 0 && f_index < 14);
-
-    // Left: Weather icon and temperatures (UPDATED: Added night/min temp)
-    lv_obj_t *left_cont = lv_obj_create(weather_cont);
-    lv_obj_set_size(left_cont, 200, 120);
+  for (time_t cur_day = event_start_day_start; cur_day <= event_end_day_start; cur_day += 86400) {
+    int f_index = (cur_day - today_start) / 86400;
+    lv_obj_t *day_cont = lv_obj_create(forecast_cont);
+    lv_obj_set_size(day_cont, isMultiDay ? 90 : 400, isMultiDay ? 60 : 130);
+    lv_obj_set_flex_flow(day_cont, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(day_cont, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_set_style_bg_color(day_cont, lv_color_hex(0xF0F0F0), 0);
+    lv_obj_set_style_bg_opa(day_cont, LV_OPA_90, 0);
+    lv_obj_set_style_radius(day_cont, 10, 0);
+    lv_obj_set_style_shadow_color(day_cont, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_shadow_width(day_cont, 10, 0);
+    lv_obj_set_style_shadow_opa(day_cont, LV_OPA_20, 0);
+    lv_obj_set_style_border_width(day_cont, 0, 0);
+    lv_obj_set_style_pad_all(day_cont, 5, 0);
+    lv_obj_set_style_pad_column(day_cont, 5, 0);
+    lv_obj_t *left_cont = lv_obj_create(day_cont);
+    lv_obj_set_size(left_cont, isMultiDay ? 30 : 150, isMultiDay ? 50 : 120);
     lv_obj_set_flex_flow(left_cont, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(left_cont, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_bg_opa(left_cont, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_pad_all(left_cont, 5, 0);
-
-    // Weather image
-    lv_obj_t *weather_img = lv_img_create(left_cont);
-    if (has_forecast) {
-      lv_img_set_src(weather_img, getWeatherImage(forecast[f_index].weather_code));
-    } else {
-      lv_img_set_src(weather_img, getWeatherImage(999)); // Unknown
-    }
-    lv_img_set_zoom(weather_img, 150); // Slightly larger for single-day
-    lv_obj_align(weather_img, LV_ALIGN_CENTER, 0, -40);  // UPDATED: Adjusted for stacked temps
-
-    // Max temperature label
-    lv_obj_t *temp_max_label = lv_label_create(left_cont);
-    if (has_forecast) {
-      lv_label_set_text(temp_max_label, (String(forecast[f_index].temp_max + temp_adjust, 1) + "°C").c_str());
-    } else {
-      lv_label_set_text(temp_max_label, "N/A");
-    }
-    lv_obj_set_style_text_font(temp_max_label, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(temp_max_label, lv_color_hex(0x000000), 0);
-    lv_obj_align(temp_max_label, LV_ALIGN_CENTER, 0, 0);  // Centered horizontally
-
-    // NEW: Min (night) temperature label below max
-    lv_obj_t *temp_min_label = lv_label_create(left_cont);
-    if (has_forecast) {
-      lv_label_set_text(temp_min_label, (String(forecast[f_index].temp_min + temp_adjust, 1) + "°C").c_str());
-      lv_obj_set_style_text_font(temp_min_label, &lv_font_montserrat_14, 0);  // Slightly smaller font for min
-      lv_obj_set_style_text_color(temp_min_label, lv_color_hex(0x666666), 0);  // Gray for secondary info
-    } else {
-      lv_label_set_text(temp_min_label, "N/A");
-    }
-    lv_obj_align_to(temp_min_label, temp_max_label, LV_ALIGN_OUT_BOTTOM_MID, 0, -5);  // Stacked below max
-
-    // Right: Conditions (description, humidity, feel like, precip, wind)
-    lv_obj_t *right_cont = lv_obj_create(weather_cont);
-    lv_obj_set_size(right_cont, 460, 120);
-    lv_obj_set_flex_flow(right_cont, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(right_cont, LV_FLEX_ALIGN_SPACE_AROUND, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_bg_opa(right_cont, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_pad_all(right_cont, 5, 0);
-    lv_obj_set_style_pad_row(right_cont, 2, 0);
-
-    // Description
-    lv_obj_t *desc_weather_label = lv_label_create(right_cont);
-    String desc = has_forecast ? getWeatherDescription(forecast[f_index].weather_code) : "Unknown";
-    lv_label_set_text(desc_weather_label, desc.c_str());
-    lv_obj_set_style_text_font(desc_weather_label, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(desc_weather_label, lv_color_hex(0x000000), 0);
-    lv_label_set_long_mode(desc_weather_label, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(desc_weather_label, 200);
-
-    // Humidity
-    lv_obj_t *hum_label = lv_label_create(right_cont);
-    String hum_text = has_forecast ? ("Humidity: " + String((int)forecast[f_index].humidity_mean) + "%") : "Humidity: N/A";
-    lv_label_set_text(hum_label, hum_text.c_str());
-    lv_obj_set_style_text_font(hum_label, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(hum_label, lv_color_hex(0x000000), 0);
-
-    // Feel like (apparent temp)
-    lv_obj_t *feel_label = lv_label_create(right_cont);
-    String feel_text = has_forecast ? ("Feels like: " + String(forecast[f_index].apparent_max + temp_adjust, 1) + "°C") : "Feels like: N/A";
-    lv_label_set_text(feel_label, feel_text.c_str());
-    lv_obj_set_style_text_font(feel_label, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(feel_label, lv_color_hex(0x000000), 0);
-
-    // Precipitation
-    lv_obj_t *precip_label = lv_label_create(right_cont);
-    String precip_text = has_forecast ? ("Precip: " + String(forecast[f_index].precip_sum, 1) + " mm") : "Precip: N/A";
-    lv_label_set_text(precip_label, precip_text.c_str());
-    lv_obj_set_style_text_font(precip_label, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(precip_label, lv_color_hex(0x000000), 0);
-
-    // Wind
-    lv_obj_t *wind_label = lv_label_create(right_cont);
-    String wind_text = has_forecast ? ("Wind: " + String(forecast[f_index].wind_max, 0) + " km/h") : "Wind: N/A";
-    lv_label_set_text(wind_label, wind_text.c_str());
-    lv_obj_set_style_text_font(wind_label, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(wind_label, lv_color_hex(0x000000), 0);
-  } else {
-    // Multi-day forecast container (existing logic)
-    lv_obj_t *forecast_cont = lv_obj_create(event_details_popup);
-    lv_obj_set_size(forecast_cont, 680, 100);
-    lv_obj_align_to(forecast_cont, event_info_cont, LV_ALIGN_OUT_BOTTOM_MID, 0, 10);
-    lv_obj_set_flex_flow(forecast_cont, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(forecast_cont, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_bg_opa(forecast_cont, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(forecast_cont, 0, 0);
-    lv_obj_set_style_pad_all(forecast_cont, 5, 0);
-    lv_obj_set_style_pad_column(forecast_cont, 2, 0);
-    lv_obj_set_scrollbar_mode(forecast_cont, LV_SCROLLBAR_MODE_OFF);
-    // Loop for display days
-    int loop_days = (num_display_days > 0) ? min(num_display_days, 14) : 0;
-    for (int i = 0; i < loop_days; i++) {
-      time_t cur_day = display_start_day + (time_t)i * 86400;
-      int f_index = (int)((cur_day - today_start) / 86400);
-      lv_obj_t *day_cont = lv_obj_create(forecast_cont);
-      lv_obj_set_size(day_cont, 90, 90);
-      lv_obj_set_flex_flow(day_cont, LV_FLEX_FLOW_COLUMN);
-      lv_obj_set_flex_align(day_cont, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-      lv_obj_set_style_bg_color(day_cont, lv_color_hex(0xF0F0F0), 0);
-      lv_obj_set_style_bg_opa(day_cont, LV_OPA_90, 0);
-      lv_obj_set_style_radius(day_cont, 10, 0);
-      lv_obj_set_style_shadow_color(day_cont, lv_color_hex(0x000000), 0);
-      lv_obj_set_style_shadow_width(day_cont, 10, 0);
-      lv_obj_set_style_shadow_opa(day_cont, LV_OPA_20, 0);
-      lv_obj_set_style_border_width(day_cont, 0, 0);
-      lv_obj_set_style_pad_all(day_cont, 2, 0);
-      lv_obj_set_style_pad_row(day_cont, -20, 0);
-      // Date label
-      char date_buf[20];
-      struct tm *d_tm = localtime(&cur_day);
-      strftime(date_buf, sizeof(date_buf), "%Y-%m-%d", d_tm);
-      lv_obj_t *date_label = lv_label_create(day_cont);
-      lv_label_set_text(date_label, date_buf);
-      lv_obj_set_style_text_font(date_label, &lv_font_montserrat_14, 0);
-      lv_obj_set_style_text_color(date_label, lv_color_hex(0x000000), 0);
-      // Check if forecast data is available for this day
-      bool has_forecast = (f_index >= 0 && f_index < 14);
-      if (has_forecast) {
-        // Weather image
-        lv_obj_t *forecast_img = lv_img_create(day_cont);
-        lv_img_set_src(forecast_img, getWeatherImage(forecast[f_index].weather_code));
-        lv_img_set_zoom(forecast_img, 102); // 50% of 204 for consistency
-        // Temperature
-        lv_obj_t *temp_l = lv_label_create(day_cont);
-        lv_label_set_text(temp_l, (String(forecast[f_index].temp_max + temp_adjust, 1) + "°C").c_str());
-        lv_obj_set_style_text_font(temp_l, &lv_font_montserrat_14, 0);
-        lv_obj_set_style_text_color(temp_l, lv_color_hex(0x000000), 0);
-      } else {
-        // Unknown weather image
-        lv_obj_t *forecast_img = lv_img_create(day_cont);
-        lv_img_set_src(forecast_img, getWeatherImage(999)); // Will default to Unknown
-        lv_img_set_zoom(forecast_img, 102); // Consistent with other images
-        // Placeholder temperature
-        lv_obj_t *temp_l = lv_label_create(day_cont);
-        lv_label_set_text(temp_l, "N/A");
-        lv_obj_set_style_text_font(temp_l, &lv_font_montserrat_14, 0);
-        lv_obj_set_style_text_color(temp_l, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_border_width(left_cont, 0, 0);
+    lv_obj_set_style_pad_all(left_cont, 0, 0);
+    char date_buf[20];
+    struct tm *d_tm = localtime(&cur_day);
+    strftime(date_buf, sizeof(date_buf), "%Y-%m-%d", d_tm);
+    lv_obj_t *date_label = lv_label_create(left_cont);
+    lv_label_set_text(date_label, date_buf);
+    lv_obj_set_style_text_font(date_label, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(date_label, lv_color_hex(0x000000), 0);
+    if (f_index >= 0 && f_index < 14) {
+      lv_obj_t *forecast_img = lv_img_create(left_cont);
+      lv_img_set_src(forecast_img, getWeatherImage(forecast[f_index].weather_code));
+      lv_img_set_zoom(forecast_img, isMultiDay ? 204 : 256);
+      lv_obj_t *temp_l = lv_label_create(left_cont);
+      lv_label_set_text(temp_l, (String(forecast[f_index].temp_max + temp_adjust, 1) + "°C").c_str());
+      lv_obj_set_style_text_font(temp_l, isMultiDay ? &lv_font_montserrat_14 : &lv_font_montserrat_14, 0);
+      lv_obj_set_style_text_color(temp_l, lv_color_hex(0x000000), 0);
+      if (!isMultiDay) {
+        lv_obj_t *right_cont = lv_obj_create(day_cont);
+        lv_obj_set_size(right_cont, 220, 120);
+        lv_obj_set_flex_flow(right_cont, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_flex_align(right_cont, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+        lv_obj_set_style_bg_opa(right_cont, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(right_cont, 0, 0);
+        lv_obj_set_style_pad_all(right_cont, 0, 0);
+        lv_obj_set_style_pad_row(right_cont, 5, 0);
+        String desc = getWeatherDescription(forecast[f_index].weather_code);
+        lv_obj_t *desc_l = lv_label_create(right_cont);
+        lv_label_set_text(desc_l, desc.c_str());
+        lv_obj_set_style_text_font(desc_l, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_color(desc_l, lv_color_hex(0x000000), 0);
+        lv_obj_t *precip_l = lv_label_create(right_cont);
+        lv_label_set_text(precip_l, ("Precipitation: " + String(forecast[f_index].precip_sum, 1) + " mm").c_str());
+        lv_obj_set_style_text_font(precip_l, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_color(precip_l, lv_color_hex(0x000000), 0);
+        lv_obj_t *wind_l = lv_label_create(right_cont);
+        lv_label_set_text(wind_l, ("Wind: " + String(round(forecast[f_index].wind_max)) + " km/h").c_str());
+        lv_obj_set_style_text_font(wind_l, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_color(wind_l, lv_color_hex(0x000000), 0);
+        lv_obj_t *hum_l = lv_label_create(right_cont);
+        lv_label_set_text(hum_l, ("Humidity: " + String(round(forecast[f_index].humidity_mean)) + "%").c_str());
+        lv_obj_set_style_text_font(hum_l, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_color(hum_l, lv_color_hex(0x000000), 0);
+        lv_obj_t *feel_l = lv_label_create(right_cont);
+        lv_label_set_text(feel_l, ("Feels like: " + String(forecast[f_index].apparent_max + temp_adjust, 1) + "°C").c_str());
+        lv_obj_set_style_text_font(feel_l, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_color(feel_l, lv_color_hex(0x000000), 0);
       }
+    } else {
+      lv_obj_t *no_forecast_label = lv_label_create(day_cont);
+      lv_label_set_text(no_forecast_label, "No forecast");
+      lv_obj_set_style_text_font(no_forecast_label, &lv_font_montserrat_14, 0);
+      lv_obj_set_style_text_color(no_forecast_label, lv_color_hex(0xFFFFFF), 0);
     }
   }
-  // Snooze button (conditionally shown)
   lv_obj_t *snooze_btn = lv_button_create(event_details_popup);
   lv_obj_align(snooze_btn, LV_ALIGN_BOTTOM_LEFT, 20, -20);
   lv_obj_set_size(snooze_btn, 120, 40);
@@ -3347,7 +2900,6 @@ void show_event_details(int index, bool isReminder) {
   if (!isReminder) {
     lv_obj_add_flag(snooze_btn, LV_OBJ_FLAG_HIDDEN);
   }
-  // Close/Cancel button
   lv_obj_t *close_btn = lv_button_create(event_details_popup);
   lv_obj_align(close_btn, LV_ALIGN_BOTTOM_RIGHT, -20, -20);
   lv_obj_set_size(close_btn, 120, 40);
@@ -3371,15 +2923,14 @@ void close_event_details_cb(lv_event_t *e) {
     event_details_popup = nullptr;
   }
 }
+
 void cancel_reminder_cb(lv_event_t *e) {
   int index = (intptr_t)lv_event_get_user_data(e);
   events[index].notified = true;
   if (debug == 1) Serial.printf("[DEBUG] Cancel reminder for event %d: set notified to true\n", index);
-  // Generate short key using hash
   String full_id = events[index].start + "_" + events[index].summary;
   unsigned long hash = hashString(full_id);
-  String base_key = "e" + String(hash % 100000000); // "e" + up to 8 digits (9 chars total)
-  // Save to preferences
+  String base_key = "e" + String(hash % 100000000);
   preferences.begin("event_states", false);
   preferences.putInt((base_key + "c").c_str(), events[index].reminder_count);
   preferences.putLong((base_key + "l").c_str(), events[index].last_reminder_time);
@@ -3387,14 +2938,16 @@ void cancel_reminder_cb(lv_event_t *e) {
   preferences.end();
   close_event_details_cb(e);
 }
+
 unsigned long hashString(const String& str) {
   unsigned long hash = 5381;
   for (size_t i = 0; i < str.length(); ++i) {
     int c = str[i];
-    hash = ((hash << 5) + hash) + c; /* hash * 33 + c */
+    hash = ((hash << 5) + hash) + c;
   }
   return hash;
 }
+
 void addEvent(JsonObject eventObj) {
   if (numEvents >= 300) {
     if (debug == 1) Serial.println("[APP] Event limit reached (300)");
@@ -3421,7 +2974,6 @@ void addEvent(JsonObject eventObj) {
     Serial.println(" Remind before: " + remind_before_str);
     Serial.println(" AllDay: " + String(events[numEvents].isAllDay ? "Yes" : "No"));
   }
-  // Parse remind_before
   int remind_before_minutes = 0;
   if (!remind_before_str.isEmpty()) {
     char unit = remind_before_str.charAt(remind_before_str.length() - 1);
@@ -3434,7 +2986,7 @@ void addEvent(JsonObject eventObj) {
     } else if (unit == 'd') {
       remind_before_minutes = value * 1440;
     } else {
-      remind_before_minutes = remind_before_str.toInt(); // fallback
+      remind_before_minutes = remind_before_str.toInt();
     }
   }
   events[numEvents].remind_before = remind_before_minutes;
@@ -3466,7 +3018,7 @@ void addEvent(JsonObject eventObj) {
   start_tm.tm_hour = startHour;
   start_tm.tm_min = startMin;
   start_tm.tm_sec = startSec;
-  start_tm.tm_isdst = -1; // Add this line to enable automatic DST detection
+  start_tm.tm_isdst = -1;
   struct tm end_tm = {0};
   end_tm.tm_year = endYear - 1900;
   end_tm.tm_mon = endMonth - 1;
@@ -3474,7 +3026,7 @@ void addEvent(JsonObject eventObj) {
   end_tm.tm_hour = endHour;
   end_tm.tm_min = endMin;
   end_tm.tm_sec = endSec;
-  end_tm.tm_isdst = -1; // Add this line to enable automatic DST detection
+  end_tm.tm_isdst = -1;
   time_t start_time = mktime(&start_tm);
   time_t end_time = mktime(&end_tm);
   if (start_time == -1 || end_time == -1) {
@@ -3493,11 +3045,9 @@ void addEvent(JsonObject eventObj) {
   if (debug == 1) Serial.println("[DEBUG] Event " + String(numEvents) + " local end: " + String(local_end_buf));
   events[numEvents].start_time = start_time;
   events[numEvents].end_time = end_time;
-  // Generate short key using hash
   String full_id = events[numEvents].start + "_" + events[numEvents].summary;
   unsigned long hash = hashString(full_id);
-  String base_key = "e" + String(hash % 100000000); // "e" + up to 8 digits (9 chars total)
-  // Load persisted states
+  String base_key = "e" + String(hash % 100000000);
   preferences.begin("event_states", false);
   events[numEvents].reminder_count = preferences.getInt((base_key + "c").c_str(), 0);
   events[numEvents].last_reminder_time = (time_t)preferences.getLong((base_key + "l").c_str(), 0);
@@ -3537,11 +3087,13 @@ void addEvent(JsonObject eventObj) {
   if (debug == 1) Serial.println("[APP] Event isToday: " + String(events[numEvents].isToday ? "Yes" : "No"));
   numEvents++;
 }
+
 void show_event_details_cb(lv_event_t *e) {
   lv_obj_t *target = (lv_obj_t*)lv_event_get_target(e);
   int index = (intptr_t)lv_obj_get_user_data(target);
   show_event_details(index, false);
 }
+
 void save_settings_cb(lv_event_t *e) {
   if (debug == 1) Serial.println("[APP] Settings save button clicked");
   SettingsUI *sui = (SettingsUI*)lv_event_get_user_data(e);
@@ -3553,7 +3105,6 @@ void save_settings_cb(lv_event_t *e) {
   username = String(lv_textarea_get_text(sui->username_ta));
   device_id = String(lv_textarea_get_text(sui->device_id_ta));
   temp_adjust = String(lv_textarea_get_text(sui->temp_adjust_ta)).toInt();
-  // Save parcelBox credentials
   if (!username.isEmpty() && !device_id.isEmpty()) {
     HTTPClient http;
     String url = "https://crontech.uk/api.php?parcelBox=" + URLEncode(apiCode) + "&parcel_box_username=" + URLEncode(username) + "&parcel_box_id=" + URLEncode(device_id);
@@ -3579,7 +3130,6 @@ void save_settings_cb(lv_event_t *e) {
     }
     http.end();
   }
-  // Save weather location
   if (!new_location.isEmpty()) {
     HTTPClient http;
     String url = "https://crontech.uk/api.php?weatherLocation=" + URLEncode(apiCode) + "&city_name=" + URLEncode(new_location);
@@ -3619,12 +3169,14 @@ void save_settings_cb(lv_event_t *e) {
   }
   delete sui;
 }
+
 void device_id_preview_cb(lv_event_t *e) {
   lv_obj_t *ta = (lv_obj_t*)lv_event_get_target(e);
   lv_obj_t *label = (lv_obj_t*)lv_event_get_user_data(e);
   const char *text = lv_textarea_get_text(ta);
   lv_label_set_text(label, text);
 }
+
 void fetchParcelBoxCredentials() {
   if (debug == 1) Serial.println("[APP] Fetching parcelbox credentials...");
   if (WiFi.status() != WL_CONNECTED) {
@@ -3658,7 +3210,7 @@ void fetchParcelBoxCredentials() {
   }
   http.end();
 }
-// New function to fetch bank holidays
+
 void fetchBankHolidays() {
   if (debug == 1) Serial.println("[APP] Fetching bank holidays...");
   if (WiFi.status() != WL_CONNECTED) {
@@ -3690,7 +3242,6 @@ void fetchBankHolidays() {
         holidays[numHolidays].month = m;
         holidays[numHolidays].day = d;
         holidays[numHolidays].title = title;
-        // Add to eventDates for highlighting if not already present
         bool exists = false;
         for (int j = 0; j < numEventDates; j++) {
           if (eventDates[j].year == y && eventDates[j].month == m && eventDates[j].day == d) {
@@ -3713,18 +3264,22 @@ void fetchBankHolidays() {
   }
   http.end();
 }
-// New function to fetch background filename from server
+
 void fetchBackgroundFilename() {
   if (debug == 1) Serial.println("[APP] Fetching background filename...");
   if (WiFi.status() != WL_CONNECTED) {
     if (debug == 1) Serial.println("[APP] WiFi not connected, skipping background filename fetch");
     return;
   }
+  WiFiClientSecure client;
+  client.setInsecure();
+  client.setTimeout(15000);
   HTTPClient http;
-  String url = "https://crontech.uk/background.php?background_img=" + apiCode;
-  http.begin(url);
+  String url = "https://crontech.uk/background.php?background_img=" + URLEncode(apiCode);
+  if (debug == 1) Serial.println("[APP] Fetching from URL: " + url);
+  http.begin(client, url);
+  http.setTimeout(15000);
   int httpCode = http.GET();
-
   if (httpCode == HTTP_CODE_OK) {
     String payload = http.getString();
     if (debug == 1) Serial.println("[APP] Background filename response: " + payload);
@@ -3732,40 +3287,66 @@ void fetchBackgroundFilename() {
     DeserializationError error = deserializeJson(doc, payload);
     if (!error) {
       backgroundFilename = doc["filename"].as<String>();
-      if (backgroundFilename == "null") backgroundFilename = "";
-      if (debug == 1) Serial.println("[APP] Fetched background filename: " + backgroundFilename);
+      if (backgroundFilename == "null" || backgroundFilename.isEmpty()) {
+        backgroundFilename = "";
+        if (bg_buffer) {
+          free(bg_buffer);
+          bg_buffer = nullptr;
+          if (debug == 1) Serial.println("[APP] Background buffer freed (no filename)");
+        }
+        if (bg_img) {
+          lv_obj_del(bg_img);
+          bg_img = nullptr;
+          if (debug == 1) Serial.println("[APP] Background image object deleted (no filename)");
+        }
+      } else {
+        if (debug == 1) Serial.println("[APP] Fetched background filename: " + backgroundFilename);
+      }
     } else {
-      if (debug == 1) Serial.println("[APP] JSON parsing failed: " + String(error.c_str()));
+      if (debug == 1) Serial.println("[APP] JSON parsing failed: " + String(error.c_str()) + ", Payload: " + payload);
     }
   } else {
-    if (debug == 1) Serial.println("[APP] HTTP request failed: " + String(httpCode));
+    String payload = http.getString();
+    if (debug == 1) Serial.println("[APP] HTTP request failed: Code=" + String(httpCode) + ", Response=" + payload);
   }
   http.end();
 }
-// New function to fetch and set background image if filename exists
+
 void fetchAndSetBackgroundImage() {
   if (backgroundFilename.isEmpty()) {
     if (debug == 1) Serial.println("[APP] No background filename, skipping image fetch");
     return;
   }
   if (debug == 1) Serial.println("[APP] Fetching background image: " + backgroundFilename);
+  WiFiClientSecure client;
+  client.setInsecure();
+  client.setTimeout(15000);
   HTTPClient http;
   String url = "https://crontech.uk/uploads/" + backgroundFilename;
-  http.begin(url);
+  if (debug == 1) Serial.println("[APP] Image download URL: " + url);
+  http.begin(client, url);
+  http.setTimeout(15000);
   int httpCode = http.GET();
   if (httpCode != HTTP_CODE_OK) {
-    if (debug == 1) Serial.println("[APP] Failed to download background image: HTTP " + String(httpCode));
+    String payload = http.getString();
+    if (debug == 1) Serial.println("[APP] Failed to download background image: HTTP " + String(httpCode) + ", Response=" + payload);
     http.end();
     return;
   }
   int contentLength = http.getSize();
-  const int expectedSize = 800 * 480 * 3;  // 1,152,000 bytes for RGB888
+  const int expectedSize = img_width * img_height * 2; // RGB565: 2 bytes per pixel
   if (contentLength != expectedSize) {
     if (debug == 1) Serial.println("[APP] Invalid background size: " + String(contentLength) + " bytes (expected " + String(expectedSize) + ")");
     http.end();
     return;
   }
   if (debug == 1) Serial.println("[APP] Background size validated: " + String(contentLength) + " bytes");
+  size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+  if (free_psram < (size_t)contentLength + 1024) {
+    if (debug == 1) Serial.println("[APP] Insufficient PSRAM for background image (" + String(free_psram) + " available, " + String(contentLength) + " needed)");
+    http.end();
+    return;
+  }
   uint8_t* imageBuffer = (uint8_t*)ps_malloc(contentLength);
   if (!imageBuffer) {
     if (debug == 1) Serial.println("[APP] Failed to allocate PSRAM for background image (" + String(contentLength) + " bytes)");
@@ -3780,8 +3361,10 @@ void fetchAndSetBackgroundImage() {
     if (available) {
       size_t read = stream->readBytes(imageBuffer + totalRead, min(available, (size_t)(contentLength - totalRead)));
       totalRead += read;
+      if (debug == 1) Serial.println("[APP] Downloaded " + String(totalRead) + "/" + String(contentLength) + " bytes");
+    } else {
+      delay(1);
     }
-    delay(1);
   }
   if (totalRead != contentLength) {
     if (debug == 1) Serial.println("[APP] Incomplete background image download: " + String(totalRead) + "/" + String(contentLength) + " bytes");
@@ -3790,29 +3373,46 @@ void fetchAndSetBackgroundImage() {
     return;
   }
   if (debug == 1) Serial.println("[APP] Download complete: " + String(totalRead) + " bytes");
-  // Delete previous background if exists
+  if (bg_buffer) {
+    free(bg_buffer);
+    bg_buffer = nullptr;
+    if (debug == 1) Serial.println("[APP] Old background buffer freed");
+  }
+  bg_buffer = imageBuffer;
+  bg_dsc.header.cf = LV_COLOR_FORMAT_RGB565;
+  bg_dsc.header.w = img_width;
+  bg_dsc.header.h = img_height;
+  bg_dsc.data_size = contentLength;
+  bg_dsc.data = bg_buffer;
+  setEventBackground();
+  if (debug == 1) Serial.println("[APP] Background image fetched and set on events box");
+  http.end();
+}
+
+void setEventBackground() {
+  if (!eventContainer || !bg_buffer) {
+    if (debug == 1) Serial.println("[APP] Skipping setEventBackground: container or buffer unavailable");
+    return;
+  }
   if (bg_img) {
     lv_obj_del(bg_img);
     bg_img = nullptr;
-    if (debug == 1) Serial.println("[APP] Previous background deleted");
+    if (debug == 1) Serial.println("[APP] Previous event background image deleted");
   }
-  // Setup LVGL image descriptor
-  lv_image_dsc_t img_dsc;
-  memset(&img_dsc, 0, sizeof(img_dsc));
-  img_dsc.header.cf = LV_COLOR_FORMAT_RGB888;
-  img_dsc.header.w = 800;
-  img_dsc.header.h = 480;
-  // Removed: always_zero and reserved (handled by memset in v9 bitfields)
-  img_dsc.data_size = contentLength;
-  img_dsc.data = imageBuffer;
-  // Create and set image
-  bg_img = lv_img_create(lv_scr_act());
-  lv_img_set_src(bg_img, &img_dsc);
-  lv_obj_set_size(bg_img, LV_PCT(100), LV_PCT(100));
+  bg_img = lv_img_create(eventContainer);
+  lv_img_set_src(bg_img, &bg_dsc);
+  int container_w = lv_obj_get_width(eventContainer);
+  int container_h = lv_obj_get_height(eventContainer);
+  int img_w = bg_dsc.header.w;
+  int img_h = bg_dsc.header.h;
+  uint32_t zoom_w = (uint32_t)256 * container_w / img_w;
+  uint32_t zoom_h = (uint32_t)256 * container_h / img_h;
+  uint32_t zoom = std::max(zoom_w, zoom_h);
+  lv_img_set_zoom(bg_img, zoom);
+  lv_obj_set_size(bg_img, (int)((uint64_t)img_w * zoom / 256), (int)((uint64_t)img_h * zoom / 256));
   lv_obj_align(bg_img, LV_ALIGN_CENTER, 0, 0);
   lv_obj_move_background(bg_img);
-  lv_obj_invalidate(lv_scr_act());  // Force redraw
-  if (debug == 1) Serial.println("[APP] Background image set successfully via LVGL");
-  http.end();
-  // Note: imageBuffer remains allocated as LVGL owns it; free on next update or reboot
+  lv_obj_invalidate(eventContainer);
+  lv_refr_now(NULL);
+  if (debug == 1) Serial.println("[APP] Event box background image object set with cover mode");
 }

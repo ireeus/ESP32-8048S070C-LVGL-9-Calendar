@@ -6,7 +6,6 @@
 #include <Preferences.h>
 #include <Update.h>
 #include <WiFiClientSecure.h>
-#include <esp_system.h>  // For ESP.restart()
 extern const lv_font_t technology_98;
 // Build version
 const String build_version = "1.4";
@@ -64,10 +63,6 @@ void fetchParcelBoxCredentials(); // New function to fetch parcelbox credentials
 void fetchBankHolidays(); // New function to fetch bank holidays
 void updateHolidayLabel(); // New function to update holiday label
 void notification_toggle_cb(lv_timer_t *timer);
-
-
-
-
 void blink_time_update_cb(lv_timer_t *timer) {
   lv_obj_t *colon = (lv_obj_t *)lv_timer_get_user_data(timer);
   if (!colon) return;
@@ -128,13 +123,12 @@ static bool notification_visible = false;
 static lv_timer_t *notification_timer = NULL;
 static lv_timer_t *blink_timer = NULL;
 static lv_obj_t *bg_img = nullptr;  // Global for background image
-static int g_ui_darkness = 0; // Global darkness level (0: light, 100: dark)
-static int temp_adjust = 0;// Global temperature adjustment
-static lv_obj_t *build_version_label = nullptr;// Global variable for build version label
-static unsigned long lastHolidayUpdate = 0;
-const unsigned long holidayUpdateInterval = 2592000000UL; // 30 days in milliseconds
-
-
+// Global darkness level (0: light, 100: dark)
+static int g_ui_darkness = 0;
+// Global temperature adjustment
+static int temp_adjust = 0;
+// Global variable for build version label
+static lv_obj_t *build_version_label = nullptr;
 // Structure to hold new event UI elements
 struct NewEventUI {
   lv_obj_t *title_ta;
@@ -259,14 +253,12 @@ struct CurrentWeather {
   int weather_code;
   float wind_speed_10m;
   int wind_direction_10m;
-  float surface_pressure;  // NEW: Atmospheric pressure in hPa
 };
 CurrentWeather current_weather;
 struct DailyWeather {
   int weather_code;
   float temp_max;
   float apparent_max;
-  float temp_min;  // NEW: Added for night/minimum temperature
   float precip_sum;
   float wind_max;
   float humidity_mean;
@@ -622,39 +614,34 @@ void fetchWeather() {
     if (debug == 1) Serial.println("[APP] Failed to geocode location");
     return;
   }
-  
-  
-// Get current weather and minutely_15 forecast from Open-Meteo (UPDATED: Added temperature_2m_min and surface_pressure)
-HTTPClient http;
-String url = "https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lon + 
-             "&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m,wind_direction_10m,surface_pressure" +  // UPDATED: Added surface_pressure
-             "&minutely_15=temperature_2m,relative_humidity_2m,weather_code,precipitation,wind_speed_10m" +  // NEW: 15-min data for ~half-hour forecast
-             "&daily=weather_code,temperature_2m_max,temperature_2m_min,apparent_temperature_max,precipitation_sum,wind_speed_10m_max,relative_humidity_2m_mean" +  // UPDATED: Added temperature_2m_min
-             "&forecast_minutely_15=96" +  // NEW: 96 timesteps = 24 hours of 15-min data
-             "&timezone=auto&forecast_days=14";  // UPDATED: forecast_days=14 for consistency
-http.begin(url);
-int httpCode = http.GET();
-if (httpCode == HTTP_CODE_OK) {
-  String payload = http.getString();
-  JsonDocument doc;
-  DeserializationError error = deserializeJson(doc, payload);
-  if (error) {
-    if (debug == 1) Serial.println("[APP] Weather JSON parsing failed: " + String(error.c_str()));
-    return;
-  }
-  JsonObject current = doc["current"];
-  current_weather.temperature_2m = current["temperature_2m"].as<float>();
-  current_weather.relative_humidity_2m = current["relative_humidity_2m"].as<float>();
-  current_weather.apparent_temperature = current["apparent_temperature"].as<float>();
-  current_weather.precipitation = current["precipitation"].as<float>();
-  current_weather.weather_code = current["weather_code"].as<int>();
-  current_weather.wind_speed_10m = current["wind_speed_10m"].as<float>();
-  current_weather.wind_direction_10m = current["wind_direction_10m"].as<int>();
-  current_weather.surface_pressure = current["surface_pressure"].as<float>();  // NEW: Parse surface pressure
-  if (debug == 1) Serial.println("[APP] Fetched current weather including pressure: " + String(current_weather.surface_pressure) + " hPa");
+  // Get current weather and minutely_15 forecast from Open-Meteo (NEW: Added minutely_15 for next half-hour approximation)
+  HTTPClient http;
+  String url = "https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lon + 
+               "&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m,wind_direction_10m" +
+               "&minutely_15=temperature_2m,relative_humidity_2m,weather_code,precipitation,wind_speed_10m" +  // NEW: 15-min data for ~half-hour forecast
+               "&daily=weather_code,temperature_2m_max,apparent_temperature_max,precipitation_sum,wind_speed_10m_max,relative_humidity_2m_mean" +
+               "&forecast_minutely_15=96" +  // NEW: 96 timesteps = 24 hours of 15-min data
+               "&timezone=auto&forecast_days=14";
+  http.begin(url);
+  int httpCode = http.GET();
+  if (httpCode == HTTP_CODE_OK) {
+    String payload = http.getString();
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, payload);
+    if (error) {
+      if (debug == 1) Serial.println("[APP] Weather JSON parsing failed: " + String(error.c_str()));
+      return;
+    }
+    JsonObject current = doc["current"];
+    current_weather.temperature_2m = current["temperature_2m"].as<float>();
+    current_weather.relative_humidity_2m = current["relative_humidity_2m"].as<float>();
+    current_weather.apparent_temperature = current["apparent_temperature"].as<float>();
+    current_weather.precipitation = current["precipitation"].as<float>();
+    current_weather.weather_code = current["weather_code"].as<int>();
+    current_weather.wind_speed_10m = current["wind_speed_10m"].as<float>();
+    current_weather.wind_direction_10m = current["wind_direction_10m"].as<int>();
+    if (debug == 1) Serial.println("[APP] Fetched current weather");
     
-	
-	
     // NEW: Parse minutely_15 for next ~30 min weather code
     JsonObject minutely15 = doc["minutely_15"];
     if (!minutely15.isNull()) {
@@ -693,7 +680,6 @@ if (httpCode == HTTP_CODE_OK) {
     JsonObject daily = doc["daily"];
     JsonArray weather_codes = daily["weather_code"];
     JsonArray temp_max = daily["temperature_2m_max"];
-    JsonArray temp_min = daily["temperature_2m_min"];  // NEW: Parse min temps
     JsonArray apparent_max = daily["apparent_temperature_max"];
     JsonArray precip_sum = daily["precipitation_sum"];
     JsonArray wind_max = daily["wind_speed_10m_max"];
@@ -701,13 +687,12 @@ if (httpCode == HTTP_CODE_OK) {
     for (int i = 0; i < 14; i++) { // Increased from 7 to 14 to process and store all requested days
       forecast[i].weather_code = weather_codes[i].as<int>();
       forecast[i].temp_max = temp_max[i].as<float>();
-      forecast[i].temp_min = temp_min[i].as<float>();  // NEW: Store min temp
       forecast[i].apparent_max = apparent_max[i].as<float>();
       forecast[i].precip_sum = precip_sum[i].as<float>();
       forecast[i].wind_max = wind_max[i].as<float>();
       forecast[i].humidity_mean = humidity_mean[i].as<float>();
     }
-    if (debug == 1) Serial.println("[APP] Fetched 14-day forecast with min/max temps"); // Updated log message
+    if (debug == 1) Serial.println("[APP] Fetched 14-day forecast weather codes"); // Updated log message
   } else {
     if (debug == 1) Serial.println("[APP] Weather request failed: " + String(httpCode));
   }
@@ -805,7 +790,7 @@ void updateWeatherDisplay() {
   lv_obj_set_style_border_width(buttons_cont, 0, 0);
   lv_obj_set_style_pad_all(buttons_cont, 0, 0);
   lv_obj_set_scrollbar_mode(buttons_cont, LV_SCROLLBAR_MODE_OFF);
-  // Humidity (UPDATED: Dark text color)
+  // Humidity
   lv_obj_t *hum_cont = lv_obj_create(buttons_cont);
   lv_obj_set_size(hum_cont, 108, 55);
   lv_obj_set_style_bg_color(hum_cont, lv_color_hex(0x00b894), 0);
@@ -815,10 +800,10 @@ void updateWeatherDisplay() {
   lv_obj_t *hum_val = lv_label_create(hum_cont);
   lv_label_set_text(hum_val, ("Hum\n" + String((int)current_weather.relative_humidity_2m) + "%").c_str());
   lv_obj_set_style_text_font(hum_val, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(hum_val, lv_color_hex(0x000000), 0);  // UPDATED: Dark color
+  lv_obj_set_style_text_color(hum_val, lv_color_hex(0xFFFFFF), 0);
   lv_obj_set_scrollbar_mode(hum_val, LV_SCROLLBAR_MODE_OFF);
   lv_obj_center(hum_val);
-  // Wind (UPDATED: Dark text color)
+  // Wind
   lv_obj_t *wind_cont = lv_obj_create(buttons_cont);
   lv_obj_set_size(wind_cont, 108, 50);
   lv_obj_set_style_bg_color(wind_cont, lv_color_hex(0xfd79a8), 0);
@@ -828,23 +813,23 @@ void updateWeatherDisplay() {
   lv_obj_t *wind_val = lv_label_create(wind_cont);
   lv_label_set_text(wind_val, ("Wind\n" + String((int)current_weather.wind_speed_10m) + " km/h").c_str());
   lv_obj_set_style_text_font(wind_val, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(wind_val, lv_color_hex(0x000000), 0);  // UPDATED: Dark color
+  lv_obj_set_style_text_color(wind_val, lv_color_hex(0xFFFFFF), 0);
   lv_obj_set_scrollbar_mode(wind_val, LV_SCROLLBAR_MODE_OFF);
   lv_obj_center(wind_val);
-// Pressure (REPLACED: Atmospheric pressure in hPa instead of precipitation)
-lv_obj_t *pressure_cont = lv_obj_create(buttons_cont);
-lv_obj_set_size(pressure_cont, 108, 50);
-lv_obj_set_style_bg_color(pressure_cont, lv_color_hex(0x55a3ff), 0);
-lv_obj_set_style_bg_grad_color(pressure_cont, lv_color_hex(0x007acc), 0);
-lv_obj_set_style_bg_grad_dir(pressure_cont, LV_GRAD_DIR_HOR, 0);
-lv_obj_set_style_radius(pressure_cont, 10, 0);
-lv_obj_t *pressure_val = lv_label_create(pressure_cont);
-lv_label_set_text(pressure_val, ("Pressure\n" + String((int)current_weather.surface_pressure) + " hPa").c_str());
-lv_obj_set_style_text_font(pressure_val, &lv_font_montserrat_14, 0);
-lv_obj_set_style_text_color(pressure_val, lv_color_hex(0x000000), 0);  // Dark color
-lv_obj_set_scrollbar_mode(pressure_val, LV_SCROLLBAR_MODE_OFF);
-lv_obj_center(pressure_val);
-  // Forecast container (UPDATED: 7-day daily forecast with max/min temperatures)
+  // Precip
+  lv_obj_t *precip_cont = lv_obj_create(buttons_cont);
+  lv_obj_set_size(precip_cont, 108, 50);
+  lv_obj_set_style_bg_color(precip_cont, lv_color_hex(0x55a3ff), 0);
+  lv_obj_set_style_bg_grad_color(precip_cont, lv_color_hex(0x007acc), 0);
+  lv_obj_set_style_bg_grad_dir(precip_cont, LV_GRAD_DIR_HOR, 0);
+  lv_obj_set_style_radius(precip_cont, 10, 0);
+  lv_obj_t *precip_val = lv_label_create(precip_cont);
+  lv_label_set_text(precip_val, ("Precip\n" + String((int)current_weather.precipitation) + " mm").c_str());
+  lv_obj_set_style_text_font(precip_val, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(precip_val, lv_color_hex(0xFFFFFF), 0);
+  lv_obj_set_scrollbar_mode(precip_val, LV_SCROLLBAR_MODE_OFF);
+  lv_obj_center(precip_val);
+  // Forecast container (UNCHANGED: 7-day daily forecast)
   lv_obj_t *forecast_cont = lv_obj_create(weatherContainer);
   lv_obj_set_size(forecast_cont, 350, 80);
   lv_obj_align(forecast_cont, LV_ALIGN_CENTER, 0, 90);
@@ -877,9 +862,7 @@ lv_obj_center(pressure_val);
     lv_img_set_src(forecast_img, getWeatherImage(forecast[i].weather_code));
     lv_img_set_zoom(forecast_img, 128);
     lv_obj_t *temp_label = lv_label_create(day_cont);
-    // UPDATED: Format as "max°/min°" (e.g., "7°/-1°")
-    String temp_text = String(forecast[i].temp_max + temp_adjust, 0) + "°/" + String(forecast[i].temp_min + temp_adjust, 0) + "°";
-    lv_label_set_text(temp_label, temp_text.c_str());
+    lv_label_set_text(temp_label, (String(forecast[i].temp_max + temp_adjust, 0) + "°C").c_str());
     lv_obj_set_style_text_font(temp_label, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(temp_label, temp_text_color, 0);
     lv_obj_set_scrollbar_mode(day_cont, LV_SCROLLBAR_MODE_OFF);
@@ -2284,43 +2267,19 @@ void updateHolidayLabel() {
   }
   int year = showed->year;
   int month = showed->month;
+  String h_str = "Bank Holidays: ";
   bool has_holiday = false;
-  String content_str = "";
   for (int i = 0; i < numHolidays; i++) {
     if (holidays[i].year == year && holidays[i].month == month) {
       has_holiday = true;
-      String processed_title = holidays[i].title;
-      processed_title.replace("'", " ");  // Replace apostrophe with space to avoid glyph issues
-      if (content_str != "") content_str += ", ";
-      content_str += processed_title + " (" + String(holidays[i].day) + ")";
+      if (h_str != "Bank Holidays: ") h_str += ", ";
+      h_str += holidays[i].title + " (" + String(holidays[i].day) + ")";
     }
   }
-
-  // Enable markup recoloring on the label
-  lv_label_set_recolor(holiday_label, true);
-
-  // Configure for full visibility: full width, left alignment, and wrapping
-  lv_obj_set_width(holiday_label, LV_PCT(100));
-  lv_obj_set_style_text_align(holiday_label, LV_TEXT_ALIGN_LEFT, 0);
-  lv_label_set_long_mode(holiday_label, LV_LABEL_LONG_WRAP);
-
-  String full_text;
-  if (!has_holiday) {
-    // Green markup for the entire no-holidays message
-    full_text = String("#05750a No bank holidays this month #");
-  } else {
-    // Orange markup for prefix, maroon for content
-    full_text = String("#050975 Bank Holidays: # #a8020a ") + content_str + " #";
-  }
-
-  // Set the marked-up text
-  lv_label_set_text(holiday_label, full_text.c_str());
-
-  // Invalidate for redraw
+  if (!has_holiday) h_str = "No bank holidays this month";
+  lv_label_set_text(holiday_label, h_str.c_str());
   lv_obj_invalidate(lv_scr_act());
-  if (debug == 1) Serial.println("[APP] Holiday label updated with markup: " + full_text);
 }
-
 void checkFirmwareUpdate() {
   if (debug == 1) Serial.println("[OTA] Starting firmware update check...");
   printMemoryUsage();
@@ -2515,10 +2474,8 @@ void prev_month_cb(lv_event_t *e) {
   lv_calendar_set_showed_date(calendar, showed_year, showed_month);
   rearrange_calendar_parts(calendar);
   updateMonthLabel(calendar);
-  fetchBankHolidays();
   updateHolidayLabel();
   update_today_highlight(calendar);
-  
 }
 void next_month_cb(lv_event_t *e) {
   const lv_calendar_date_t * showed = lv_calendar_get_showed_date(calendar);
@@ -2532,7 +2489,6 @@ void next_month_cb(lv_event_t *e) {
   lv_calendar_set_showed_date(calendar, showed_year, showed_month);
   rearrange_calendar_parts(calendar);
   updateMonthLabel(calendar);
-  fetchBankHolidays();
   updateHolidayLabel();
   update_today_highlight(calendar);
 }
@@ -2932,11 +2888,7 @@ void setup() {
           setup_display();
           show_location_screen();
         } else {
-			setup_calendar();
-			fetchBankHolidays();
-			updateHolidayLabel();
-			lastHolidayUpdate = millis();
-		  
+          setup_calendar();
         }
       }
     } else {
@@ -2955,23 +2907,6 @@ void loop() {
     // Normal LVGL update cycle
     loop_display();
     lv_tick_inc(5);
-    
-    // Scheduled restart logic: Trigger at midnight on Sundays or the 1st of each month
-    static int prev_sec = -1;  // Track previous second to avoid multi-trigger at exact midnight
-    time_t now_t;
-    time(&now_t);
-    struct tm *timeinfo = localtime(&now_t);
-    if (timeinfo->tm_hour == 0 && timeinfo->tm_min == 0 && timeinfo->tm_sec == 0 &&
-        (timeinfo->tm_wday == 0 || timeinfo->tm_mday == 1) &&
-        prev_sec != 0) {  // Ensure it's the transition to midnight
-      if (debug == 1) {
-        String msg = String("[APP] Scheduled restart triggered: ") + (timeinfo->tm_wday == 0 ? "Sunday midnight" : "1st of month midnight");
-        Serial.println(msg);
-      }
-      ESP.restart();
-    }
-    prev_sec = timeinfo->tm_sec;  // Update tracker
-    
     delay(5);
   } else {
     // OTA mode: Skip LVGL, handle OTA periodically (though blocking in this case)
@@ -3049,13 +2984,7 @@ void loop() {
     fetchAndSetBackgroundImage();
     lastBackgroundUpdate = currentTime;
   }
-  if (currentTime - lastHolidayUpdate >= holidayUpdateInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
-  fetchBankHolidays();
-  updateHolidayLabel();
-  lastHolidayUpdate = currentTime;
 }
-}
-
 void show_event_details(int index, bool isReminder) {
   if (event_details_popup) {
     return; // Avoid multiple popups
@@ -3186,7 +3115,7 @@ void show_event_details(int index, bool isReminder) {
     int f_index = (int)((event_day - today_start) / 86400);
     bool has_forecast = (f_index >= 0 && f_index < 14);
 
-    // Left: Weather icon and temperatures (UPDATED: Added night/min temp)
+    // Left: Weather icon and temperature
     lv_obj_t *left_cont = lv_obj_create(weather_cont);
     lv_obj_set_size(left_cont, 200, 120);
     lv_obj_set_flex_flow(left_cont, LV_FLEX_FLOW_COLUMN);
@@ -3202,29 +3131,18 @@ void show_event_details(int index, bool isReminder) {
       lv_img_set_src(weather_img, getWeatherImage(999)); // Unknown
     }
     lv_img_set_zoom(weather_img, 150); // Slightly larger for single-day
-    lv_obj_align(weather_img, LV_ALIGN_CENTER, 0, -40);  // UPDATED: Adjusted for stacked temps
+    lv_obj_align(weather_img, LV_ALIGN_CENTER, 0, -20);
 
-    // Max temperature label
-    lv_obj_t *temp_max_label = lv_label_create(left_cont);
+    // Temperature label
+    lv_obj_t *temp_label = lv_label_create(left_cont);
     if (has_forecast) {
-      lv_label_set_text(temp_max_label, (String(forecast[f_index].temp_max + temp_adjust, 1) + "°C").c_str());
+      lv_label_set_text(temp_label, (String(forecast[f_index].temp_max + temp_adjust, 1) + "°C").c_str());
     } else {
-      lv_label_set_text(temp_max_label, "N/A");
+      lv_label_set_text(temp_label, "N/A");
     }
-    lv_obj_set_style_text_font(temp_max_label, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(temp_max_label, lv_color_hex(0x000000), 0);
-    lv_obj_align(temp_max_label, LV_ALIGN_CENTER, 0, 0);  // Centered horizontally
-
-    // NEW: Min (night) temperature label below max
-    lv_obj_t *temp_min_label = lv_label_create(left_cont);
-    if (has_forecast) {
-      lv_label_set_text(temp_min_label, (String(forecast[f_index].temp_min + temp_adjust, 1) + "°C").c_str());
-      lv_obj_set_style_text_font(temp_min_label, &lv_font_montserrat_14, 0);  // Slightly smaller font for min
-      lv_obj_set_style_text_color(temp_min_label, lv_color_hex(0x666666), 0);  // Gray for secondary info
-    } else {
-      lv_label_set_text(temp_min_label, "N/A");
-    }
-    lv_obj_align_to(temp_min_label, temp_max_label, LV_ALIGN_OUT_BOTTOM_MID, 0, -5);  // Stacked below max
+    lv_obj_set_style_text_font(temp_label, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(temp_label, lv_color_hex(0x000000), 0);
+    lv_obj_align(temp_label, LV_ALIGN_CENTER, 0, 20);
 
     // Right: Conditions (description, humidity, feel like, precip, wind)
     lv_obj_t *right_cont = lv_obj_create(weather_cont);
@@ -3363,7 +3281,6 @@ void show_event_details(int index, bool isReminder) {
   lv_obj_center(close_label);
   lv_obj_set_style_text_font(close_label, &lv_font_montserrat_14, 0);
 }
-
 void close_event_details_cb(lv_event_t *e) {
   if (event_details_popup) {
     lv_obj_add_flag(event_details_popup, LV_OBJ_FLAG_HIDDEN);

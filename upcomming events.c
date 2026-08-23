@@ -6,17 +6,15 @@
 #include <Preferences.h>
 #include <Update.h>
 #include <WiFiClientSecure.h>
-#include <esp_system.h>  // For ESP.restart()
 extern const lv_font_t technology_98;
 // Build version
 const String build_version = "1.4";
-int debug =0; // Change to 1 to enable serial prints
+int debug =1; // Change to 1 to enable serial prints
 // Firmware check interval variable
 const unsigned long firmwareCheckInterval = 100000UL; // 5 minutes in milliseconds
 // Forward declarations
 void fetchEvents();
 void updateEventDisplay(lv_obj_t *calendar);
-void blink_time_update_cb(lv_timer_t *timer);
 void fetchWeather();
 void updateWeatherDisplay();
 void wifi_connect_cb(lv_event_t *e);
@@ -64,39 +62,6 @@ void fetchParcelBoxCredentials(); // New function to fetch parcelbox credentials
 void fetchBankHolidays(); // New function to fetch bank holidays
 void updateHolidayLabel(); // New function to update holiday label
 void notification_toggle_cb(lv_timer_t *timer);
-
-
-
-
-void blink_time_update_cb(lv_timer_t *timer) {
-  lv_obj_t *colon = (lv_obj_t *)lv_timer_get_user_data(timer);
-  if (!colon) return;
-
-  lv_obj_t *parent = lv_obj_get_parent(colon);
-  if (!parent) return;
-
-  // Access siblings by creation order (0: hours, 1: colon, 2: minutes)
-  lv_obj_t *hours = lv_obj_get_child(parent, 0);
-  lv_obj_t *minutes = lv_obj_get_child(parent, 2);
-  if (!hours || !minutes) return;
-
-  // Toggle colon visibility (1s on, 1s off)
-  static bool visible = true;
-  lv_obj_set_style_text_opa(colon, visible ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
-  visible = !visible;
-
-  // Update time display
-  time_t now_t;
-  time(&now_t);
-  struct tm *timeinfo = localtime(&now_t);
-  char hours_buf[3];
-  strftime(hours_buf, sizeof(hours_buf), "%H", timeinfo);
-  lv_label_set_text(hours, hours_buf);
-
-  char mins_buf[3];
-  strftime(mins_buf, sizeof(mins_buf), "%M", timeinfo);
-  lv_label_set_text(minutes, mins_buf);
-}
 void fetchBackgroundFilename(); // New function to fetch background filename from server
 void fetchAndSetBackgroundImage(); // New function to download and set background image
 void fetchWeatherLocation();// forward declaration for new function
@@ -126,15 +91,13 @@ static lv_obj_t *notification_img = nullptr; // New: Object for the notification
 static lv_obj_t *wifi_icon = nullptr; // New: Object for the WiFi signal icon
 static bool notification_visible = false;
 static lv_timer_t *notification_timer = NULL;
-static lv_timer_t *blink_timer = NULL;
 static lv_obj_t *bg_img = nullptr;  // Global for background image
-static int g_ui_darkness = 0; // Global darkness level (0: light, 100: dark)
-static int temp_adjust = 0;// Global temperature adjustment
-static lv_obj_t *build_version_label = nullptr;// Global variable for build version label
-static unsigned long lastHolidayUpdate = 0;
-const unsigned long holidayUpdateInterval = 2592000000UL; // 30 days in milliseconds
-
-
+// Global darkness level (0: light, 100: dark)
+static int g_ui_darkness = 0;
+// Global temperature adjustment
+static int temp_adjust = 0;
+// Global variable for build version label
+static lv_obj_t *build_version_label = nullptr;
 // Structure to hold new event UI elements
 struct NewEventUI {
   lv_obj_t *title_ta;
@@ -151,11 +114,6 @@ struct NewEventUI {
   lv_obj_t *end_min_ta;
   lv_obj_t *remind_before_ta;
 };
-// New: Struct for next half-hour weather (only code needed for condition)
-struct NextWeather {
-  int weather_code;
-};
-NextWeather next_weather;
 // Structure to hold settings UI elements
 struct SettingsUI {
   lv_obj_t *location_ta; // For weather location (city name)
@@ -199,6 +157,8 @@ Holiday holidays[100];
 int numHolidays = 0;
 // Time zone for London (BST/GMT)
 const char* ntpServer = "pool.ntp.org";
+const long gmtOffset_sec = 0;
+const int daylightOffset_sec = 3600;
 // WiFi and API code
 String ssid;
 String password;
@@ -259,14 +219,12 @@ struct CurrentWeather {
   int weather_code;
   float wind_speed_10m;
   int wind_direction_10m;
-  float surface_pressure;  // NEW: Atmospheric pressure in hPa
 };
 CurrentWeather current_weather;
 struct DailyWeather {
   int weather_code;
   float temp_max;
   float apparent_max;
-  float temp_min;  // NEW: Added for night/minimum temperature
   float precip_sum;
   float wind_max;
   float humidity_mean;
@@ -622,78 +580,31 @@ void fetchWeather() {
     if (debug == 1) Serial.println("[APP] Failed to geocode location");
     return;
   }
-  
-  
-// Get current weather and minutely_15 forecast from Open-Meteo (UPDATED: Added temperature_2m_min and surface_pressure)
-HTTPClient http;
-String url = "https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lon + 
-             "&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m,wind_direction_10m,surface_pressure" +  // UPDATED: Added surface_pressure
-             "&minutely_15=temperature_2m,relative_humidity_2m,weather_code,precipitation,wind_speed_10m" +  // NEW: 15-min data for ~half-hour forecast
-             "&daily=weather_code,temperature_2m_max,temperature_2m_min,apparent_temperature_max,precipitation_sum,wind_speed_10m_max,relative_humidity_2m_mean" +  // UPDATED: Added temperature_2m_min
-             "&forecast_minutely_15=96" +  // NEW: 96 timesteps = 24 hours of 15-min data
-             "&timezone=auto&forecast_days=14";  // UPDATED: forecast_days=14 for consistency
-http.begin(url);
-int httpCode = http.GET();
-if (httpCode == HTTP_CODE_OK) {
-  String payload = http.getString();
-  JsonDocument doc;
-  DeserializationError error = deserializeJson(doc, payload);
-  if (error) {
-    if (debug == 1) Serial.println("[APP] Weather JSON parsing failed: " + String(error.c_str()));
-    return;
-  }
-  JsonObject current = doc["current"];
-  current_weather.temperature_2m = current["temperature_2m"].as<float>();
-  current_weather.relative_humidity_2m = current["relative_humidity_2m"].as<float>();
-  current_weather.apparent_temperature = current["apparent_temperature"].as<float>();
-  current_weather.precipitation = current["precipitation"].as<float>();
-  current_weather.weather_code = current["weather_code"].as<int>();
-  current_weather.wind_speed_10m = current["wind_speed_10m"].as<float>();
-  current_weather.wind_direction_10m = current["wind_direction_10m"].as<int>();
-  current_weather.surface_pressure = current["surface_pressure"].as<float>();  // NEW: Parse surface pressure
-  if (debug == 1) Serial.println("[APP] Fetched current weather including pressure: " + String(current_weather.surface_pressure) + " hPa");
-    
-	
-	
-    // NEW: Parse minutely_15 for next ~30 min weather code
-    JsonObject minutely15 = doc["minutely_15"];
-    if (!minutely15.isNull()) {
-      JsonArray m_time = minutely15["time"];
-      JsonArray m_code = minutely15["weather_code"];
-      time_t now_t;
-      time(&now_t);
-      struct tm target_tm = *localtime(&now_t);
-      target_tm.tm_min += 30;
-      target_tm.tm_sec = 0;
-      time_t target_time = mktime(&target_tm);  // Normalize to next half-hour
-      int next_index = -1;
-      time_t closest_time = 0;
-      for (size_t i = 0; i < m_time.size(); ++i) {
-        const char* time_str = m_time[i].as<const char*>();
-        struct tm parse_tm = {0};
-        if (strptime(time_str, "%Y-%m-%dT%H:%M", &parse_tm) != NULL) {
-          parse_tm.tm_sec = 0;
-          time_t parse_time = mktime(&parse_tm);
-          if (parse_time >= target_time && (next_index == -1 || parse_time < closest_time)) {
-            next_index = i;
-            closest_time = parse_time;
-          }
-        }
-      }
-      if (next_index != -1) {
-        next_weather.weather_code = m_code[next_index].as<int>();
-        if (debug == 1) Serial.println("[APP] Next ~30 min weather code: " + String(next_weather.weather_code));
-      } else {
-        next_weather.weather_code = current_weather.weather_code;  // Fallback
-      }
-    } else {
-      next_weather.weather_code = current_weather.weather_code;  // Fallback if no minutely data
+  // Get current weather from Open-Meteo
+  HTTPClient http;
+  String url = "https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lon + "&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m,wind_direction_10m&daily=weather_code,temperature_2m_max,apparent_temperature_max,precipitation_sum,wind_speed_10m_max,relative_humidity_2m_mean&timezone=auto&forecast_days=14";
+  http.begin(url);
+  int httpCode = http.GET();
+  if (httpCode == HTTP_CODE_OK) {
+    String payload = http.getString();
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, payload);
+    if (error) {
+      if (debug == 1) Serial.println("[APP] Weather JSON parsing failed: " + String(error.c_str()));
+      return;
     }
-    
+    JsonObject current = doc["current"];
+    current_weather.temperature_2m = current["temperature_2m"].as<float>();
+    current_weather.relative_humidity_2m = current["relative_humidity_2m"].as<float>();
+    current_weather.apparent_temperature = current["apparent_temperature"].as<float>();
+    current_weather.precipitation = current["precipitation"].as<float>();
+    current_weather.weather_code = current["weather_code"].as<int>();
+    current_weather.wind_speed_10m = current["wind_speed_10m"].as<float>();
+    current_weather.wind_direction_10m = current["wind_direction_10m"].as<int>();
+    if (debug == 1) Serial.println("[APP] Fetched current weather");
     JsonObject daily = doc["daily"];
     JsonArray weather_codes = daily["weather_code"];
     JsonArray temp_max = daily["temperature_2m_max"];
-    JsonArray temp_min = daily["temperature_2m_min"];  // NEW: Parse min temps
     JsonArray apparent_max = daily["apparent_temperature_max"];
     JsonArray precip_sum = daily["precipitation_sum"];
     JsonArray wind_max = daily["wind_speed_10m_max"];
@@ -701,18 +612,17 @@ if (httpCode == HTTP_CODE_OK) {
     for (int i = 0; i < 14; i++) { // Increased from 7 to 14 to process and store all requested days
       forecast[i].weather_code = weather_codes[i].as<int>();
       forecast[i].temp_max = temp_max[i].as<float>();
-      forecast[i].temp_min = temp_min[i].as<float>();  // NEW: Store min temp
       forecast[i].apparent_max = apparent_max[i].as<float>();
       forecast[i].precip_sum = precip_sum[i].as<float>();
       forecast[i].wind_max = wind_max[i].as<float>();
       forecast[i].humidity_mean = humidity_mean[i].as<float>();
     }
-    if (debug == 1) Serial.println("[APP] Fetched 14-day forecast with min/max temps"); // Updated log message
+    if (debug == 1) Serial.println("[APP] Fetched 14-day forecast weather codes"); // Updated log message
   } else {
     if (debug == 1) Serial.println("[APP] Weather request failed: " + String(httpCode));
   }
   http.end();
-  // Fetch air quality (unchanged)
+  // Fetch air quality
   HTTPClient http_aq;
   String aq_url = "https://air-quality-api.open-meteo.com/v1/air-quality?latitude=" + lat + "&longitude=" + lon + "&current=european_aqi&timezone=auto";
   http_aq.begin(aq_url);
@@ -732,7 +642,6 @@ if (httpCode == HTTP_CODE_OK) {
   }
   http_aq.end();
 }
-
 void updateWeatherDisplay() {
   if (debug == 1) Serial.println("[APP] Updating weather display...");
   if (!weatherContainer) {
@@ -757,30 +666,30 @@ void updateWeatherDisplay() {
   lv_obj_set_style_bg_color(weatherContainer, weather_bg_color, 0);
   lv_color_t main_text_color = (g_ui_darkness > 50) ? lv_color_hex(0xFFFFFF) : lv_color_hex(0x636e72);
   lv_color_t temp_text_color = (g_ui_darkness > 50) ? lv_color_hex(0xFFFFFF) : lv_color_hex(0x2d3436);
-  // Weather image (CHANGED: Use next_weather.weather_code for next half-hour condition)
+  // Weather image
   lv_obj_t *weather_img = lv_img_create(weatherContainer);
-  lv_img_set_src(weather_img, getWeatherImage(next_weather.weather_code));
+  lv_img_set_src(weather_img, getWeatherImage(current_weather.weather_code));
   lv_obj_align(weather_img, LV_ALIGN_CENTER, 0, -80);
-  // Temperature label (UNCHANGED: Current temperature)
+  // Temperature label
   lv_obj_t *temp_label = lv_label_create(weatherContainer);
   lv_label_set_text(temp_label, (String(current_weather.temperature_2m + temp_adjust, 1) + "°C").c_str());
   lv_obj_set_style_text_font(temp_label, &lv_font_montserrat_24, 0);
   lv_obj_set_style_text_color(temp_label, temp_text_color, 0);
   lv_obj_align(temp_label, LV_ALIGN_CENTER, 0, -25);
-  // AQI label on the right side of the image and temperature (UNCHANGED)
+  // AQI label on the right side of the image and temperature
   lv_obj_t *aqi_label_local = lv_label_create(weatherContainer);
   lv_label_set_text(aqi_label_local, ("AQI: " + getAqiDescription(current_aqi)).c_str());
   lv_obj_set_style_text_font(aqi_label_local, &lv_font_montserrat_14, 0);
   lv_obj_set_style_text_color(aqi_label_local, getAqiColor(current_aqi), 0);
   lv_obj_align(aqi_label_local, LV_ALIGN_CENTER, 120, -85); // Moved to right side, symmetric with description
-  // Description (CHANGED: Use next_weather.weather_code for next half-hour condition)
-  String desc = getWeatherDescription(next_weather.weather_code);
+  // Description
+  String desc = getWeatherDescription(current_weather.weather_code);
   lv_obj_t *desc_label = lv_label_create(weatherContainer);
   lv_label_set_text(desc_label, desc.c_str());
   lv_obj_set_style_text_font(desc_label, &lv_font_montserrat_14, 0);
   lv_obj_set_style_text_color(desc_label, main_text_color, 0);
   lv_obj_align(desc_label, LV_ALIGN_CENTER, -145, -60);
-  // Header container for location (UNCHANGED)
+  // Header container for location
   lv_obj_t *header_cont = lv_obj_create(weatherContainer);
   lv_obj_set_size(header_cont, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
   lv_obj_set_flex_flow(header_cont, LV_FLEX_FLOW_ROW);
@@ -795,7 +704,7 @@ void updateWeatherDisplay() {
   lv_obj_set_style_text_color(loc_label, main_text_color, 0);
   lv_obj_set_style_text_font(loc_label, &lv_font_montserrat_14, 0);
   lv_obj_align(loc_label, LV_ALIGN_CENTER, 0, -10);
-  // Buttons container (UNCHANGED: Uses current_weather values)
+  // Buttons container
   lv_obj_t *buttons_cont = lv_obj_create(weatherContainer);
   lv_obj_set_size(buttons_cont, 380, 55);
   lv_obj_align(buttons_cont, LV_ALIGN_CENTER, 0, 30);
@@ -805,7 +714,7 @@ void updateWeatherDisplay() {
   lv_obj_set_style_border_width(buttons_cont, 0, 0);
   lv_obj_set_style_pad_all(buttons_cont, 0, 0);
   lv_obj_set_scrollbar_mode(buttons_cont, LV_SCROLLBAR_MODE_OFF);
-  // Humidity (UPDATED: Dark text color)
+  // Humidity
   lv_obj_t *hum_cont = lv_obj_create(buttons_cont);
   lv_obj_set_size(hum_cont, 108, 55);
   lv_obj_set_style_bg_color(hum_cont, lv_color_hex(0x00b894), 0);
@@ -815,10 +724,10 @@ void updateWeatherDisplay() {
   lv_obj_t *hum_val = lv_label_create(hum_cont);
   lv_label_set_text(hum_val, ("Hum\n" + String((int)current_weather.relative_humidity_2m) + "%").c_str());
   lv_obj_set_style_text_font(hum_val, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(hum_val, lv_color_hex(0x000000), 0);  // UPDATED: Dark color
+  lv_obj_set_style_text_color(hum_val, lv_color_hex(0xFFFFFF), 0);
   lv_obj_set_scrollbar_mode(hum_val, LV_SCROLLBAR_MODE_OFF);
   lv_obj_center(hum_val);
-  // Wind (UPDATED: Dark text color)
+  // Wind
   lv_obj_t *wind_cont = lv_obj_create(buttons_cont);
   lv_obj_set_size(wind_cont, 108, 50);
   lv_obj_set_style_bg_color(wind_cont, lv_color_hex(0xfd79a8), 0);
@@ -828,23 +737,23 @@ void updateWeatherDisplay() {
   lv_obj_t *wind_val = lv_label_create(wind_cont);
   lv_label_set_text(wind_val, ("Wind\n" + String((int)current_weather.wind_speed_10m) + " km/h").c_str());
   lv_obj_set_style_text_font(wind_val, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(wind_val, lv_color_hex(0x000000), 0);  // UPDATED: Dark color
+  lv_obj_set_style_text_color(wind_val, lv_color_hex(0xFFFFFF), 0);
   lv_obj_set_scrollbar_mode(wind_val, LV_SCROLLBAR_MODE_OFF);
   lv_obj_center(wind_val);
-// Pressure (REPLACED: Atmospheric pressure in hPa instead of precipitation)
-lv_obj_t *pressure_cont = lv_obj_create(buttons_cont);
-lv_obj_set_size(pressure_cont, 108, 50);
-lv_obj_set_style_bg_color(pressure_cont, lv_color_hex(0x55a3ff), 0);
-lv_obj_set_style_bg_grad_color(pressure_cont, lv_color_hex(0x007acc), 0);
-lv_obj_set_style_bg_grad_dir(pressure_cont, LV_GRAD_DIR_HOR, 0);
-lv_obj_set_style_radius(pressure_cont, 10, 0);
-lv_obj_t *pressure_val = lv_label_create(pressure_cont);
-lv_label_set_text(pressure_val, ("Pressure\n" + String((int)current_weather.surface_pressure) + " hPa").c_str());
-lv_obj_set_style_text_font(pressure_val, &lv_font_montserrat_14, 0);
-lv_obj_set_style_text_color(pressure_val, lv_color_hex(0x000000), 0);  // Dark color
-lv_obj_set_scrollbar_mode(pressure_val, LV_SCROLLBAR_MODE_OFF);
-lv_obj_center(pressure_val);
-  // Forecast container (UPDATED: 7-day daily forecast with max/min temperatures)
+  // Precip
+  lv_obj_t *precip_cont = lv_obj_create(buttons_cont);
+  lv_obj_set_size(precip_cont, 108, 50);
+  lv_obj_set_style_bg_color(precip_cont, lv_color_hex(0x55a3ff), 0);
+  lv_obj_set_style_bg_grad_color(precip_cont, lv_color_hex(0x007acc), 0);
+  lv_obj_set_style_bg_grad_dir(precip_cont, LV_GRAD_DIR_HOR, 0);
+  lv_obj_set_style_radius(precip_cont, 10, 0);
+  lv_obj_t *precip_val = lv_label_create(precip_cont);
+  lv_label_set_text(precip_val, ("Precip\n" + String((int)current_weather.precipitation) + " mm").c_str());
+  lv_obj_set_style_text_font(precip_val, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(precip_val, lv_color_hex(0xFFFFFF), 0);
+  lv_obj_set_scrollbar_mode(precip_val, LV_SCROLLBAR_MODE_OFF);
+  lv_obj_center(precip_val);
+  // Forecast container
   lv_obj_t *forecast_cont = lv_obj_create(weatherContainer);
   lv_obj_set_size(forecast_cont, 350, 80);
   lv_obj_align(forecast_cont, LV_ALIGN_CENTER, 0, 90);
@@ -877,16 +786,13 @@ lv_obj_center(pressure_val);
     lv_img_set_src(forecast_img, getWeatherImage(forecast[i].weather_code));
     lv_img_set_zoom(forecast_img, 128);
     lv_obj_t *temp_label = lv_label_create(day_cont);
-    // UPDATED: Format as "max°/min°" (e.g., "7°/-1°")
-    String temp_text = String(forecast[i].temp_max + temp_adjust, 0) + "°/" + String(forecast[i].temp_min + temp_adjust, 0) + "°";
-    lv_label_set_text(temp_label, temp_text.c_str());
+    lv_label_set_text(temp_label, (String(forecast[i].temp_max + temp_adjust, 0) + "°C").c_str());
     lv_obj_set_style_text_font(temp_label, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(temp_label, temp_text_color, 0);
     lv_obj_set_scrollbar_mode(day_cont, LV_SCROLLBAR_MODE_OFF);
   }
   lv_calendar_set_day_names(calendar, day_names);
 }
-
 bool isDateHighlightable(int year, int month, int day) {
   for (int i = 0; i < numEventDates; i++) {
     if (eventDates[i].year == year && eventDates[i].month == month && eventDates[i].day == day) {
@@ -904,12 +810,6 @@ void updateEventDisplay(lv_obj_t *calendar) {
   if (debug == 1) Serial.println("[APP] Updating event display...");
   printMemoryUsage();
 
-  // NEW: Delete timer before cleaning to avoid dangling references
-  if (blink_timer) {
-    lv_timer_del(blink_timer);
-    blink_timer = NULL;
-  }
-
   // Initialize or clean event container
   if (!eventContainer) {
     eventContainer = lv_obj_create(lv_scr_act());
@@ -924,7 +824,7 @@ void updateEventDisplay(lv_obj_t *calendar) {
     lv_obj_invalidate(eventContainer);
   }
 
-  // Set highlighted dates on calendar (unchanged)
+  // Set highlighted dates on calendar
   if (debug == 1) Serial.println("[APP] Setting highlighted dates...");
   lv_calendar_date_t highlighted_dates[1000];
   int highlight_count = 0;
@@ -955,7 +855,7 @@ void updateEventDisplay(lv_obj_t *calendar) {
   todayStart -= todayStart % 86400; // Start of today
   time_t todayEnd = todayStart + 86400 - 1; // End of today
 
-  // Step 1: Display ongoing events (unchanged)
+  // Step 1: Display ongoing events (started before today, ending after now)
   for (int i = 0; i < numEvents; i++) {
     if (events[i].start_time < todayStart && events[i].end_time > now) {
       // This is an ongoing event
@@ -991,7 +891,7 @@ void updateEventDisplay(lv_obj_t *calendar) {
     }
   }
 
-  // Step 2: Display today's events (unchanged)
+  // Step 2: Display today's events
   for (int i = 0; i < numEvents; i++) {
     if (events[i].isToday) {
       lv_obj_t *event_cont = lv_obj_create(eventContainer);
@@ -1073,7 +973,6 @@ void updateEventDisplay(lv_obj_t *calendar) {
     }
   }
 
-
   // Step 3: Display upcoming events
   int upcoming_count = 0;
   for (int i = 0; i < numEvents; i++) {
@@ -1085,9 +984,9 @@ void updateEventDisplay(lv_obj_t *calendar) {
   if (upcoming_count > 0) {
     // Upcoming label
     lv_obj_t *upcoming_label = lv_label_create(eventContainer);
-    lv_label_set_text(upcoming_label, "Due in more than 3 days");
+    lv_label_set_text(upcoming_label, "Upcoming");
     lv_obj_set_style_text_font(upcoming_label, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(upcoming_label, lv_color_hex(0xCAE4CA), 0);
+    lv_obj_set_style_text_color(upcoming_label, lv_color_hex(0x800000), 0);
     lv_obj_align(upcoming_label, LV_ALIGN_TOP_LEFT, 10, y_offset);
     y_offset += 25;
 
@@ -1133,87 +1032,34 @@ void updateEventDisplay(lv_obj_t *calendar) {
     }
   }
 
-
-  // NEW: Handle timer deletion for events case (safe, though already deleted earlier)
-  if (total_displayed > 0) {
-    if (blink_timer) {
-      lv_timer_del(blink_timer);
-      blink_timer = NULL;
-    }
+  // Display large time if no events displayed
+  if (total_displayed == 0) {
+    struct tm *timeinfo = localtime(&now);
+    char time_buf[6];  // HH:MM\0
+    strftime(time_buf, sizeof(time_buf), "%H:%M", timeinfo);
+    lv_obj_t *large_time_label = lv_label_create(eventContainer);
+    lv_label_set_text(large_time_label, time_buf);
+    lv_obj_set_style_text_font(large_time_label, &technology_98, 0);
+    lv_obj_set_style_text_color(large_time_label, lv_color_hex(0xFF0000), 0);
+    lv_obj_set_style_text_align(large_time_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_long_mode(large_time_label, LV_LABEL_LONG_DOT);
+    lv_obj_align(large_time_label, LV_ALIGN_CENTER, 0, 0);
+	
+	
+	
+	 lv_obj_t *noEventsLabel = lv_label_create(eventContainer);
+    lv_label_set_text(noEventsLabel, "No events");
+    lv_obj_set_style_text_font(noEventsLabel, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(noEventsLabel, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_align(noEventsLabel, LV_ALIGN_TOP_LEFT, 10, y_offset);
+    if (debug == 1) Serial.println("[APP] No events: Displaying large red time " + String(time_buf));
+  } else {
+    if (debug == 1) Serial.println("[APP] Displayed " + String(total_displayed) + " events");
   }
 
-// Display large time if no events displayed (MODIFIED for dynamic alignment)
-if (total_displayed == 0) {
-  struct tm *timeinfo = localtime(&now);
-  char hours_buf[3];
-  strftime(hours_buf, sizeof(hours_buf), "%H", timeinfo);
-  char mins_buf[3];
-  strftime(mins_buf, sizeof(mins_buf), "%M", timeinfo);
-
-  // Hours label
-  lv_obj_t *large_time_hours = lv_label_create(eventContainer);
-  lv_label_set_text(large_time_hours, hours_buf);
-  lv_obj_set_style_text_font(large_time_hours, &technology_98, 0);
-  lv_obj_set_style_text_color(large_time_hours, lv_color_hex(0xFF0000), 0);
-  lv_obj_set_style_text_align(large_time_hours, LV_TEXT_ALIGN_CENTER, 0);
-  lv_label_set_long_mode(large_time_hours, LV_LABEL_LONG_CLIP);
-
-  // Colon label
-  lv_obj_t *large_time_colon = lv_label_create(eventContainer);
-  lv_label_set_text(large_time_colon, ":");
-  lv_obj_set_style_text_font(large_time_colon, &technology_98, 0);
-  lv_obj_set_style_text_color(large_time_colon, lv_color_hex(0xFF0000), 0);
-  lv_obj_set_style_text_align(large_time_colon, LV_TEXT_ALIGN_CENTER, 0);
-  lv_obj_set_style_text_opa(large_time_colon, LV_OPA_COVER, 0);  // Start visible
-  lv_label_set_long_mode(large_time_colon, LV_LABEL_LONG_CLIP);
-
-  // Minutes label
-  lv_obj_t *large_time_minutes = lv_label_create(eventContainer);
-  lv_label_set_text(large_time_minutes, mins_buf);
-  lv_obj_set_style_text_font(large_time_minutes, &technology_98, 0);
-  lv_obj_set_style_text_color(large_time_minutes, lv_color_hex(0xFF0000), 0);
-  lv_obj_set_style_text_align(large_time_minutes, LV_TEXT_ALIGN_CENTER, 0);
-  lv_label_set_long_mode(large_time_minutes, LV_LABEL_LONG_CLIP);
-
-// Dynamically calculate alignments based on text widths
-lv_point_t hours_size, colon_size, minutes_size;
-lv_text_get_size(&hours_size, hours_buf, &technology_98, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-lv_text_get_size(&colon_size, ":", &technology_98, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-lv_text_get_size(&minutes_size, mins_buf, &technology_98, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-
-lv_coord_t total_width = hours_size.x + colon_size.x + minutes_size.x;
-lv_coord_t half_width = total_width / 2;
-
-lv_coord_t hours_x = -half_width + (hours_size.x / 2);
-lv_coord_t colon_x = hours_x + hours_size.x + (colon_size.x / 2) - 25;  // Reduced space by 15px
-lv_coord_t mins_x = colon_x + colon_size.x + (minutes_size.x / 2)-2;
-
-lv_obj_align(large_time_hours, LV_ALIGN_CENTER, hours_x, 0);
-lv_obj_align(large_time_colon, LV_ALIGN_CENTER, colon_x, 0);
-lv_obj_align(large_time_minutes, LV_ALIGN_CENTER, mins_x, 0);
-
-// Force layout update to ensure immediate rendering
-lv_obj_update_layout(eventContainer);
-
-  // "No events" label (unchanged, but adjust y_offset if needed for visibility)
-  lv_obj_t *noEventsLabel = lv_label_create(eventContainer);
-  lv_label_set_text(noEventsLabel, "No events");
-  lv_obj_set_style_text_font(noEventsLabel, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(noEventsLabel, lv_color_hex(0xFFFFFF), 0);
-  lv_obj_align(noEventsLabel, LV_ALIGN_TOP_LEFT, 10, y_offset + 20);  // Minor adjustment: +20 to avoid overlap with time if y_offset=-10
-
-  // Create/start blink and time-update timer (pass colon as user data)
-  blink_timer = lv_timer_create(blink_time_update_cb, 1000, NULL);
-  lv_timer_set_user_data(blink_timer, large_time_colon);
-
-  if (debug == 1) {
-    Serial.printf("[APP] No events: Dynamic offsets - hours_x=%d, colon_x=%d, mins_x=%d (total_width=%d)\n",
-                  hours_x, colon_x, mins_x, total_width);
-    Serial.println("[APP] No events: Displaying large red time " + String(hours_buf) + ":" + String(mins_buf) + " with blinking colon");
-  }
+  lv_obj_invalidate(eventContainer);  // Ensure refresh
 }
 
-}
 
 void wifi_connect_cb(lv_event_t * e) {
   if (debug == 1) Serial.println("[APP] WiFi connect button clicked");
@@ -1331,7 +1177,6 @@ void wifi_logout_cb(lv_event_t * e) {
   if (wifi_setup_screen) {
     lv_obj_del(wifi_setup_screen);
     wifi_setup_screen = nullptr;
-	lv_obj_del(wifi_setup_screen);  // This will cascade-delete children, including QR
   }
   if (settings_popup) {
     lv_obj_add_flag(settings_popup, LV_OBJ_FLAG_HIDDEN);
@@ -1445,27 +1290,7 @@ void show_wifi_setup_screen() {
     lv_obj_add_flag(keyboard, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_style_text_font(keyboard, &lv_font_montserrat_14, 0);
   }
- // UPDATED: Add QR code image under the UI, positioned at y-offset -10
-  lv_obj_t *qr_img = lv_img_create(wifi_setup_screen);  // Create on the screen container
-  lv_img_set_src(qr_img, &qr);
-  lv_img_set_zoom(qr_img, 120);  // Scale for visibility (adjust as needed)
-  lv_obj_align(qr_img, LV_ALIGN_BOTTOM_MID, 0, 90);  // Position under buttons/text areas
-  lv_obj_set_style_img_recolor(qr_img, lv_color_hex(0xFFFFFF), 0);  // Ensure white for dark background
-
-  // NEW: Add instructional text label above the QR for context and guidance
-  lv_obj_t *instruction_label = lv_label_create(wifi_setup_screen);
-  lv_label_set_text(instruction_label, "Register on crontech.uk to use CronTab. Scan the QR code for quick setup.");
-  lv_obj_set_style_text_color(instruction_label, lv_color_hex(0xFFFFFF), 0);
-  lv_obj_set_style_text_font(instruction_label, &lv_font_montserrat_14, 0);
-  lv_label_set_long_mode(instruction_label, LV_LABEL_LONG_WRAP);  // Enable text wrapping for longer sentences
-  lv_obj_set_width(instruction_label, 600);  // Set a reasonable width for wrapping on 800px screen
-  lv_obj_align_to(instruction_label, qr_img, LV_ALIGN_OUT_TOP_MID, 0, 70);  // Position 20px above QR
-
-  if (debug == 1) Serial.println("[APP] WiFi setup screen shown with QR code and instructional text");;
-
 }
-
-
 void show_api_code_screen() {
   if (debug == 1) Serial.println("[APP] Showing API code screen...");
   api_code_screen = lv_obj_create(lv_scr_act());
@@ -1492,23 +1317,6 @@ void show_api_code_screen() {
     lv_obj_add_flag(keyboard, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_style_text_font(keyboard, &lv_font_montserrat_14, 0);
   }
- // UPDATED: Add QR code image under the UI, positioned at y-offset -10
-  lv_obj_t *qr_img = lv_img_create(api_code_screen);  // Create on the screen container
-  lv_img_set_src(qr_img, &qr);
-  lv_img_set_zoom(qr_img, 150);  // Scale for visibility (adjust as needed)
-  lv_obj_align(qr_img, LV_ALIGN_BOTTOM_MID, 0, 50);  // Position under buttons/text areas
-  lv_obj_set_style_img_recolor(qr_img, lv_color_hex(0xFFFFFF), 0);  // Ensure white for dark background
-
-  // NEW: Add instructional text label above the QR for context and guidance
-  lv_obj_t *instruction_label = lv_label_create(api_code_screen);
-  lv_label_set_text(instruction_label, "Scan QR for quick API code.");
-  lv_obj_set_style_text_color(instruction_label, lv_color_hex(0xFFFFFF), 0);
-  lv_obj_set_style_text_font(instruction_label, &lv_font_montserrat_14, 0);
-  lv_label_set_long_mode(instruction_label, LV_LABEL_LONG_WRAP);  // Enable text wrapping for longer sentences
-  lv_obj_set_width(instruction_label, 600);  // Set a reasonable width for wrapping on 800px screen
-  lv_obj_align_to(instruction_label, qr_img, LV_ALIGN_OUT_TOP_MID, 0, -100);  // Position 20px above QR
-
-  if (debug == 1) Serial.println("[APP] API code screen shown with QR code and instructional text");
 }
 void show_location_screen() {
   if (debug == 1) Serial.println("[APP] Showing location screen...");
@@ -2284,43 +2092,19 @@ void updateHolidayLabel() {
   }
   int year = showed->year;
   int month = showed->month;
+  String h_str = "Bank Holidays: ";
   bool has_holiday = false;
-  String content_str = "";
   for (int i = 0; i < numHolidays; i++) {
     if (holidays[i].year == year && holidays[i].month == month) {
       has_holiday = true;
-      String processed_title = holidays[i].title;
-      processed_title.replace("'", " ");  // Replace apostrophe with space to avoid glyph issues
-      if (content_str != "") content_str += ", ";
-      content_str += processed_title + " (" + String(holidays[i].day) + ")";
+      if (h_str != "Bank Holidays: ") h_str += ", ";
+      h_str += holidays[i].title + " (" + String(holidays[i].day) + ")";
     }
   }
-
-  // Enable markup recoloring on the label
-  lv_label_set_recolor(holiday_label, true);
-
-  // Configure for full visibility: full width, left alignment, and wrapping
-  lv_obj_set_width(holiday_label, LV_PCT(100));
-  lv_obj_set_style_text_align(holiday_label, LV_TEXT_ALIGN_LEFT, 0);
-  lv_label_set_long_mode(holiday_label, LV_LABEL_LONG_WRAP);
-
-  String full_text;
-  if (!has_holiday) {
-    // Green markup for the entire no-holidays message
-    full_text = String("#05750a No bank holidays this month #");
-  } else {
-    // Orange markup for prefix, maroon for content
-    full_text = String("#050975 Bank Holidays: # #a8020a ") + content_str + " #";
-  }
-
-  // Set the marked-up text
-  lv_label_set_text(holiday_label, full_text.c_str());
-
-  // Invalidate for redraw
+  if (!has_holiday) h_str = "No bank holidays this month";
+  lv_label_set_text(holiday_label, h_str.c_str());
   lv_obj_invalidate(lv_scr_act());
-  if (debug == 1) Serial.println("[APP] Holiday label updated with markup: " + full_text);
 }
-
 void checkFirmwareUpdate() {
   if (debug == 1) Serial.println("[OTA] Starting firmware update check...");
   printMemoryUsage();
@@ -2515,10 +2299,8 @@ void prev_month_cb(lv_event_t *e) {
   lv_calendar_set_showed_date(calendar, showed_year, showed_month);
   rearrange_calendar_parts(calendar);
   updateMonthLabel(calendar);
-  fetchBankHolidays();
   updateHolidayLabel();
   update_today_highlight(calendar);
-  
 }
 void next_month_cb(lv_event_t *e) {
   const lv_calendar_date_t * showed = lv_calendar_get_showed_date(calendar);
@@ -2532,7 +2314,6 @@ void next_month_cb(lv_event_t *e) {
   lv_calendar_set_showed_date(calendar, showed_year, showed_month);
   rearrange_calendar_parts(calendar);
   updateMonthLabel(calendar);
-  fetchBankHolidays();
   updateHolidayLabel();
   update_today_highlight(calendar);
 }
@@ -2583,6 +2364,7 @@ void darkness_slider_cb(lv_event_t *e) {
 void setup_calendar() {
   if (debug == 1) Serial.println("[APP] Setting up calendar...");
   if (debug == 1) Serial.println("[APP] Initializing NTP...");
+  configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
   if (debug == 1) Serial.println("[APP] Waiting for NTP time sync...");
   struct tm timeinfo;
   if (!getLocalTime(&timeinfo)) {
@@ -2848,35 +2630,6 @@ void fetchWeatherLocation() {
   }
   http.end();
 }
-// Replace the existing timezone constants with a proper DST-aware string
-// Remove these lines:
-// const long gmtOffset_sec = 0;
-// const int daylightOffset_sec = 3600;
-
-// Updated initTime() function with correct configTime usage and TZ setting for automatic DST
-void initTime() {
-  if (debug == 1) Serial.println("[APP] Initializing time with automatic DST support...");
-  // First, sync time in UTC
-  configTime(0, 0, ntpServer);
-  struct tm timeinfo;
-  if (!getLocalTime(&timeinfo)) {
-    if (debug == 1) Serial.println("[APP] Failed to obtain initial time from NTP");
-    return;
-  }
-  if (debug == 1) Serial.println("[APP] Initial UTC time obtained from NTP");
-  // Now set the UK timezone string for automatic GMT/BST handling
-  setenv("TZ", "GMT0BST,M3.5.0/1,M10.5.0", 1);
-  tzset();
-  // Verify local time after TZ set
-  if (getLocalTime(&timeinfo)) {
-    if (debug == 1) Serial.println("[APP] Local time after TZ set: " + String(timeinfo.tm_year + 1900) + "-" + 
-                                   String(timeinfo.tm_mon + 1) + "-" + String(timeinfo.tm_mday) + " " + 
-                                   String(timeinfo.tm_hour) + ":" + String(timeinfo.tm_min) + ":" + String(timeinfo.tm_sec));
-  } else {
-    if (debug == 1) Serial.println("[APP] Failed to obtain local time after TZ set");
-  }
-}
-// Modified setup() function: Add the initTime() call after successful WiFi connection
 void setup() {
   Serial.begin(115200);
   delay(1000);
@@ -2907,8 +2660,6 @@ void setup() {
     }
     if (WiFi.status() == WL_CONNECTED) {
       if (debug == 1) Serial.println("[APP] WiFi connected! IP: " + WiFi.localIP().toString());
-      // NEW: Initialize time with automatic DST after WiFi connects
-      initTime();
       preferences.begin("api", false);
       apiCode = preferences.getString("apiCode", "");
       preferences.end();
@@ -2932,11 +2683,7 @@ void setup() {
           setup_display();
           show_location_screen();
         } else {
-			setup_calendar();
-			fetchBankHolidays();
-			updateHolidayLabel();
-			lastHolidayUpdate = millis();
-		  
+          setup_calendar();
         }
       }
     } else {
@@ -2945,33 +2692,11 @@ void setup() {
     }
   }
 }
-
-
-
-///////////////////////////////////////////////////////////////////////
-
 void loop() {
   if (!is_ota_updating) {
     // Normal LVGL update cycle
     loop_display();
     lv_tick_inc(5);
-    
-    // Scheduled restart logic: Trigger at midnight on Sundays or the 1st of each month
-    static int prev_sec = -1;  // Track previous second to avoid multi-trigger at exact midnight
-    time_t now_t;
-    time(&now_t);
-    struct tm *timeinfo = localtime(&now_t);
-    if (timeinfo->tm_hour == 0 && timeinfo->tm_min == 0 && timeinfo->tm_sec == 0 &&
-        (timeinfo->tm_wday == 0 || timeinfo->tm_mday == 1) &&
-        prev_sec != 0) {  // Ensure it's the transition to midnight
-      if (debug == 1) {
-        String msg = String("[APP] Scheduled restart triggered: ") + (timeinfo->tm_wday == 0 ? "Sunday midnight" : "1st of month midnight");
-        Serial.println(msg);
-      }
-      ESP.restart();
-    }
-    prev_sec = timeinfo->tm_sec;  // Update tracker
-    
     delay(5);
   } else {
     // OTA mode: Skip LVGL, handle OTA periodically (though blocking in this case)
@@ -3049,13 +2774,7 @@ void loop() {
     fetchAndSetBackgroundImage();
     lastBackgroundUpdate = currentTime;
   }
-  if (currentTime - lastHolidayUpdate >= holidayUpdateInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
-  fetchBankHolidays();
-  updateHolidayLabel();
-  lastHolidayUpdate = currentTime;
 }
-}
-
 void show_event_details(int index, bool isReminder) {
   if (event_details_popup) {
     return; // Avoid multiple popups
@@ -3070,42 +2789,43 @@ void show_event_details(int index, bool isReminder) {
   lv_obj_set_style_bg_color(event_details_popup, lv_color_hex(0x000000), 0);
   lv_obj_set_style_border_color(event_details_popup, lv_color_hex(0xFFFFFF), 0);
   lv_obj_set_style_border_width(event_details_popup, 2, 0);
-  // Event details container
-  lv_obj_t *event_info_cont = lv_obj_create(event_details_popup);
-  lv_obj_set_size(event_info_cont, 680, 150);
-  lv_obj_align(event_info_cont, LV_ALIGN_TOP_MID, 0, 10);
-  lv_obj_set_style_bg_color(event_info_cont, lv_color_hex(0xF0F0F0), 0);
-  lv_obj_set_style_bg_opa(event_info_cont, LV_OPA_COVER, 0);
-  lv_obj_set_style_border_width(event_info_cont, 0, 0);
-  lv_obj_set_style_pad_all(event_info_cont, 10, 0);
-  lv_obj_set_style_pad_row(event_info_cont, 5, 0);
-  lv_obj_set_scrollbar_mode(event_info_cont, LV_SCROLLBAR_MODE_OFF);
   // Title
-  lv_obj_t *title_label = lv_label_create(event_info_cont);
+  lv_obj_t *title_label = lv_label_create(event_details_popup);
   lv_label_set_text(title_label, events[index].summary.c_str());
-  lv_obj_align(title_label, LV_ALIGN_TOP_MID, 0, 0);
+  lv_obj_align(title_label, LV_ALIGN_TOP_MID, 0, 10);
   lv_obj_set_style_text_font(title_label, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(title_label, lv_color_hex(0x000000), 0);
+  lv_obj_set_style_text_color(title_label, lv_color_hex(0xFFFFFF), 0);
   // Description
-  lv_obj_t *desc_label = lv_label_create(event_info_cont);
+  lv_obj_t *desc_label = lv_label_create(event_details_popup);
   lv_label_set_text(desc_label, events[index].description.c_str());
   lv_label_set_long_mode(desc_label, LV_LABEL_LONG_WRAP);
-  lv_obj_set_width(desc_label, 650);
-  lv_obj_align_to(desc_label, title_label, LV_ALIGN_OUT_BOTTOM_MID, 0, 10);
+  lv_obj_set_width(desc_label, 400);
+  lv_obj_align(desc_label, LV_ALIGN_TOP_MID, 0, 50);
   lv_obj_set_style_text_font(desc_label, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(desc_label, lv_color_hex(0x000000), 0);
+  lv_obj_set_style_text_color(desc_label, lv_color_hex(0xFFFFFF), 0);
   // Start
-  lv_obj_t *start_label = lv_label_create(event_info_cont);
+  lv_obj_t *start_label = lv_label_create(event_details_popup);
   lv_label_set_text(start_label, ("Start: " + events[index].start).c_str());
-  lv_obj_align_to(start_label, desc_label, LV_ALIGN_OUT_BOTTOM_MID, 0, 10);
+  lv_obj_align_to(start_label, desc_label, LV_ALIGN_OUT_BOTTOM_MID, 0, 20);
   lv_obj_set_style_text_font(start_label, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(start_label, lv_color_hex(0x000000), 0);
+  lv_obj_set_style_text_color(start_label, lv_color_hex(0xFFFFFF), 0);
   // End
-  lv_obj_t *end_label = lv_label_create(event_info_cont);
+  lv_obj_t *end_label = lv_label_create(event_details_popup);
   lv_label_set_text(end_label, ("End: " + events[index].end).c_str());
-  lv_obj_align_to(end_label, start_label, LV_ALIGN_OUT_BOTTOM_MID, 0, 5);
+  lv_obj_align_to(end_label, start_label, LV_ALIGN_OUT_BOTTOM_MID, 0, 10);
   lv_obj_set_style_text_font(end_label, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(end_label, lv_color_hex(0x000000), 0);
+  lv_obj_set_style_text_color(end_label, lv_color_hex(0xFFFFFF), 0);
+  // Forecast container
+  lv_obj_t *forecast_cont = lv_obj_create(event_details_popup);
+  lv_obj_set_size(forecast_cont, 680, 100);
+  lv_obj_align_to(forecast_cont, end_label, LV_ALIGN_OUT_BOTTOM_MID, 0, 20);
+  lv_obj_set_flex_flow(forecast_cont, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(forecast_cont, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  lv_obj_set_style_bg_opa(forecast_cont, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(forecast_cont, 0, 0);
+  lv_obj_set_style_pad_all(forecast_cont, 5, 0);
+  lv_obj_set_style_pad_column(forecast_cont, 2, 0);
+  lv_obj_set_scrollbar_mode(forecast_cont, LV_SCROLLBAR_MODE_OFF);
   // Determine the event's start date
   struct tm event_start_tm = {0};
   String event_start_str = events[index].start; // e.g., "2025-10-25" or "2025-10-25 14:00"
@@ -3119,219 +2839,65 @@ void show_event_details(int index, bool isReminder) {
   event_start_tm.tm_hour = 0;
   event_start_tm.tm_min = 0;
   event_start_tm.tm_sec = 0;
-  event_start_tm.tm_isdst = -1;
-  time_t event_start_day = mktime(&event_start_tm);
-  // Parse end date similarly to check for single-day event
-  struct tm event_end_tm = {0};
-  String event_end_str = events[index].end;
-  if (!event_end_str.isEmpty()) {
-    if (strptime(event_end_str.c_str(), "%Y-%m-%d %H:%M", &event_end_tm) == NULL) {
-      strptime(event_end_str.c_str(), "%Y-%m-%d", &event_end_tm);
-    }
-  }
-  event_end_tm.tm_hour = 0;
-  event_end_tm.tm_min = 0;
-  event_end_tm.tm_sec = 0;
-  event_end_tm.tm_isdst = -1;
-  time_t event_end_day = mktime(&event_end_tm);
-  bool is_single_day = (event_start_day == event_end_day);
-  // Calculate number of event days
-  long full_duration_sec = (long)events[index].end_time - (long)events[index].start_time;
-  int num_event_days_full = (full_duration_sec / 86400L) + 1;
-  // Get today's start
-  time_t now_t;
-  time(&now_t);
-  struct tm today_tm = {0};
+  time_t event_start = mktime(&event_start_tm);
+  // Get today's date for reference
+  time_t now;
+  time(&now);
+  struct tm today_tm;
   getLocalTime(&today_tm);
   today_tm.tm_hour = 0;
   today_tm.tm_min = 0;
   today_tm.tm_sec = 0;
-  today_tm.tm_isdst = -1;
   time_t today_start = mktime(&today_tm);
-  // Determine display parameters
-  time_t display_start_day;
-  int num_display_days;
-  if (now_t > events[index].start_time) {
-    // Ongoing or past
-    long remaining_sec = (long)events[index].end_time - now_t;
-    if (remaining_sec >= 0) {
-      num_display_days = (remaining_sec / 86400L) + 1;
-      display_start_day = today_start;
+  // Calculate the offset in days between today and the event start
+  double seconds_diff = difftime(event_start, today_start);
+  int day_offset = seconds_diff / 86400; // Convert seconds to days
+  // Loop for 7 days starting from the event's start date
+  for (int i = 0; i < 7; i++) {
+    time_t cur_day = event_start + i * 86400;
+    int f_index = day_offset + i; // Index into forecast array, adjusted for event start
+    lv_obj_t *day_cont = lv_obj_create(forecast_cont);
+    lv_obj_set_size(day_cont, 90, 90);
+    lv_obj_set_flex_flow(day_cont, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(day_cont, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_bg_color(day_cont, lv_color_hex(0xF0F0F0), 0);
+    lv_obj_set_style_bg_opa(day_cont, LV_OPA_90, 0);
+    lv_obj_set_style_radius(day_cont, 10, 0);
+    lv_obj_set_style_shadow_color(day_cont, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_shadow_width(day_cont, 10, 0);
+    lv_obj_set_style_shadow_opa(day_cont, LV_OPA_20, 0);
+    lv_obj_set_style_border_width(day_cont, 0, 0);
+    lv_obj_set_style_pad_all(day_cont, 2, 0);
+    lv_obj_set_style_pad_row(day_cont, -20, 0);
+    // Date label
+    char date_buf[20];
+    struct tm *d_tm = localtime(&cur_day);
+    strftime(date_buf, sizeof(date_buf), "%Y-%m-%d", d_tm);
+    lv_obj_t *date_label = lv_label_create(day_cont);
+    lv_label_set_text(date_label, date_buf);
+    lv_obj_set_style_text_font(date_label, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(date_label, lv_color_hex(0x000000), 0);
+    // Check if forecast data is available for this day
+    if (f_index >= 0 && f_index < 14 && f_index < sizeof(forecast) / sizeof(forecast[0])) {
+      // Weather image
+      lv_obj_t *forecast_img = lv_img_create(day_cont);
+      lv_img_set_src(forecast_img, getWeatherImage(forecast[f_index].weather_code));
+      lv_img_set_zoom(forecast_img, 102); // 50% of 204 for consistency
+      // Temperature
+      lv_obj_t *temp_l = lv_label_create(day_cont);
+      lv_label_set_text(temp_l, (String(forecast[f_index].temp_max + temp_adjust, 1) + "°C").c_str());
+      lv_obj_set_style_text_font(temp_l, &lv_font_montserrat_14, 0);
+      lv_obj_set_style_text_color(temp_l, lv_color_hex(0x000000), 0);
     } else {
-      num_display_days = 0;
-      display_start_day = 0; // Irrelevant
-    }
-  } else {
-    // Future
-    num_display_days = num_event_days_full;
-    display_start_day = event_start_day;
-  }
-  // Weather section: Single-day vs Multi-day layout
-  if (is_single_day && num_display_days >= 1) {
-    // Single-day wider layout
-    lv_obj_t *weather_cont = lv_obj_create(event_details_popup);
-    lv_obj_set_size(weather_cont, 680, 120);
-    lv_obj_align_to(weather_cont, event_info_cont, LV_ALIGN_OUT_BOTTOM_MID, 0, 10);
-    lv_obj_set_flex_flow(weather_cont, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(weather_cont, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_bg_color(weather_cont, lv_color_white(), 0);
-    lv_obj_set_style_bg_opa(weather_cont, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(weather_cont, 0, 0);
-    lv_obj_set_style_pad_all(weather_cont, 5, 0);
-    lv_obj_set_style_pad_column(weather_cont, 10, 0);
-    lv_obj_set_scrollbar_mode(weather_cont, LV_SCROLLBAR_MODE_OFF);
-
-    // Calculate f_index for the single event day
-    time_t event_day = event_start_day;
-    int f_index = (int)((event_day - today_start) / 86400);
-    bool has_forecast = (f_index >= 0 && f_index < 14);
-
-    // Left: Weather icon and temperatures (UPDATED: Added night/min temp)
-    lv_obj_t *left_cont = lv_obj_create(weather_cont);
-    lv_obj_set_size(left_cont, 200, 120);
-    lv_obj_set_flex_flow(left_cont, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(left_cont, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_bg_opa(left_cont, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_pad_all(left_cont, 5, 0);
-
-    // Weather image
-    lv_obj_t *weather_img = lv_img_create(left_cont);
-    if (has_forecast) {
-      lv_img_set_src(weather_img, getWeatherImage(forecast[f_index].weather_code));
-    } else {
-      lv_img_set_src(weather_img, getWeatherImage(999)); // Unknown
-    }
-    lv_img_set_zoom(weather_img, 150); // Slightly larger for single-day
-    lv_obj_align(weather_img, LV_ALIGN_CENTER, 0, -40);  // UPDATED: Adjusted for stacked temps
-
-    // Max temperature label
-    lv_obj_t *temp_max_label = lv_label_create(left_cont);
-    if (has_forecast) {
-      lv_label_set_text(temp_max_label, (String(forecast[f_index].temp_max + temp_adjust, 1) + "°C").c_str());
-    } else {
-      lv_label_set_text(temp_max_label, "N/A");
-    }
-    lv_obj_set_style_text_font(temp_max_label, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(temp_max_label, lv_color_hex(0x000000), 0);
-    lv_obj_align(temp_max_label, LV_ALIGN_CENTER, 0, 0);  // Centered horizontally
-
-    // NEW: Min (night) temperature label below max
-    lv_obj_t *temp_min_label = lv_label_create(left_cont);
-    if (has_forecast) {
-      lv_label_set_text(temp_min_label, (String(forecast[f_index].temp_min + temp_adjust, 1) + "°C").c_str());
-      lv_obj_set_style_text_font(temp_min_label, &lv_font_montserrat_14, 0);  // Slightly smaller font for min
-      lv_obj_set_style_text_color(temp_min_label, lv_color_hex(0x666666), 0);  // Gray for secondary info
-    } else {
-      lv_label_set_text(temp_min_label, "N/A");
-    }
-    lv_obj_align_to(temp_min_label, temp_max_label, LV_ALIGN_OUT_BOTTOM_MID, 0, -5);  // Stacked below max
-
-    // Right: Conditions (description, humidity, feel like, precip, wind)
-    lv_obj_t *right_cont = lv_obj_create(weather_cont);
-    lv_obj_set_size(right_cont, 460, 120);
-    lv_obj_set_flex_flow(right_cont, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(right_cont, LV_FLEX_ALIGN_SPACE_AROUND, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_bg_opa(right_cont, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_pad_all(right_cont, 5, 0);
-    lv_obj_set_style_pad_row(right_cont, 2, 0);
-
-    // Description
-    lv_obj_t *desc_weather_label = lv_label_create(right_cont);
-    String desc = has_forecast ? getWeatherDescription(forecast[f_index].weather_code) : "Unknown";
-    lv_label_set_text(desc_weather_label, desc.c_str());
-    lv_obj_set_style_text_font(desc_weather_label, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(desc_weather_label, lv_color_hex(0x000000), 0);
-    lv_label_set_long_mode(desc_weather_label, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(desc_weather_label, 200);
-
-    // Humidity
-    lv_obj_t *hum_label = lv_label_create(right_cont);
-    String hum_text = has_forecast ? ("Humidity: " + String((int)forecast[f_index].humidity_mean) + "%") : "Humidity: N/A";
-    lv_label_set_text(hum_label, hum_text.c_str());
-    lv_obj_set_style_text_font(hum_label, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(hum_label, lv_color_hex(0x000000), 0);
-
-    // Feel like (apparent temp)
-    lv_obj_t *feel_label = lv_label_create(right_cont);
-    String feel_text = has_forecast ? ("Feels like: " + String(forecast[f_index].apparent_max + temp_adjust, 1) + "°C") : "Feels like: N/A";
-    lv_label_set_text(feel_label, feel_text.c_str());
-    lv_obj_set_style_text_font(feel_label, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(feel_label, lv_color_hex(0x000000), 0);
-
-    // Precipitation
-    lv_obj_t *precip_label = lv_label_create(right_cont);
-    String precip_text = has_forecast ? ("Precip: " + String(forecast[f_index].precip_sum, 1) + " mm") : "Precip: N/A";
-    lv_label_set_text(precip_label, precip_text.c_str());
-    lv_obj_set_style_text_font(precip_label, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(precip_label, lv_color_hex(0x000000), 0);
-
-    // Wind
-    lv_obj_t *wind_label = lv_label_create(right_cont);
-    String wind_text = has_forecast ? ("Wind: " + String(forecast[f_index].wind_max, 0) + " km/h") : "Wind: N/A";
-    lv_label_set_text(wind_label, wind_text.c_str());
-    lv_obj_set_style_text_font(wind_label, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(wind_label, lv_color_hex(0x000000), 0);
-  } else {
-    // Multi-day forecast container (existing logic)
-    lv_obj_t *forecast_cont = lv_obj_create(event_details_popup);
-    lv_obj_set_size(forecast_cont, 680, 100);
-    lv_obj_align_to(forecast_cont, event_info_cont, LV_ALIGN_OUT_BOTTOM_MID, 0, 10);
-    lv_obj_set_flex_flow(forecast_cont, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(forecast_cont, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_bg_opa(forecast_cont, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(forecast_cont, 0, 0);
-    lv_obj_set_style_pad_all(forecast_cont, 5, 0);
-    lv_obj_set_style_pad_column(forecast_cont, 2, 0);
-    lv_obj_set_scrollbar_mode(forecast_cont, LV_SCROLLBAR_MODE_OFF);
-    // Loop for display days
-    int loop_days = (num_display_days > 0) ? min(num_display_days, 14) : 0;
-    for (int i = 0; i < loop_days; i++) {
-      time_t cur_day = display_start_day + (time_t)i * 86400;
-      int f_index = (int)((cur_day - today_start) / 86400);
-      lv_obj_t *day_cont = lv_obj_create(forecast_cont);
-      lv_obj_set_size(day_cont, 90, 90);
-      lv_obj_set_flex_flow(day_cont, LV_FLEX_FLOW_COLUMN);
-      lv_obj_set_flex_align(day_cont, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-      lv_obj_set_style_bg_color(day_cont, lv_color_hex(0xF0F0F0), 0);
-      lv_obj_set_style_bg_opa(day_cont, LV_OPA_90, 0);
-      lv_obj_set_style_radius(day_cont, 10, 0);
-      lv_obj_set_style_shadow_color(day_cont, lv_color_hex(0x000000), 0);
-      lv_obj_set_style_shadow_width(day_cont, 10, 0);
-      lv_obj_set_style_shadow_opa(day_cont, LV_OPA_20, 0);
-      lv_obj_set_style_border_width(day_cont, 0, 0);
-      lv_obj_set_style_pad_all(day_cont, 2, 0);
-      lv_obj_set_style_pad_row(day_cont, -20, 0);
-      // Date label
-      char date_buf[20];
-      struct tm *d_tm = localtime(&cur_day);
-      strftime(date_buf, sizeof(date_buf), "%Y-%m-%d", d_tm);
-      lv_obj_t *date_label = lv_label_create(day_cont);
-      lv_label_set_text(date_label, date_buf);
-      lv_obj_set_style_text_font(date_label, &lv_font_montserrat_14, 0);
-      lv_obj_set_style_text_color(date_label, lv_color_hex(0x000000), 0);
-      // Check if forecast data is available for this day
-      bool has_forecast = (f_index >= 0 && f_index < 14);
-      if (has_forecast) {
-        // Weather image
-        lv_obj_t *forecast_img = lv_img_create(day_cont);
-        lv_img_set_src(forecast_img, getWeatherImage(forecast[f_index].weather_code));
-        lv_img_set_zoom(forecast_img, 102); // 50% of 204 for consistency
-        // Temperature
-        lv_obj_t *temp_l = lv_label_create(day_cont);
-        lv_label_set_text(temp_l, (String(forecast[f_index].temp_max + temp_adjust, 1) + "°C").c_str());
-        lv_obj_set_style_text_font(temp_l, &lv_font_montserrat_14, 0);
-        lv_obj_set_style_text_color(temp_l, lv_color_hex(0x000000), 0);
-      } else {
-        // Unknown weather image
-        lv_obj_t *forecast_img = lv_img_create(day_cont);
-        lv_img_set_src(forecast_img, getWeatherImage(999)); // Will default to Unknown
-        lv_img_set_zoom(forecast_img, 102); // Consistent with other images
-        // Placeholder temperature
-        lv_obj_t *temp_l = lv_label_create(day_cont);
-        lv_label_set_text(temp_l, "N/A");
-        lv_obj_set_style_text_font(temp_l, &lv_font_montserrat_14, 0);
-        lv_obj_set_style_text_color(temp_l, lv_color_hex(0x000000), 0);
-      }
+      // Unknown weather image
+      lv_obj_t *forecast_img = lv_img_create(day_cont);
+      lv_img_set_src(forecast_img, getWeatherImage(-1)); // Assuming -1 represents unknown weather
+      lv_img_set_zoom(forecast_img, 102); // Consistent with other images
+      // Placeholder temperature
+      lv_obj_t *temp_l = lv_label_create(day_cont);
+      lv_label_set_text(temp_l, "N/A");
+      lv_obj_set_style_text_font(temp_l, &lv_font_montserrat_14, 0);
+      lv_obj_set_style_text_color(temp_l, lv_color_hex(0x000000), 0);
     }
   }
   // Snooze button (conditionally shown)
@@ -3363,7 +2929,6 @@ void show_event_details(int index, bool isReminder) {
   lv_obj_center(close_label);
   lv_obj_set_style_text_font(close_label, &lv_font_montserrat_14, 0);
 }
-
 void close_event_details_cb(lv_event_t *e) {
   if (event_details_popup) {
     lv_obj_add_flag(event_details_popup, LV_OBJ_FLAG_HIDDEN);
