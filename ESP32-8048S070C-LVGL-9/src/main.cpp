@@ -231,6 +231,13 @@ static lv_color_t scheme_accent_tint(int lvl) { return lv_palette_lighten(scheme
 static lv_color_t scheme_card_a()        { return (g_ui_darkness > 50) ? scheme_accent_dark() : scheme_accent_soft(); }
 static lv_color_t scheme_card_b()        { return (g_ui_darkness > 50) ? scheme_accent_deep() : scheme_accent(); }
 static lv_color_t scheme_card_text()     { return (g_ui_darkness > 50) ? lv_color_hex(0xECEFF1) : scheme_accent_deep(); }
+// Text for a card whose background is a FIXED light colour - the "due in more
+// than 3 days" cards, which are always the same light blue gradient. Those cards
+// do not respond to the brightness slider, so their text must not either:
+// scheme_card_text() flipped it to near-white in dark mode and it disappeared
+// against the light background. Near-black keeps ~4.6:1 contrast even at the
+// darker end of that gradient.
+static lv_color_t scheme_text_on_light()  { return lv_color_hex(0x101820); }
 static int temp_adjust = 0;// Global temperature adjustment
 static lv_obj_t *build_version_label = nullptr;// Global variable for build version label
 static unsigned long lastHolidayUpdate = 0;
@@ -1195,7 +1202,10 @@ void updateEventDisplay(lv_obj_t *calendar) {
       if (description.length() > 0) {
         lv_obj_t *desc_label = lv_label_create(event_cont);
         lv_label_set_text(desc_label, description.c_str());
-        lv_obj_set_style_text_color(desc_label, lv_color_hex(0x2A2A2A), 0);
+        // This card's background DOES follow the brightness slider, so this label
+        // has to match the rest of the card - a fixed dark grey went unreadable
+        // against the dark background in dark mode.
+        lv_obj_set_style_text_color(desc_label, scheme_card_text(), 0);
         lv_obj_set_style_text_font(desc_label, &lv_font_montserrat_14, 0);
         lv_obj_set_style_text_align(desc_label, LV_TEXT_ALIGN_LEFT, 0);
         lv_label_set_long_mode(desc_label, LV_LABEL_LONG_WRAP);
@@ -1247,7 +1257,7 @@ void updateEventDisplay(lv_obj_t *calendar) {
         // Title label (blue)
         lv_obj_t *title_label = lv_label_create(event_cont);
         lv_label_set_text(title_label, summary.c_str());
-        lv_obj_set_style_text_color(title_label, scheme_card_text(), 0);
+        lv_obj_set_style_text_color(title_label, scheme_text_on_light(), 0);
         lv_obj_set_style_text_font(title_label, &lv_font_montserrat_14, 0);
         lv_obj_set_style_text_align(title_label, LV_TEXT_ALIGN_LEFT, 0);
         lv_label_set_long_mode(title_label, LV_LABEL_LONG_WRAP);
@@ -1257,7 +1267,7 @@ void updateEventDisplay(lv_obj_t *calendar) {
         // Date row
         lv_obj_t *date_label = lv_label_create(event_cont);
         lv_label_set_text(date_label, ("On " + start_date_str).c_str());
-        lv_obj_set_style_text_color(date_label, scheme_card_text(), 0);
+        lv_obj_set_style_text_color(date_label, scheme_text_on_light(), 0);
         lv_obj_set_style_text_font(date_label, &lv_font_montserrat_14, 0);
         lv_obj_set_style_text_align(date_label, LV_TEXT_ALIGN_LEFT, 0);
         lv_obj_align_to(date_label, title_label, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 0);
