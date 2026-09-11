@@ -2584,7 +2584,6 @@ void apply_calendar_theme(lv_obj_t *cal) {
   const lv_color_t cell_bg    = dark ? lv_color_hex(0x262626) : lv_color_hex(0xF2F5F8);
   const lv_color_t cell_press = dark ? lv_color_hex(0x35404D) : lv_color_hex(0xDCE7F5);
   const lv_color_t text       = dark ? lv_color_hex(0xECEFF1) : lv_color_hex(0x2C3E50);
-  const lv_color_t weekday    = dark ? lv_color_hex(0x4FC3F7) : lv_color_hex(0x007ACC);
 
   lv_obj_set_style_bg_color(cal, card_bg, LV_PART_MAIN);
   lv_obj_set_style_bg_opa(cal, LV_OPA_COVER, LV_PART_MAIN);
@@ -2594,8 +2593,11 @@ void apply_calendar_theme(lv_obj_t *cal) {
   lv_obj_set_style_bg_opa(cal, LV_OPA_COVER, LV_PART_ITEMS);
   lv_obj_set_style_bg_color(cal, cell_press, LV_PART_ITEMS | LV_STATE_PRESSED);
   lv_obj_set_style_text_color(cal, text, LV_PART_ITEMS);
-  // Su..Sa header row (tagged with LV_BUTTONMATRIX_CTRL_CUSTOM_2 -> USER_2)
-  lv_obj_set_style_text_color(cal, weekday, LV_PART_ITEMS | LV_STATE_USER_2);
+  // The 1px item border must stay opaque and be the same colour as the cell:
+  // invisible on normal days, but it is what LVGL's own calendar draw callback
+  // recolours (and thickens) to mark "today", so it has to exist.
+  lv_obj_set_style_border_color(cal, cell_bg, LV_PART_ITEMS);
+  lv_obj_set_style_border_opa(cal, LV_OPA_COVER, LV_PART_ITEMS);
 }
 void darkness_slider_cb(lv_event_t *e) {
   lv_obj_t *slider = (lv_obj_t*)lv_event_get_target(e);
@@ -2691,19 +2693,16 @@ void setup_calendar() {
   lv_obj_set_style_shadow_width(calendar, 16, LV_PART_MAIN);
   lv_obj_set_style_shadow_opa(calendar, LV_OPA_20, LV_PART_MAIN);
   lv_obj_set_style_shadow_offset_y(calendar, 4, LV_PART_MAIN);
-  // Rounded day cells with a little breathing room between them.
+  // Rounded day cells with a little breathing room between them. The item
+  // border must stay >= 1px: lv_draw_rect drops the border draw descriptor when
+  // the width is 0, and LVGL's calendar marks "today" by recolouring it.
   lv_obj_set_style_radius(calendar, 7, LV_PART_ITEMS);
-  lv_obj_set_style_border_width(calendar, 0, LV_PART_ITEMS);
+  lv_obj_set_style_border_width(calendar, 1, LV_PART_ITEMS);
   lv_obj_t *cal_btnm = lv_calendar_get_btnmatrix(calendar);
   if (cal_btnm) {
     lv_obj_set_style_pad_row(cal_btnm, 4, LV_PART_MAIN);
     lv_obj_set_style_pad_column(cal_btnm, 4, LV_PART_MAIN);
     lv_obj_set_style_pad_all(cal_btnm, 0, LV_PART_MAIN);
-    // Tag the Su..Sa row so it can be coloured separately from the day
-    // numbers (LV_BUTTONMATRIX_CTRL_CUSTOM_2 maps to LV_STATE_USER_2).
-    for (int i = 0; i < 7; i++) {
-      lv_btnmatrix_set_btn_ctrl(cal_btnm, i, LV_BTNMATRIX_CTRL_CUSTOM_2);
-    }
   }
   // Days that have events: theme tint plus an accent outline.
   static lv_style_t style_highlight;
@@ -2713,14 +2712,10 @@ void setup_calendar() {
   lv_style_set_border_opa(&style_highlight, LV_OPA_COVER);
   lv_style_set_border_color(&style_highlight, lv_color_hex(0x007ACC));
   lv_obj_add_style(calendar, &style_highlight, LV_PART_ITEMS | LV_STATE_CHECKED);
-  // Today: solid accent circle with white text.
-  static lv_style_t style_today;
-  lv_style_init(&style_today);
-  lv_style_set_bg_color(&style_today, lv_color_hex(0x007ACC));
-  lv_style_set_bg_opa(&style_today, LV_OPA_COVER);
-  lv_style_set_radius(&style_today, LV_RADIUS_CIRCLE);
-  lv_style_set_text_color(&style_today, lv_color_hex(0xFFFFFF));
-  lv_obj_add_style(calendar, &style_today, LV_PART_ITEMS | LV_STATE_USER_1);
+  // "Today" is drawn by LVGL's calendar draw callback (the button it tagged with
+  // LV_CALENDAR_CTRL_TODAY gets an accent-coloured, +1px border). A
+  // LV_STATE_USER_1 style would never fire: lv_buttonmatrix only maps
+  // CHECKED/DISABLED/PRESSED/... to states, never CUSTOM_1..4 -> USER_1..4.
   apply_calendar_theme(calendar);
   const char * day_names[7] = {"Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"};
   lv_calendar_set_day_names(calendar, day_names);
