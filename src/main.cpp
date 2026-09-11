@@ -64,6 +64,7 @@ void fetchParcelBoxCredentials(); // New function to fetch parcelbox credentials
 void fetchBankHolidays(); // New function to fetch bank holidays
 void updateHolidayLabel(); // New function to update holiday label
 void notification_toggle_cb(lv_timer_t *timer);
+void notification_hide();
 
 
 
@@ -498,6 +499,22 @@ void fetchEvents() {
   http.end();
   printMemoryUsage();
 }
+// Tear down the notification icon and its blink timer together and reset the
+// blink state. The parcel notification can be cleared from the web app at any
+// time, so the icon may be removed while its blink timer is still pending; the
+// timer must be deleted here as well, otherwise it later fires against a
+// NULL/deleted object and crashes in lv_obj_add_flag()/lv_obj_clear_flag().
+void notification_hide() {
+  if (notification_timer) {
+    lv_timer_del(notification_timer);
+    notification_timer = NULL;
+  }
+  if (notification_img) {
+    lv_obj_del(notification_img);
+    notification_img = nullptr;
+  }
+  notification_visible = false;
+}
 // New function to fetch notifications and display image if new event
 void fetchNotifications() {
   if (debug == 1) Serial.println("[APP] Fetching notifications from https://cloudapps.zapto.org/spb/api.php...");
@@ -529,6 +546,7 @@ void fetchNotifications() {
       current_notification_text = this_notification;
       if (!notification_img) {
         notification_img = lv_img_create(lv_scr_act());
+        lv_obj_null_on_delete(&notification_img); // Auto-null if deleted elsewhere
         lv_img_set_src(notification_img, &box);
         lv_img_set_zoom(notification_img, 102);
         lv_obj_align(notification_img, LV_ALIGN_TOP_RIGHT, -110, -13); // Top-right with padding
@@ -540,10 +558,7 @@ void fetchNotifications() {
       }
     } else {
       if (debug == 1) Serial.println("[APP] No new notification event, hiding image");
-      if (notification_img) {
-        lv_obj_del(notification_img);
-        notification_img = nullptr;
-      }
+      notification_hide();
     }
   } else {
     if (debug == 1) Serial.println("[APP] Notification HTTP request failed: " + String(httpCode));
@@ -551,12 +566,7 @@ void fetchNotifications() {
   http.end();
 }
 void notification_click_cb(lv_event_t *e) {
-  if (notification_img) {
-    if (notification_timer) lv_timer_del(notification_timer);
-    notification_timer = NULL;
-    lv_obj_del(notification_img);
-    notification_img = nullptr;
-  }
+  notification_hide();
   last_ignored_notification = current_notification_text;
   // Mark as read
   HTTPClient http;
@@ -579,6 +589,14 @@ void blink_animation_cb(void * var, int32_t v) {
   lv_obj_set_style_img_opa((lv_obj_t *)var, v, 0);
 }
 void notification_toggle_cb(lv_timer_t *timer) {
+  if (notification_img == nullptr) {
+    // The icon was removed (e.g. the notification was cleared from the web app)
+    // while this timer was still pending. Stop the timer instead of touching a
+    // dead object. Deleting a timer from inside its own callback is supported
+    // by LVGL v9 (the handler restarts its iteration).
+    notification_hide();
+    return;
+  }
   if (notification_visible) {
     lv_obj_add_flag(notification_img, LV_OBJ_FLAG_HIDDEN);
     notification_visible = false;
