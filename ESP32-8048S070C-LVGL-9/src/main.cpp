@@ -9,7 +9,7 @@
 #include <esp_system.h>  // For ESP.restart()
 extern const lv_font_t technology_98;
 // Build version
-const String build_version = "2.0";
+const String build_version = "1.4";
 int debug =0; // Change to 1 to enable serial prints
 // Firmware check interval variable
 const unsigned long firmwareCheckInterval = 100000UL; // 5 minutes in milliseconds
@@ -3310,8 +3310,15 @@ void setup() {
         setup_display();
         show_api_code_screen();
       } else {
-        fetchParcelBoxCredentials();
-        fetchWeatherLocation(); // Added
+        // TEMPORARY TEST / robustness fix:
+        // These two HTTPS fetches to crontech.uk run BEFORE the display is even
+        // initialised, so they sit inside the window where the heap corruption
+        // is already present. Skipping them gets the UI up without two TLS
+        // sessions first. Nothing here depends on the results: the values are
+        // read straight back out of Preferences on the next lines, and the
+        // periodic loop re-fetches both anyway.
+        // fetchParcelBoxCredentials();
+        // fetchWeatherLocation(); // Added
         preferences.begin("location", false);
         location = preferences.getString("location", "");
         lat = preferences.getString("lat", "");
