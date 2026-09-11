@@ -263,7 +263,6 @@ struct SettingsUI {
   lv_obj_t *location_ta; // For weather location (city name)
   lv_obj_t *username_ta; // For parcelBox username
   lv_obj_t *device_id_ta; // For parcelBox device ID
-  lv_obj_t *temp_adjust_ta; // For temperature adjustment
 };
 // Event structure
 struct Event {
@@ -2096,26 +2095,18 @@ void show_settings_popup() {
     lv_obj_set_style_pad_row(right_col, 8, 0);
     lv_obj_set_flex_flow(right_col, LV_FLEX_FLOW_COLUMN);
 
-    // Left column: QR code, firmware version, brightness.
+    // Left column: just the QR code now that brightness has moved across.
     lv_obj_t *qr_card = make_card(left_col, lv_color_hex(0x151515), lv_color_hex(0x151515));
     lv_obj_set_flex_align(qr_card, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_t *qr_img = lv_img_create(qr_card);
     lv_img_set_src(qr_img, &qr);
-    lv_img_set_zoom(qr_img, 110); // 298px source -> ~128px on screen
+    lv_img_set_zoom(qr_img, 132); // 20% up from 110; 298px source -> ~154px on screen
     lv_obj_t *qr_hint = lv_label_create(qr_card);
     lv_label_set_text(qr_hint, "Scan to open the web app");
     lv_obj_set_style_text_font(qr_hint, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(qr_hint, lv_color_hex(0xFFFFFF), 0);
 
-    lv_obj_t *brightness_card = make_card(left_col, lv_color_hex(0x1e1e1e), lv_color_hex(0x1e1e1e));
-    make_card_title(brightness_card, "UI Brightness");
-    lv_obj_t *darkness_slider = lv_slider_create(brightness_card);
-    lv_slider_set_range(darkness_slider, 0, 100);
-    lv_slider_set_value(darkness_slider, g_ui_darkness, LV_ANIM_OFF);
-    lv_obj_set_width(darkness_slider, LV_PCT(100));
-    lv_obj_add_event_cb(darkness_slider, darkness_slider_cb, LV_EVENT_VALUE_CHANGED, NULL);
-
-    // Right column: weather location, ParcelBox, temperature.
+    // Right column: weather location, ParcelBox, brightness.
     lv_obj_t *weather_cont = make_card(right_col, scheme_accent(), scheme_accent_dark());
     make_card_title(weather_cont, "Weather Location");
     lv_obj_t *location_ta = make_field(weather_cont, "City", "City", location, 0, LV_PCT(100), 0);
@@ -2133,14 +2124,19 @@ void show_settings_popup() {
     lv_obj_t *username_ta = make_field(parcel_pair, "Username", "Username", username, 0, 0, 1);
     lv_obj_t *device_id_ta = make_field(parcel_pair, "Device ID", "Device ID", device_id, 0, 0, 1);
 
-    lv_obj_t *temp_cont = make_card(right_col, scheme_accent_deep(),
-                                    lv_palette_darken(scheme_palette(), 5));
-    make_card_title(temp_cont, "Temperature Adjustment");
-    lv_obj_t *temp_adjust_ta = make_field(temp_cont, "Adjust (\xC2\xB0" "C)", "0", String(temp_adjust), 1, LV_PCT(100), 0);
+    // UI Brightness now occupies the slot the "Temperature Adjustment" card used
+    // to hold, so both columns stay full-height instead of leaving a gap.
+    lv_obj_t *brightness_card = make_card(right_col, lv_color_hex(0x1e1e1e), lv_color_hex(0x1e1e1e));
+    make_card_title(brightness_card, "UI Brightness");
+    lv_obj_t *darkness_slider = lv_slider_create(brightness_card);
+    lv_slider_set_range(darkness_slider, 0, 100);
+    lv_slider_set_value(darkness_slider, g_ui_darkness, LV_ANIM_OFF);
+    lv_obj_set_width(darkness_slider, LV_PCT(100));
+    lv_obj_add_event_cb(darkness_slider, darkness_slider_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
-    // Firmware version sits directly under the Temperature Adjustment card as a
-    // normal child of the column, so it starts at the same left edge as that
-    // card rather than floating in a corner.
+    // Firmware version sits directly under the last card as a normal child of the
+    // column, so it starts at the same left edge as that card rather than
+    // floating in a corner.
     lv_obj_t *version_settings_label = lv_label_create(right_col);
     lv_label_set_text(version_settings_label, ("Firmware: " + currentFirmwareVersion).c_str());
     lv_obj_set_style_text_font(version_settings_label, &lv_font_montserrat_14, 0);
@@ -2168,7 +2164,6 @@ void show_settings_popup() {
     sui->location_ta = location_ta;
     sui->username_ta = username_ta;
     sui->device_id_ta = device_id_ta;
-    sui->temp_adjust_ta = temp_adjust_ta;
     lv_obj_add_event_cb(submit_btn, save_settings_cb, LV_EVENT_PRESSED, sui);
 
     // Keyboard setup (shared across screens, hidden until a field is focused).
@@ -4414,7 +4409,6 @@ void save_settings_cb(lv_event_t *e) {
   String new_location = String(lv_textarea_get_text(sui->location_ta));
   username = String(lv_textarea_get_text(sui->username_ta));
   device_id = String(lv_textarea_get_text(sui->device_id_ta));
-  temp_adjust = String(lv_textarea_get_text(sui->temp_adjust_ta)).toInt();
   // Save parcelBox credentials
   if (!username.isEmpty() && !device_id.isEmpty()) {
     HTTPClient http;
