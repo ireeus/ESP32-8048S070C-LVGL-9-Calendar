@@ -18,6 +18,13 @@ const unsigned long firmwareCheckInterval = 100000UL; // 5 minutes in millisecon
 // the space above the on-screen keyboard while a text field is focused.
 #define SETTINGS_POPUP_W 780
 #define SETTINGS_POPUP_H 464
+// Upper bound on event cards built in the side panel. Each card is 3+ LVGL
+// objects carrying local styles; building one per event (up to 300) exhausted
+// the LVGL heap, so lv_obj_create() started returning NULL and the next call
+// dereferenced it - which is what crashed both the boot sequence and the
+// settings window. The panel is only 400x175, so a handful is all that is
+// readable anyway.
+#define MAX_EVENT_CHIPS 10
 // Forward declarations
 void fetchEvents();
 void updateEventDisplay(lv_obj_t *calendar);
@@ -988,7 +995,7 @@ void updateEventDisplay(lv_obj_t *calendar) {
   time_t todayEnd = todayStart + 86400 - 1; // End of today
 
   // Step 1: Display ongoing events (unchanged)
-  for (int i = 0; i < numEvents; i++) {
+  for (int i = 0; i < numEvents && total_displayed < MAX_EVENT_CHIPS; i++) {
     if (events[i].start_time < todayStart && events[i].end_time > now) {
       // This is an ongoing event
       lv_obj_t *event_cont = lv_obj_create(eventContainer);
@@ -1024,7 +1031,7 @@ void updateEventDisplay(lv_obj_t *calendar) {
   }
 
   // Step 2: Display today's events (unchanged)
-  for (int i = 0; i < numEvents; i++) {
+  for (int i = 0; i < numEvents && total_displayed < MAX_EVENT_CHIPS; i++) {
     if (events[i].isToday) {
       lv_obj_t *event_cont = lv_obj_create(eventContainer);
       lv_obj_set_size(event_cont, 361, 65);
@@ -1114,7 +1121,7 @@ void updateEventDisplay(lv_obj_t *calendar) {
     }
   }
 
-  if (upcoming_count > 0) {
+  if (upcoming_count > 0 && total_displayed < MAX_EVENT_CHIPS) {
     // Upcoming label
     lv_obj_t *upcoming_label = lv_label_create(eventContainer);
     lv_label_set_text(upcoming_label, "Due in more than 3 days");
@@ -1124,7 +1131,7 @@ void updateEventDisplay(lv_obj_t *calendar) {
     y_offset += 25;
 
     // Display upcoming events (similar to today's, but with date)
-    for (int i = 0; i < numEvents; i++) {
+    for (int i = 0; i < numEvents && total_displayed < MAX_EVENT_CHIPS; i++) {
       if (!events[i].isToday && events[i].start_time >= todayStart) {
         lv_obj_t *event_cont = lv_obj_create(eventContainer);
         lv_obj_set_size(event_cont, 361, 65);
@@ -1614,13 +1621,14 @@ void show_settings_popup() {
     // instead.
     lv_mem_monitor_t mem;
     lv_mem_monitor(&mem);
+    Serial.printf("[APP] Settings: LVGL heap free before = %u\n", (unsigned)mem.free_size);
     if (mem.free_size < 28000) {
-      if (debug == 1) Serial.printf("[APP] Settings: not enough LVGL memory (%u free)\n", (unsigned)mem.free_size);
+      Serial.printf("[APP] Settings: refused, only %u bytes free\n", (unsigned)mem.free_size);
       return;
     }
     settings_popup = lv_obj_create(lv_scr_act());
     if (!settings_popup) {
-      if (debug == 1) Serial.println("[APP] Settings: failed to create popup");
+      Serial.println("[APP] Settings: failed to create popup");
       return;
     }
     lv_obj_set_size(settings_popup, SETTINGS_POPUP_W, SETTINGS_POPUP_H);
@@ -1822,6 +1830,8 @@ void show_settings_popup() {
       lv_obj_add_flag(keyboard, LV_OBJ_FLAG_HIDDEN);
       lv_obj_set_style_text_font(keyboard, &lv_font_montserrat_14, 0);
     }
+    lv_mem_monitor(&mem);
+    Serial.printf("[APP] Settings: LVGL heap free after = %u\n", (unsigned)mem.free_size);
 }
 void factory_reset_cb(lv_event_t *e) {
   const char* namespaces[] = {"wifi", "api", "location", "firmware", "ui", "cloudapps", "event_states"};

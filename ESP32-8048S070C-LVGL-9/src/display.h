@@ -112,6 +112,15 @@ void setup_display()
   Serial.println("LVGL initialized");
   Serial.printf("Free heap after LVGL: %d bytes\n", heap_caps_get_free_size(MALLOC_CAP_8BIT));
   Serial.printf("Free PSRAM after LVGL: %d bytes\n", heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+  // Report the actual LVGL heap size. If this says ~59736 the enlarged
+  // LV_MEM_SIZE in include/lv_conf.h did NOT get compiled in (needs a clean
+  // build, i.e. `pio run -t clean`); it should be ~127656.
+  {
+    lv_mem_monitor_t lvmon;
+    lv_mem_monitor(&lvmon);
+    Serial.printf("LVGL heap: total %u bytes, free %u bytes\n",
+                  (unsigned)lvmon.total_size, (unsigned)lvmon.free_size);
+  }
   lv_tick_set_cb(millis_cb);
   screenWidth = gfx.width();
   screenHeight = gfx.height();
