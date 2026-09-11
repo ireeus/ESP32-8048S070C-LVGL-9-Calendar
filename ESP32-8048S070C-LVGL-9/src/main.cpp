@@ -9,7 +9,7 @@
 #include <esp_system.h>  // For ESP.restart()
 extern const lv_font_t technology_98;
 // Build version
-const String build_version = "1.4";
+const String build_version = "2.1";
 int debug =0; // Change to 1 to enable serial prints
 // Firmware check interval variable
 const unsigned long firmwareCheckInterval = 100000UL; // 5 minutes in milliseconds
@@ -17,9 +17,10 @@ const unsigned long firmwareCheckInterval = 100000UL; // 5 minutes in millisecon
 // two-column layout so the whole page is visible at once, and it shrinks to
 // the space above the on-screen keyboard while a text field is focused.
 // Maximum number of events kept in RAM. The old fetch loop tested for 4000
-// while the storage array held only 300, so the effective limit was always
-// the array size - now made explicit and consistent.
-#define MAX_EVENTS 500
+// while the storage array held only 300, so the effective limit was always the
+// array size. 200 is plenty for this calendar and saves ~10KB of static RAM
+// versus the old 300 (each Event is ~104 bytes: four Strings + two time_t).
+#define MAX_EVENTS 200
 #define SETTINGS_POPUP_W 780
 #define SETTINGS_POPUP_H 464
 // Upper bound on event cards built in the side panel. Each card is 3+ LVGL
