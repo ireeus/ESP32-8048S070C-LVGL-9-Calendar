@@ -2782,6 +2782,7 @@ void setup_calendar() {
   if (debug == 1) Serial.println("[APP] Starting display setup...");
   setup_display();
   lv_obj_set_scrollbar_mode(lv_scr_act(), LV_SCROLLBAR_MODE_OFF);
+  heapCheck("H after setup_display");
   if (debug == 1) Serial.println("[APP] Display setup complete");
   // Apply initial darkness
   uint8_t gray = 255 - (g_ui_darkness * 255 / 100);
@@ -2818,6 +2819,7 @@ void setup_calendar() {
     }
     lv_timer_handler();
   }
+  heapCheck("I after splash");
   if (debug == 1) Serial.println("[APP] Creating calendar...");
   calendar = lv_calendar_create(lv_scr_act());
   if (!calendar) {
@@ -2892,7 +2894,9 @@ void setup_calendar() {
   updateDateTimeLabel();
   updateMonthLabel(calendar);
   updateHolidayLabel();
+  heapCheck("K after labels");
   update_today_highlight(calendar);
+  heapCheck("L before bank holidays");
   if (debug == 1) Serial.println("[APP] Fetching bank holidays...");
   fetchBankHolidays();
   if (debug == 1) Serial.println("[APP] Fetching initial events...");

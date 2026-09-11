@@ -65,9 +65,21 @@ void my_touchpad_read(lv_indev_t *indev, lv_indev_data_t *data)
     data->state = LV_INDEV_STATE_RELEASED;
   }
 }
+
+// ---------------------------------------------------------------------------
+// TEMPORARY DIAGNOSTIC
+// Verifies the internal heap is intact at each startup checkpoint. Watch the
+// [HEAP] lines in the serial log: the last "OK" before a "*** CORRUPT ***"
+// brackets the code that is smashing the heap.
+// ---------------------------------------------------------------------------
+static void heapCheck(const char *tag) {
+  bool ok = heap_caps_check_integrity_all(true);
+  Serial.printf("[HEAP] %-30s %s\n", tag, ok ? "OK" : "*** CORRUPT ***");
+}
 void setup_display()
 {
   Serial.begin(115200);
+  heapCheck("A setup_display start");
   Serial.println("Initializing display...");
   Serial.printf("Free heap before init: %d bytes\n", heap_caps_get_free_size(MALLOC_CAP_8BIT));
   Serial.printf("Free PSRAM before init: %d bytes\n", heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
@@ -110,6 +122,7 @@ void setup_display()
   Serial.println("Touchscreen initialized");
   lv_init();
   Serial.println("LVGL initialized");
+  heapCheck("E after lv_init");
   Serial.printf("Free heap after LVGL: %d bytes\n", heap_caps_get_free_size(MALLOC_CAP_8BIT));
   Serial.printf("Free PSRAM after LVGL: %d bytes\n", heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
   lv_tick_set_cb(millis_cb);
@@ -134,11 +147,13 @@ void setup_display()
   lv_color_t *buf2 = disp_draw_buf + bufSize; // Second buffer starts after first
   lv_display_set_buffers(disp, disp_draw_buf, buf2, bufSize, LV_DISPLAY_RENDER_MODE_PARTIAL); // Fixed size to bufSize (pixels per buffer)
   Serial.println("LVGL display created");
+  heapCheck("F after display buffers");
   lv_indev_t *indev = lv_indev_create();
   lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
   lv_indev_set_read_cb(indev, my_touchpad_read);
   Serial.println("Touch input device created");
   Serial.println("Display setup complete.");
+  heapCheck("G setup_display end");
 }
 void loop_display()
 {
