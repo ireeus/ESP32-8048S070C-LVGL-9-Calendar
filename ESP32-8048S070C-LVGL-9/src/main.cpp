@@ -74,7 +74,6 @@ void notification_click_cb(lv_event_t *e);
 void blink_animation_cb(void * var, int32_t v);
 void snooze_reminder_cb(lv_event_t *e);
 const lv_image_dsc_t* getWifiImage();
-void device_id_preview_cb(lv_event_t *e);
 void fetchParcelBoxCredentials(); // New function to fetch parcelbox credentials
 void fetchBankHolidays(); // New function to fetch bank holidays
 void updateHolidayLabel(); // New function to update holiday label
@@ -1412,7 +1411,12 @@ void keyboard_event_cb(lv_event_t * e) {
             lv_keyboard_set_textarea(keyboard, ta);
             lv_obj_align(keyboard, LV_ALIGN_BOTTOM_MID, 0, 0);
             lv_obj_clear_flag(keyboard, LV_OBJ_FLAG_HIDDEN);
-            lv_obj_move_foreground(keyboard);
+            // v9 equivalent of the v8 lv_obj_move_foreground() helper. That
+            // helper is a static inline in lv_api_map_v8.h which calls
+            // LV_LOG_WARN -> lv_log_add, and lv_log_add does not exist when
+            // LV_USE_LOG is 0, so calling it fails to link.
+            lv_obj_t *kb_parent = lv_obj_get_parent(keyboard);
+            if (kb_parent) lv_obj_move_to_index(keyboard, lv_obj_get_child_count(kb_parent) - 1);
             if (settings_popup && is_descendant_of(ta, settings_popup)) {
                 // Settings window: shrink it to the area above the keyboard and
                 // scroll the focused field into view, so it is never hidden
@@ -1676,32 +1680,35 @@ void show_settings_popup() {
       lv_obj_set_style_text_color(lbl, lv_color_hex(0xFFFFFF), 0);
       return lbl;
     };
-    auto make_field_row = [](lv_obj_t *card, const char *label_text, const char *placeholder,
-                             const String &value, intptr_t numeric) {
-      lv_obj_t *row = lv_obj_create(card);
-      lv_obj_set_width(row, LV_PCT(100));
-      lv_obj_set_height(row, LV_SIZE_CONTENT);
-      lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0);
-      lv_obj_set_style_border_width(row, 0, 0);
-      lv_obj_set_style_pad_all(row, 0, 0);
-      lv_obj_set_style_pad_column(row, 6, 0);
-      lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
-      lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-      lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
-      lv_obj_set_scrollbar_mode(row, LV_SCROLLBAR_MODE_OFF);
-      lv_obj_t *label = lv_label_create(row);
-      lv_label_set_text(label, label_text);
-      lv_obj_set_style_text_font(label, &lv_font_montserrat_14, 0);
-      lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), 0);
-      lv_obj_t *ta = lv_textarea_create(row);
+    // Field = input box with its description label UNDERNEATH it. `width` sizes
+    // the column; pass width 0 + grow 1 to share a row with another field.
+    auto make_field = [](lv_obj_t *parent, const char *label_text, const char *placeholder,
+                         const String &value, intptr_t numeric, lv_coord_t width, uint8_t grow) {
+      lv_obj_t *col = lv_obj_create(parent);
+      lv_obj_set_width(col, width);
+      if (grow) lv_obj_set_flex_grow(col, grow);
+      lv_obj_set_height(col, LV_SIZE_CONTENT);
+      lv_obj_set_style_bg_opa(col, LV_OPA_TRANSP, 0);
+      lv_obj_set_style_border_width(col, 0, 0);
+      lv_obj_set_style_pad_all(col, 0, 0);
+      lv_obj_set_style_pad_row(col, 2, 0);
+      lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
+      lv_obj_set_flex_align(col, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+      lv_obj_clear_flag(col, LV_OBJ_FLAG_SCROLLABLE);
+      lv_obj_set_scrollbar_mode(col, LV_SCROLLBAR_MODE_OFF);
+      lv_obj_t *ta = lv_textarea_create(col);
       lv_textarea_set_one_line(ta, true);
       lv_textarea_set_placeholder_text(ta, placeholder);
       lv_textarea_set_text(ta, value.c_str());
-      lv_obj_set_width(ta, 210);
+      lv_obj_set_width(ta, LV_PCT(100));
       lv_obj_set_style_text_font(ta, &lv_font_montserrat_14, 0);
       lv_obj_set_user_data(ta, (void*)numeric);
       lv_obj_add_event_cb(ta, keyboard_event_cb, LV_EVENT_FOCUSED, ta);
       lv_obj_add_event_cb(ta, keyboard_event_cb, LV_EVENT_DEFOCUSED, ta);
+      lv_obj_t *label = lv_label_create(col); // description below the input
+      lv_label_set_text(label, label_text);
+      lv_obj_set_style_text_font(label, &lv_font_montserrat_14, 0);
+      lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), 0);
       return ta;
     };
     auto make_button = [](lv_obj_t *parent, const char *text, uint32_t color, lv_coord_t w) {
@@ -1715,11 +1722,7 @@ void show_settings_popup() {
       return btn;
     };
 
-    // ---- header -----------------------------------------------------------
-    lv_obj_t *settings_title = lv_label_create(settings_popup);
-    lv_label_set_text(settings_title, "Settings");
-    lv_obj_set_style_text_font(settings_title, &lv_font_montserrat_24, 0);
-    lv_obj_set_style_text_color(settings_title, lv_color_hex(0xFFFFFF), 0);
+    // (No "Settings" heading: it only pushed the content down.)
 
     // ---- two-column body --------------------------------------------------
     lv_obj_t *settings_body = make_panel(settings_popup);
@@ -1754,10 +1757,14 @@ void show_settings_popup() {
     lv_obj_set_style_text_font(qr_hint, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(qr_hint, lv_color_hex(0xFFFFFF), 0);
 
-    lv_obj_t *version_settings_label = lv_label_create(left_col);
+    // Firmware version floated into the bottom-right corner. IGNORE_LAYOUT keeps
+    // it out of the flex flow so it costs no vertical space.
+    lv_obj_t *version_settings_label = lv_label_create(settings_popup);
     lv_label_set_text(version_settings_label, ("Firmware: " + currentFirmwareVersion).c_str());
     lv_obj_set_style_text_font(version_settings_label, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(version_settings_label, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_color(version_settings_label, lv_color_hex(0x777777), 0);
+    lv_obj_add_flag(version_settings_label, LV_OBJ_FLAG_IGNORE_LAYOUT);
+    lv_obj_align(version_settings_label, LV_ALIGN_BOTTOM_RIGHT, -14, -12);
 
     lv_obj_t *brightness_card = make_card(left_col, 0x1e1e1e, 0x1e1e1e);
     make_card_title(brightness_card, "UI Brightness");
@@ -1770,32 +1777,24 @@ void show_settings_popup() {
     // Right column: weather location, ParcelBox, temperature.
     lv_obj_t *weather_cont = make_card(right_col, 0x55a3ff, 0x007acc);
     make_card_title(weather_cont, "Weather Location");
-    lv_obj_t *location_ta = make_field_row(weather_cont, "City:", "City", location, 0);
+    lv_obj_t *location_ta = make_field(weather_cont, "City", "City", location, 0, LV_PCT(100), 0);
 
     lv_obj_t *parcelbox_cont = make_card(right_col, 0x00b894, 0x00a085);
     make_card_title(parcelbox_cont, "ParcelBox");
-    lv_obj_t *username_ta = make_field_row(parcelbox_cont, "Username:", "Username", username, 0);
-    lv_obj_t *device_id_ta = make_field_row(parcelbox_cont, "Device ID:", "Device ID", device_id, 0);
-    lv_obj_t *preview_row = make_panel(parcelbox_cont);
-    lv_obj_set_width(preview_row, LV_PCT(100));
-    lv_obj_set_height(preview_row, LV_SIZE_CONTENT);
-    lv_obj_set_style_pad_column(preview_row, 6, 0);
-    lv_obj_set_flex_flow(preview_row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(preview_row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_t *preview_label_title = lv_label_create(preview_row);
-    lv_label_set_text(preview_label_title, "Preview:");
-    lv_obj_set_style_text_font(preview_label_title, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(preview_label_title, lv_color_hex(0xFFFFFF), 0);
-    lv_obj_t *preview_label = lv_label_create(preview_row);
-    lv_label_set_text(preview_label, device_id.c_str());
-    lv_obj_set_width(preview_label, 250);
-    lv_obj_set_style_text_font(preview_label, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(preview_label, lv_color_hex(0xFFFF00), 0);
-    lv_obj_add_event_cb(device_id_ta, device_id_preview_cb, LV_EVENT_VALUE_CHANGED, preview_label);
+    // Username and Device ID side by side, each with its description underneath.
+    // (The old Device ID "Preview" row was removed.)
+    lv_obj_t *parcel_pair = make_panel(parcelbox_cont);
+    lv_obj_set_width(parcel_pair, LV_PCT(100));
+    lv_obj_set_height(parcel_pair, LV_SIZE_CONTENT);
+    lv_obj_set_style_pad_column(parcel_pair, 8, 0);
+    lv_obj_set_flex_flow(parcel_pair, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(parcel_pair, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_t *username_ta = make_field(parcel_pair, "Username", "Username", username, 0, 0, 1);
+    lv_obj_t *device_id_ta = make_field(parcel_pair, "Device ID", "Device ID", device_id, 0, 0, 1);
 
     lv_obj_t *temp_cont = make_card(right_col, 0xfd79a8, 0xe84393);
     make_card_title(temp_cont, "Temperature Adjustment");
-    lv_obj_t *temp_adjust_ta = make_field_row(temp_cont, "Adjust (\xC2\xB0" "C):", "0", String(temp_adjust), 1);
+    lv_obj_t *temp_adjust_ta = make_field(temp_cont, "Adjust (\xC2\xB0" "C)", "0", String(temp_adjust), 1, LV_PCT(100), 0);
 
     // ---- footer buttons ---------------------------------------------------
     lv_obj_t *settings_footer = make_panel(settings_popup);
@@ -3914,12 +3913,6 @@ void save_settings_cb(lv_event_t *e) {
     settings_popup = nullptr;
   }
   delete sui;
-}
-void device_id_preview_cb(lv_event_t *e) {
-  lv_obj_t *ta = (lv_obj_t*)lv_event_get_target(e);
-  lv_obj_t *label = (lv_obj_t*)lv_event_get_user_data(e);
-  const char *text = lv_textarea_get_text(ta);
-  lv_label_set_text(label, text);
 }
 void fetchParcelBoxCredentials() {
   if (debug == 1) Serial.println("[APP] Fetching parcelbox credentials...");
