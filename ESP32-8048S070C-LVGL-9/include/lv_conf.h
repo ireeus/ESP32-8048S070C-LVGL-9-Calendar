@@ -372,8 +372,10 @@
  * Logging
  *-----------*/
 
-/** Enable log module */
-#define LV_USE_LOG 1
+/** Enable log module.
+ *  Disabled: it costs cycles and stack on every LVGL call for output we never
+ *  read. Turn back to 1 + LV_LOG_LEVEL_TRACE only when debugging LVGL itself. */
+#define LV_USE_LOG 0
 #if LV_USE_LOG
     /** Set value to one of the following levels of logging detail:
      *  - LV_LOG_LEVEL_TRACE    Log detailed information.
