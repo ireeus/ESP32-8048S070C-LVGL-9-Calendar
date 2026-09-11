@@ -32,7 +32,6 @@ uint32_t screenHeight;
 uint32_t bufSize;
 lv_display_t *disp;
 lv_color_t *disp_draw_buf;
-uint16_t *frame_buffer = nullptr;
 uint32_t millis_cb(void)
 {
   return millis();
@@ -74,25 +73,12 @@ void setup_display()
   // Initialize PSRAM
   bool psram_available = psramInit();
   Serial.printf("PSRAM initialized: %s\n", psram_available ? "Success" : "Failed");
-  // Allocate frame buffer (try PSRAM first, fall back to SRAM if PSRAM unavailable)
-  if (psram_available) {
-    frame_buffer = (uint16_t *)heap_caps_malloc(800 * 480 * 2, MALLOC_CAP_SPIRAM);
-    if (!frame_buffer) {
-      Serial.println("Failed to allocate frame buffer in PSRAM!");
-      // Try SRAM as fallback
-      frame_buffer = (uint16_t *)heap_caps_malloc(800 * 480 * 2, MALLOC_CAP_8BIT);
-    }
-  } else {
-    Serial.println("PSRAM unavailable, trying SRAM...");
-    frame_buffer = (uint16_t *)heap_caps_malloc(800 * 480 * 2, MALLOC_CAP_8BIT);
-  }
-  if (!frame_buffer) {
-    Serial.println("Failed to allocate frame buffer in SRAM! Halting...");
-    while (true) delay(1000); // Halt execution
-  }
-  Serial.println("Frame buffer allocated");
-  Serial.printf("Free heap after frame buffer: %d bytes\n", heap_caps_get_free_size(MALLOC_CAP_8BIT));
-  Serial.printf("Free PSRAM after frame buffer: %d bytes\n", heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+  // NOTE: no separate framebuffer is allocated here on purpose. The RGB panel
+  // owns the framebuffer - Arduino_RGB_Display::begin() below asks the ESP-IDF
+  // driver for it via _rgbpanel->getFrameBuffer(). The old code allocated a
+  // *second* 800*480*2 (768KB) PSRAM buffer here that nothing ever read or
+  // wrote: it just reserved 768KB and pushed the driver's real framebuffer to a
+  // different address.
   // Initialize display
   gfx.begin();
   Serial.println("Display initialized");

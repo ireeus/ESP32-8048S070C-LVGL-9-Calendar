@@ -16,6 +16,10 @@ const unsigned long firmwareCheckInterval = 100000UL; // 5 minutes in millisecon
 // Settings popup geometry (the display is 800x480). The popup uses a
 // two-column layout so the whole page is visible at once, and it shrinks to
 // the space above the on-screen keyboard while a text field is focused.
+// Maximum number of events kept in RAM. The old fetch loop tested for 4000
+// while the storage array held only 300, so the effective limit was always
+// the array size - now made explicit and consistent.
+#define MAX_EVENTS 500
 #define SETTINGS_POPUP_W 780
 #define SETTINGS_POPUP_H 464
 // Upper bound on event cards built in the side panel. Each card is 3+ LVGL
@@ -76,6 +80,7 @@ void snooze_reminder_cb(lv_event_t *e);
 const lv_image_dsc_t* getWifiImage();
 void fetchParcelBoxCredentials(); // New function to fetch parcelbox credentials
 void fetchBankHolidays(); // New function to fetch bank holidays
+void fetchAfterUiReady(); // Post-UI fetch sequence (bank holidays last)
 void updateHolidayLabel(); // New function to update holiday label
 void notification_toggle_cb(lv_timer_t *timer);
 void notification_hide();
@@ -195,7 +200,7 @@ struct Event {
   int reminder_count;
   time_t last_reminder_time;
 };
-Event events[300];
+Event events[MAX_EVENTS];
 int numEvents = 0;
 // Store unique dates for highlighting
 struct EventDate {
@@ -501,7 +506,7 @@ void fetchEvents() {
     }
     if (debug == 1) Serial.println("[APP] Processing " + String(eventArray.size()) + " events");
     for (JsonObject eventObj : eventArray) {
-      if (numEvents >= 4000) {
+      if (numEvents >= MAX_EVENTS) {
         if (debug == 1) Serial.println("[APP] Event limit reached (4000)");
         break;
       }
@@ -1291,6 +1296,7 @@ void wifi_connect_cb(lv_event_t * e) {
         show_location_screen();
       } else {
         setup_calendar();
+        fetchAfterUiReady();
       }
     }
   } else {
@@ -1317,6 +1323,7 @@ void api_code_submit_cb(lv_event_t * e) {
     show_location_screen();
   } else {
     setup_calendar();
+    fetchAfterUiReady();
   }
 }
 void location_submit_cb(lv_event_t * e) {
@@ -1359,6 +1366,7 @@ void location_submit_cb(lv_event_t * e) {
     location_screen = nullptr;
   }
   setup_calendar();
+  fetchAfterUiReady();
 }
 // ---------------------------------------------------------------------------
 // Confirmation dialog for destructive actions (log out / factory reset).
@@ -2893,18 +2901,11 @@ void setup_calendar() {
   updateMonthLabel(calendar);
   updateHolidayLabel();
   update_today_highlight(calendar);
-  if (debug == 1) Serial.println("[APP] Fetching bank holidays...");
-  fetchBankHolidays();
-  if (debug == 1) Serial.println("[APP] Fetching initial events...");
-  fetchEvents();
+  // Render the panels with whatever data we already have. NO network traffic
+  // happens while the screen is being built - setup() fetches everything once
+  // the UI is up, with the bank holidays fetched last of all.
   updateEventDisplay(calendar);
-  if (debug == 1) Serial.println("[APP] Fetching initial weather...");
-  fetchWeather();
   updateWeatherDisplay();
-  if (debug == 1) Serial.println("[APP] Checking for firmware updates...");
-  checkFirmwareUpdate();
-  fetchBackgroundFilename();
-  fetchAndSetBackgroundImage();
   button_bar = lv_obj_create(lv_scr_act());
   lv_obj_set_size(button_bar, 350, 40);
   lv_obj_align_to(button_bar, calendar, LV_ALIGN_OUT_BOTTOM_MID, 0, 10);
@@ -3250,27 +3251,57 @@ void fetchWeatherLocation() {
 // Updated initTime() function with correct configTime usage and TZ setting for automatic DST
 void initTime() {
   if (debug == 1) Serial.println("[APP] Initializing time with automatic DST support...");
-  // First, sync time in UTC
-  configTime(0, 0, ntpServer);
+  // EVERYTHING that follows depends on a correct clock: the calendar month,
+  // event dates, reminders and the bank-holiday lookup. So retry until NTP
+  // hands us a sane year instead of giving up on the first attempt.
   struct tm timeinfo;
-  if (!getLocalTime(&timeinfo)) {
-    if (debug == 1) Serial.println("[APP] Failed to obtain initial time from NTP");
-    return;
+  bool synced = false;
+  for (int attempt = 1; attempt <= 5 && !synced; attempt++) {
+    configTime(0, 0, ntpServer); // sync in UTC first
+    if (getLocalTime(&timeinfo) && (timeinfo.tm_year + 1900) >= 2024) {
+      synced = true;
+    } else {
+      if (debug == 1) Serial.printf("[APP] NTP not ready (attempt %d/5)\n", attempt);
+      delay(500);
+    }
   }
-  if (debug == 1) Serial.println("[APP] Initial UTC time obtained from NTP");
+  if (!synced) {
+    Serial.println("[APP] WARNING: NTP time not available - dates may be wrong");
+  }
   // Now set the UK timezone string for automatic GMT/BST handling
   setenv("TZ", "GMT0BST,M3.5.0/1,M10.5.0", 1);
   tzset();
-  // Verify local time after TZ set
-  if (getLocalTime(&timeinfo)) {
-    if (debug == 1) Serial.println("[APP] Local time after TZ set: " + String(timeinfo.tm_year + 1900) + "-" + 
-                                   String(timeinfo.tm_mon + 1) + "-" + String(timeinfo.tm_mday) + " " + 
-                                   String(timeinfo.tm_hour) + ":" + String(timeinfo.tm_min) + ":" + String(timeinfo.tm_sec));
-  } else {
-    if (debug == 1) Serial.println("[APP] Failed to obtain local time after TZ set");
+  if (synced && getLocalTime(&timeinfo) && debug == 1) {
+    Serial.println("[APP] Time synced: " + String(timeinfo.tm_year + 1900) + "-" +
+                   String(timeinfo.tm_mon + 1) + "-" + String(timeinfo.tm_mday) + " " +
+                   String(timeinfo.tm_hour) + ":" + String(timeinfo.tm_min));
   }
 }
 // Modified setup() function: Add the initTime() call after successful WiFi connection
+// ---------------------------------------------------------------------------
+// Everything fetched once the UI is already on screen. Bank holidays are
+// deliberately LAST: they are the slowest and least important, so a slow or
+// failing gov.uk request can never hold up the rest of the data. Kept in one
+// function so the setup wizards (WiFi / API code / location) behave the same
+// as a normal boot.
+// ---------------------------------------------------------------------------
+void fetchAfterUiReady() {
+  fetchParcelBoxCredentials();
+  fetchWeatherLocation();
+  fetchEvents();
+  updateEventDisplay(calendar);
+  fetchWeather();
+  updateWeatherDisplay();
+  checkFirmwareUpdate();
+  updateFirmwareButton();
+  fetchBackgroundFilename();
+  fetchAndSetBackgroundImage();
+  // -- last, always --
+  fetchBankHolidays();
+  updateHolidayLabel();
+  lastHolidayUpdate = millis();
+}
+
 void setup() {
   Serial.begin(115200);
   delay(1000);
@@ -3310,15 +3341,6 @@ void setup() {
         setup_display();
         show_api_code_screen();
       } else {
-        // TEMPORARY TEST / robustness fix:
-        // These two HTTPS fetches to crontech.uk run BEFORE the display is even
-        // initialised, so they sit inside the window where the heap corruption
-        // is already present. Skipping them gets the UI up without two TLS
-        // sessions first. Nothing here depends on the results: the values are
-        // read straight back out of Preferences on the next lines, and the
-        // periodic loop re-fetches both anyway.
-        // fetchParcelBoxCredentials();
-        // fetchWeatherLocation(); // Added
         preferences.begin("location", false);
         location = preferences.getString("location", "");
         lat = preferences.getString("lat", "");
@@ -3333,11 +3355,14 @@ void setup() {
           setup_display();
           show_location_screen();
         } else {
-			setup_calendar();
-			fetchBankHolidays();
-			updateHolidayLabel();
-			lastHolidayUpdate = millis();
-		  
+          // ---- 1) Build the whole UI first ------------------------------
+          // initTime() above has already synced the clock, so the calendar
+          // month, event dates and date/time labels are correct from the first
+          // paint. setup_calendar() itself does no network I/O.
+          setup_calendar();
+
+          // ---- 2) Screen is up: fetch everything, holidays last --------
+          fetchAfterUiReady();
         }
       }
     } else {
@@ -3797,7 +3822,7 @@ unsigned long hashString(const String& str) {
   return hash;
 }
 void addEvent(JsonObject eventObj) {
-  if (numEvents >= 300) {
+  if (numEvents >= MAX_EVENTS) {
     if (debug == 1) Serial.println("[APP] Event limit reached (300)");
     return;
   }
