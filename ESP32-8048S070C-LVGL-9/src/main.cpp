@@ -2573,6 +2573,30 @@ void updateFirmwareButton() {
     }
   }
 }
+// Colours for the calendar grid, derived from the UI brightness setting so the
+// calendar stays readable in both light and dark modes. Called at setup and
+// whenever the brightness slider moves.
+void apply_calendar_theme(lv_obj_t *cal) {
+  if (!cal) return;
+  const bool dark = (g_ui_darkness > 50);
+  const lv_color_t card_bg    = dark ? lv_color_hex(0x1B1B1B) : lv_color_hex(0xFFFFFF);
+  const lv_color_t card_line  = dark ? lv_color_hex(0x333333) : lv_color_hex(0xD8DEE4);
+  const lv_color_t cell_bg    = dark ? lv_color_hex(0x262626) : lv_color_hex(0xF2F5F8);
+  const lv_color_t cell_press = dark ? lv_color_hex(0x35404D) : lv_color_hex(0xDCE7F5);
+  const lv_color_t text       = dark ? lv_color_hex(0xECEFF1) : lv_color_hex(0x2C3E50);
+  const lv_color_t weekday    = dark ? lv_color_hex(0x4FC3F7) : lv_color_hex(0x007ACC);
+
+  lv_obj_set_style_bg_color(cal, card_bg, LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(cal, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_border_color(cal, card_line, LV_PART_MAIN);
+  // Day cells
+  lv_obj_set_style_bg_color(cal, cell_bg, LV_PART_ITEMS);
+  lv_obj_set_style_bg_opa(cal, LV_OPA_COVER, LV_PART_ITEMS);
+  lv_obj_set_style_bg_color(cal, cell_press, LV_PART_ITEMS | LV_STATE_PRESSED);
+  lv_obj_set_style_text_color(cal, text, LV_PART_ITEMS);
+  // Su..Sa header row (tagged with LV_BUTTONMATRIX_CTRL_CUSTOM_2 -> USER_2)
+  lv_obj_set_style_text_color(cal, weekday, LV_PART_ITEMS | LV_STATE_USER_2);
+}
 void darkness_slider_cb(lv_event_t *e) {
   lv_obj_t *slider = (lv_obj_t*)lv_event_get_target(e);
   g_ui_darkness = lv_slider_get_value(slider);
@@ -2583,12 +2607,12 @@ void darkness_slider_cb(lv_event_t *e) {
   // Apply to main screen
   lv_obj_set_style_bg_color(lv_scr_act(), bg_color, 0);
   lv_obj_set_style_bg_opa(lv_scr_act(), LV_OPA_100, 0);
-  // Apply to labels and calendar text
+  // Apply to labels and calendar
   if (month_label) lv_obj_set_style_text_color(month_label, text_color, 0);
   if (date_time_label) lv_obj_set_style_text_color(date_time_label, text_color, 0);
-  if (calendar) {
-    lv_obj_set_style_text_color(calendar, text_color, LV_PART_ITEMS | LV_STATE_DEFAULT);
-  }
+  if (holiday_label) lv_obj_set_style_text_color(holiday_label, text_color, 0);
+  if (build_version_label) lv_obj_set_style_text_color(build_version_label, text_color, 0);
+  apply_calendar_theme(calendar);
   // Redraw weather and events to apply changes
   updateWeatherDisplay();
   updateEventDisplay(calendar);
@@ -2659,17 +2683,45 @@ void setup_calendar() {
   showed_month = timeinfo.tm_mon + 1;
   lv_calendar_set_showed_date(calendar, showed_year, showed_month);
   lv_obj_add_event_cb(calendar, calendar_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
+  // ---- Calendar card styling -------------------------------------------
+  lv_obj_set_style_radius(calendar, 12, LV_PART_MAIN);
+  lv_obj_set_style_border_width(calendar, 2, LV_PART_MAIN);
+  lv_obj_set_style_pad_all(calendar, 6, LV_PART_MAIN);
+  lv_obj_set_style_shadow_color(calendar, lv_color_hex(0x000000), LV_PART_MAIN);
+  lv_obj_set_style_shadow_width(calendar, 16, LV_PART_MAIN);
+  lv_obj_set_style_shadow_opa(calendar, LV_OPA_20, LV_PART_MAIN);
+  lv_obj_set_style_shadow_offset_y(calendar, 4, LV_PART_MAIN);
+  // Rounded day cells with a little breathing room between them.
+  lv_obj_set_style_radius(calendar, 7, LV_PART_ITEMS);
+  lv_obj_set_style_border_width(calendar, 0, LV_PART_ITEMS);
+  lv_obj_t *cal_btnm = lv_calendar_get_btnmatrix(calendar);
+  if (cal_btnm) {
+    lv_obj_set_style_pad_row(cal_btnm, 4, LV_PART_MAIN);
+    lv_obj_set_style_pad_column(cal_btnm, 4, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(cal_btnm, 0, LV_PART_MAIN);
+    // Tag the Su..Sa row so it can be coloured separately from the day
+    // numbers (LV_BUTTONMATRIX_CTRL_CUSTOM_2 maps to LV_STATE_USER_2).
+    for (int i = 0; i < 7; i++) {
+      lv_btnmatrix_set_btn_ctrl(cal_btnm, i, LV_BTNMATRIX_CTRL_CUSTOM_2);
+    }
+  }
+  // Days that have events: theme tint plus an accent outline.
   static lv_style_t style_highlight;
   lv_style_init(&style_highlight);
-  lv_style_set_bg_color(&style_highlight, lv_color_hex(0xFF0000));
+  lv_style_set_radius(&style_highlight, 7);
+  lv_style_set_border_width(&style_highlight, 2);
+  lv_style_set_border_opa(&style_highlight, LV_OPA_COVER);
+  lv_style_set_border_color(&style_highlight, lv_color_hex(0x007ACC));
   lv_obj_add_style(calendar, &style_highlight, LV_PART_ITEMS | LV_STATE_CHECKED);
+  // Today: solid accent circle with white text.
   static lv_style_t style_today;
   lv_style_init(&style_today);
-  lv_style_set_text_color(&style_today, lv_color_hex(0x0000FF));
-  lv_style_set_border_width(&style_today, 2);
-  lv_style_set_border_color(&style_today, lv_color_hex(0x0000FF));
+  lv_style_set_bg_color(&style_today, lv_color_hex(0x007ACC));
+  lv_style_set_bg_opa(&style_today, LV_OPA_COVER);
+  lv_style_set_radius(&style_today, LV_RADIUS_CIRCLE);
+  lv_style_set_text_color(&style_today, lv_color_hex(0xFFFFFF));
   lv_obj_add_style(calendar, &style_today, LV_PART_ITEMS | LV_STATE_USER_1);
-  lv_obj_set_style_text_color(calendar, text_color, LV_PART_ITEMS | LV_STATE_DEFAULT);
+  apply_calendar_theme(calendar);
   const char * day_names[7] = {"Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"};
   lv_calendar_set_day_names(calendar, day_names);
   rearrange_calendar_parts(calendar);
@@ -2725,27 +2777,45 @@ void setup_calendar() {
   lv_obj_t *prev_btn = lv_button_create(button_bar);
   lv_obj_add_event_cb(prev_btn, prev_month_cb, LV_EVENT_PRESSED, NULL);
   lv_obj_set_size(prev_btn, 40, 40);
-  lv_obj_set_style_bg_color(prev_btn, lv_color_hex(0x333333), 0);
+  lv_obj_set_style_bg_color(prev_btn, lv_color_hex(0x007ACC), 0);
+  lv_obj_set_style_bg_color(prev_btn, lv_color_hex(0x005A9E), LV_STATE_PRESSED);
+  lv_obj_set_style_radius(prev_btn, 10, 0);
+  lv_obj_set_style_shadow_color(prev_btn, lv_color_hex(0x000000), 0);
+  lv_obj_set_style_shadow_width(prev_btn, 8, 0);
+  lv_obj_set_style_shadow_opa(prev_btn, LV_OPA_20, 0);
   lv_obj_t *prev_label = lv_label_create(prev_btn);
   lv_label_set_text(prev_label, LV_SYMBOL_LEFT);
   lv_obj_center(prev_label);
   lv_obj_set_style_text_font(prev_label, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(prev_label, lv_color_hex(0xFFFFFF), 0);
   lv_obj_t *settings_btn_obj = lv_button_create(button_bar);
   lv_obj_add_event_cb(settings_btn_obj, settings_btn_cb, LV_EVENT_PRESSED, NULL);
-  lv_obj_set_style_bg_color(settings_btn_obj, lv_color_hex(0x333333), 0);
+  lv_obj_set_style_bg_color(settings_btn_obj, lv_color_hex(0x2F3640), 0);
+  lv_obj_set_style_bg_color(settings_btn_obj, lv_color_hex(0x1E242B), LV_STATE_PRESSED);
+  lv_obj_set_style_radius(settings_btn_obj, 10, 0);
+  lv_obj_set_style_shadow_color(settings_btn_obj, lv_color_hex(0x000000), 0);
+  lv_obj_set_style_shadow_width(settings_btn_obj, 8, 0);
+  lv_obj_set_style_shadow_opa(settings_btn_obj, LV_OPA_20, 0);
   lv_obj_t *settings_label = lv_label_create(settings_btn_obj);
   lv_label_set_text(settings_label, LV_SYMBOL_SETTINGS);
   lv_obj_center(settings_label);
   lv_obj_set_style_text_font(settings_label, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(settings_label, lv_color_hex(0xFFFFFF), 0);
   lv_obj_set_size(settings_btn_obj, 40, 40);
   lv_obj_t *next_btn = lv_button_create(button_bar);
   lv_obj_add_event_cb(next_btn, next_month_cb, LV_EVENT_PRESSED, NULL);
   lv_obj_set_size(next_btn, 40, 40);
-  lv_obj_set_style_bg_color(next_btn, lv_color_hex(0x333333), 0);
+  lv_obj_set_style_bg_color(next_btn, lv_color_hex(0x007ACC), 0);
+  lv_obj_set_style_bg_color(next_btn, lv_color_hex(0x005A9E), LV_STATE_PRESSED);
+  lv_obj_set_style_radius(next_btn, 10, 0);
+  lv_obj_set_style_shadow_color(next_btn, lv_color_hex(0x000000), 0);
+  lv_obj_set_style_shadow_width(next_btn, 8, 0);
+  lv_obj_set_style_shadow_opa(next_btn, LV_OPA_20, 0);
   lv_obj_t *next_label = lv_label_create(next_btn);
   lv_label_set_text(next_label, LV_SYMBOL_RIGHT);
   lv_obj_center(next_label);
   lv_obj_set_style_text_font(next_label, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(next_label, lv_color_hex(0xFFFFFF), 0);
   updateFirmwareButton();
   wifi_icon = lv_img_create(lv_scr_act());
   lv_img_set_src(wifi_icon, getWifiImage());
