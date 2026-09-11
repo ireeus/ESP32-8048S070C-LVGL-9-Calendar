@@ -23,6 +23,15 @@ const unsigned long firmwareCheckInterval = 100000UL; // 5 minutes in millisecon
 #define MAX_EVENTS 200
 #define SETTINGS_POPUP_W 780
 #define SETTINGS_POPUP_H 464
+// Add-event window geometry. It owns the strip ABOVE the on-screen keyboard, so
+// it is 95% of the panel width and its height is derived at run time from the
+// keyboard's real measured height (see show_new_event_popup) - that way the two
+// can never overlap no matter what font or theme the keyboard ends up using.
+#define NEW_EVENT_W 760        // 95% of the 800px panel width
+#define NEW_EVENT_TOP 4        // gap between the panel top and the window
+#define NEW_EVENT_ROW 34       // height of one single-line field
+#define NEW_EVENT_COL2_X 344   // x of the date/time column (left column is 320 wide)
+#define NEW_EVENT_FIELD_H 34   // height of a date/time field
 // Upper bound on event cards built in the side panel. Each card is 3+ LVGL
 // objects carrying local styles; building one per event (up to 300) exhausted
 // the LVGL heap, so lv_obj_create() started returning NULL and the next call
@@ -129,6 +138,7 @@ static lv_obj_t *api_code_screen = nullptr;
 static lv_obj_t *location_screen = nullptr;
 static lv_obj_t *settings_popup = nullptr;
 static lv_obj_t *new_event_popup = nullptr;
+static lv_obj_t *new_event_error_label = nullptr; // single reusable inline error
 static lv_obj_t *keyboard = nullptr;
 static lv_obj_t *date_time_label = nullptr; // Renamed from month_label
 static lv_obj_t *month_label = nullptr;
@@ -1531,6 +1541,13 @@ void keyboard_event_cb(lv_event_t * e) {
                 lv_obj_set_height(settings_popup, h);
                 lv_obj_align(settings_popup, LV_ALIGN_TOP_MID, 0, 8);
                 lv_obj_scroll_to_view_recursive(ta, LV_ANIM_ON);
+            } else if (new_event_popup && is_descendant_of(ta, new_event_popup)) {
+                // Add-event window: show_new_event_popup already sizes it from
+                // the keyboard's measured height, so it sits entirely in the
+                // strip above the keyboard and must NOT be nudged. The generic
+                // "shift the parent up by the overlap" path below used to walk
+                // the window off the top of the screen while leaving the
+                // focused field behind the keyboard.
             } else {
                 // Adjust parent container (popup/screen) to ensure textarea is above keyboard
                 lv_obj_t *par = lv_obj_get_parent(ta);
@@ -1562,9 +1579,15 @@ void keyboard_event_cb(lv_event_t * e) {
                 lv_obj_align(settings_popup, LV_ALIGN_CENTER, 0, 0);
                 lv_obj_scroll_to_y(settings_popup, 0, LV_ANIM_OFF);
             } else {
-                // Reset parent to centered position if applicable
                 lv_obj_t *par = lv_obj_get_parent(ta);
-                if (par && (par == new_event_popup || par == location_screen || par == api_code_screen || par == wifi_setup_screen)) {
+                if (par == new_event_popup) {
+                    // Keep the add-event window pinned to the top strip when the
+                    // keyboard hides; re-centring it here is what made the form
+                    // jump on every focus change.
+                    lv_obj_align(par, LV_ALIGN_TOP_MID, 0, NEW_EVENT_TOP);
+                } else if (par && (par == location_screen || par == api_code_screen || par == wifi_setup_screen)) {
+                    // These are full-screen forms, so re-centring is a no-op that
+                    // undoes the generic overlap shift above.
                     lv_obj_align(par, LV_ALIGN_CENTER, 0, 0);
                 }
             }
@@ -1964,6 +1987,72 @@ void settings_btn_cb(lv_event_t * e) {
     }
   }
 }
+// ---- Add-event form layout helpers -----------------------------------------
+// The form is two columns: free text on the left, date/time on the right, with
+// the action buttons pinned to the window's bottom-right corner so they stay
+// inside it whatever height it ends up with.
+static lv_obj_t *new_event_caption(lv_obj_t *parent, const char *text,
+                                   lv_coord_t x, lv_coord_t y) {
+  lv_obj_t *l = lv_label_create(parent);
+  lv_label_set_text(l, text);
+  lv_obj_align(l, LV_ALIGN_TOP_LEFT, x, y);
+  lv_obj_set_style_text_font(l, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(l, lv_color_hex(0xFFFFFF), 0);
+  return l;
+}
+static void new_event_hint(lv_obj_t *parent, const char *text, lv_coord_t x, lv_coord_t y) {
+  lv_obj_t *l = new_event_caption(parent, text, x, y);
+  lv_obj_set_style_text_color(l, lv_color_hex(0xAAAAAA), 0);
+}
+// One prefilled field wired to the shared on-screen keyboard. `numeric` selects
+// the number keypad for the date/time boxes (same flag the old inline code put
+// in lv_obj_set_user_data).
+static lv_obj_t *new_event_field(lv_obj_t *parent, const char *text, const char *placeholder,
+                                 uint32_t max_len, bool numeric, lv_coord_t x, lv_coord_t y,
+                                 lv_coord_t w, lv_coord_t h) {
+  lv_obj_t *ta = lv_textarea_create(parent);
+  lv_textarea_set_one_line(ta, true);
+  lv_textarea_set_max_length(ta, max_len);
+  lv_textarea_set_placeholder_text(ta, placeholder);
+  lv_textarea_set_text(ta, text);
+  lv_obj_set_size(ta, w, h);
+  lv_obj_align(ta, LV_ALIGN_TOP_LEFT, x, y);
+  lv_obj_set_style_text_font(ta, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(ta, lv_color_hex(0x333333), 0);
+  lv_obj_set_style_pad_all(ta, 4, 0);
+  lv_obj_set_user_data(ta, (void *)(intptr_t)(numeric ? 1 : 0));
+  lv_obj_add_event_cb(ta, keyboard_event_cb, LV_EVENT_FOCUSED, ta);
+  lv_obj_add_event_cb(ta, keyboard_event_cb, LV_EVENT_DEFOCUSED, ta);
+  return ta;
+}
+// Show/replace the one inline error message on the form. Reusing a single label
+// stops the old code from stacking a fresh red label on every failed submit.
+static void new_event_error(const char *msg) {
+  if (!new_event_popup) return;
+  if (new_event_error_label) {
+    lv_obj_del(new_event_error_label);
+    new_event_error_label = nullptr;
+  }
+  new_event_error_label = lv_label_create(new_event_popup);
+  lv_label_set_text(new_event_error_label, msg);
+  lv_obj_set_style_text_color(new_event_error_label, lv_color_hex(0xFF0000), 0);
+  lv_obj_set_style_text_font(new_event_error_label, &lv_font_montserrat_14, 0);
+  lv_obj_align(new_event_error_label, LV_ALIGN_BOTTOM_MID, 0, -46);
+}
+// Single teardown path for the add-event window so the keyboard never stays on
+// screen over the calendar after Submit/Cancel.
+static void close_new_event_popup() {
+  if (keyboard) {
+    lv_keyboard_set_textarea(keyboard, nullptr);
+    lv_obj_add_flag(keyboard, LV_OBJ_FLAG_HIDDEN);
+  }
+  new_event_error_label = nullptr; // it dies with the window
+  if (new_event_popup) {
+    lv_obj_add_flag(new_event_popup, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_del(new_event_popup);
+    new_event_popup = nullptr;
+  }
+}
 void new_event_btn_cb(lv_event_t * e) {
   if (debug == 1) Serial.println("[APP] New event button clicked");
   show_new_event_popup();
@@ -1978,30 +2067,60 @@ void show_new_event_popup(lv_calendar_date_t *selected_date) {
     return;
   }
   close_day_events_popup();
+
+  // --- Make sure the keyboard exists, then measure it ------------------------
+  // The form is laid out in whatever vertical strip is left above the keyboard.
+  // Measuring the real height instead of assuming one is what stops the window
+  // from being covered: the old 600x400 window centred at y=40..440 sat
+  // directly underneath a keyboard occupying the bottom ~200px, and the
+  // "shift the parent up by the overlap" fallback then walked it off the top of
+  // the screen.
+  if (!keyboard) {
+    keyboard = lv_keyboard_create(lv_scr_act());
+    lv_obj_align(keyboard, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_add_flag(keyboard, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_style_text_font(keyboard, &lv_font_montserrat_14, 0);
+  }
+  // A hidden object is not laid out, so unhide -> relayout -> measure -> re-hide.
+  // No lv_timer_handler() runs in between, so the keyboard is never painted.
+  bool kb_was_hidden = lv_obj_has_flag(keyboard, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_clear_flag(keyboard, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_width(keyboard, LV_PCT(100));
+  lv_obj_align(keyboard, LV_ALIGN_BOTTOM_MID, 0, 0);
+  lv_obj_update_layout(keyboard);
+  lv_coord_t kb_h = lv_obj_get_height(keyboard);
+  if (kb_h < 80 || kb_h > 300) kb_h = 190; // unexpected -> sane default
+  if (kb_was_hidden) lv_obj_add_flag(keyboard, LV_OBJ_FLAG_HIDDEN);
+
+  lv_coord_t scr_h = lv_disp_get_ver_res(lv_disp_get_default());
+  lv_coord_t popup_h = scr_h - kb_h - NEW_EVENT_TOP - 4;
+  if (popup_h < 150) popup_h = 150; // never collapse to nothing
+
   new_event_popup = lv_obj_create(lv_scr_act());
-  lv_obj_set_size(new_event_popup, 600, 400);
-  lv_obj_align(new_event_popup, LV_ALIGN_CENTER, 0, 0);
+  lv_obj_set_size(new_event_popup, NEW_EVENT_W, popup_h);
+  lv_obj_align(new_event_popup, LV_ALIGN_TOP_MID, 0, NEW_EVENT_TOP);
   lv_obj_set_style_bg_color(new_event_popup, lv_color_hex(0x000000), 0);
   lv_obj_set_style_border_color(new_event_popup, lv_color_hex(0xFFFFFF), 0);
   lv_obj_set_style_border_width(new_event_popup, 2, 0);
+  lv_obj_set_style_radius(new_event_popup, 8, 0);
+  lv_obj_set_style_pad_all(new_event_popup, 10, 0);
+  lv_obj_set_scrollbar_mode(new_event_popup, LV_SCROLLBAR_MODE_AUTO);
+  new_event_error_label = nullptr;
   NewEventUI *ui = new NewEventUI();
-  ui->title_ta = lv_textarea_create(new_event_popup);
-  lv_textarea_set_one_line(ui->title_ta, true);
-  lv_textarea_set_placeholder_text(ui->title_ta, "Event title");
-  lv_obj_set_width(ui->title_ta, 500);
-  lv_obj_align(ui->title_ta, LV_ALIGN_TOP_MID, 0, 20);
-  lv_obj_set_style_text_font(ui->title_ta, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(ui->title_ta, lv_color_hex(0x333333), 0); // Darker text
-  lv_obj_set_user_data(ui->title_ta, (void*)0);
+  new_event_caption(new_event_popup, "Title", 0, 0);
+  ui->title_ta = new_event_field(new_event_popup, "", "Event title", 128, false,
+                                 0, 20, 320, NEW_EVENT_ROW);
   lv_obj_add_event_cb(ui->title_ta, keyboard_event_cb, LV_EVENT_FOCUSED, ui->title_ta);
   lv_obj_add_event_cb(ui->title_ta, keyboard_event_cb, LV_EVENT_DEFOCUSED, ui->title_ta);
+  new_event_caption(new_event_popup, "Description", 0, 60);
   ui->desc_ta = lv_textarea_create(new_event_popup);
   lv_textarea_set_one_line(ui->desc_ta, false);
   lv_textarea_set_placeholder_text(ui->desc_ta, "Event description");
-  lv_obj_set_size(ui->desc_ta, 500, 80);
-  lv_obj_align(ui->desc_ta, LV_ALIGN_TOP_MID, 0, 70);
+  lv_obj_set_size(ui->desc_ta, 320, 52);
+  lv_obj_align(ui->desc_ta, LV_ALIGN_TOP_LEFT, 0, 80);
   lv_obj_set_style_text_font(ui->desc_ta, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(ui->desc_ta, lv_color_hex(0x333333), 0); // Darker text
+  lv_obj_set_style_text_color(ui->desc_ta, lv_color_hex(0x333333), 0);
+  lv_obj_set_style_pad_all(ui->desc_ta, 4, 0);
   lv_obj_set_user_data(ui->desc_ta, (void*)0);
   lv_obj_add_event_cb(ui->desc_ta, keyboard_event_cb, LV_EVENT_FOCUSED, ui->desc_ta);
   lv_obj_add_event_cb(ui->desc_ta, keyboard_event_cb, LV_EVENT_DEFOCUSED, ui->desc_ta);
@@ -2040,156 +2159,53 @@ void show_new_event_popup(lv_calendar_date_t *selected_date) {
   int end_day = end_tm->tm_mday;
   int end_hour = end_tm->tm_hour;
   int end_min = (end_tm->tm_min / 15) * 15;
-  lv_obj_t *remind_label = lv_label_create(new_event_popup);
-  lv_label_set_text(remind_label, "Remind before (5m,2h,1d):");
-  lv_obj_align(remind_label, LV_ALIGN_TOP_LEFT, 50, 170);
-  lv_obj_set_style_text_font(remind_label, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(remind_label, lv_color_hex(0xFFFFFF), 0); // Brighter text
-  ui->remind_before_ta = lv_textarea_create(new_event_popup);
-  lv_textarea_set_one_line(ui->remind_before_ta, true);
-  lv_textarea_set_max_length(ui->remind_before_ta, 4);
-  lv_textarea_set_placeholder_text(ui->remind_before_ta, "0m");
-  lv_textarea_set_text(ui->remind_before_ta, "0m");
-  lv_obj_set_width(ui->remind_before_ta, 100);
-  lv_obj_align(ui->remind_before_ta, LV_ALIGN_TOP_LEFT, 250, 170);
-  lv_obj_set_style_text_font(ui->remind_before_ta, &lv_font_montserrat_14, 0);
-  lv_obj_set_user_data(ui->remind_before_ta, (void*)0);
-  lv_obj_add_event_cb(ui->remind_before_ta, keyboard_event_cb, LV_EVENT_FOCUSED, ui->remind_before_ta);
-  lv_obj_add_event_cb(ui->remind_before_ta, keyboard_event_cb, LV_EVENT_DEFOCUSED, ui->remind_before_ta);
-  lv_obj_t *start_label = lv_label_create(new_event_popup);
-  lv_label_set_text(start_label, "Start:");
-  lv_obj_align(start_label, LV_ALIGN_TOP_LEFT, 50, 210);
-  lv_obj_set_style_text_font(start_label, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(start_label, lv_color_hex(0xFFFFFF), 0); // Brighter text
+  new_event_caption(new_event_popup, "Remind before", 0, 140);
+  ui->remind_before_ta = new_event_field(new_event_popup, "0m", "0m", 4, false,
+                                         0, 160, 90, NEW_EVENT_ROW);
+  new_event_hint(new_event_popup, "(15m, 2h, 1d)", 100, 168);
+  // Right column: start date/time, grouped as YYYY/MM/DD  HH:MM.
   char buf[5];
-  ui->start_year_ta = lv_textarea_create(new_event_popup);
-  lv_textarea_set_one_line(ui->start_year_ta, true);
-  lv_textarea_set_max_length(ui->start_year_ta, 4);
+  new_event_caption(new_event_popup, "Start", NEW_EVENT_COL2_X, 0);
   snprintf(buf, sizeof(buf), "%04d", start_year);
-  lv_textarea_set_text(ui->start_year_ta, buf);
-  lv_textarea_set_placeholder_text(ui->start_year_ta, "YYYY");
-  lv_obj_set_width(ui->start_year_ta, 100);
-  lv_obj_align(ui->start_year_ta, LV_ALIGN_TOP_LEFT, 100, 210);
-  lv_obj_set_style_text_font(ui->start_year_ta, &lv_font_montserrat_14, 0);
-  lv_obj_set_user_data(ui->start_year_ta, (void*)1);
-  lv_obj_add_event_cb(ui->start_year_ta, keyboard_event_cb, LV_EVENT_FOCUSED, ui->start_year_ta);
-  lv_obj_add_event_cb(ui->start_year_ta, keyboard_event_cb, LV_EVENT_DEFOCUSED, ui->start_year_ta);
-  ui->start_month_ta = lv_textarea_create(new_event_popup);
-  lv_textarea_set_one_line(ui->start_month_ta, true);
-  lv_textarea_set_max_length(ui->start_month_ta, 2);
+  ui->start_year_ta = new_event_field(new_event_popup, buf, "YYYY", 4, true,
+                                      NEW_EVENT_COL2_X, 20, 74, NEW_EVENT_FIELD_H);
+  new_event_hint(new_event_popup, "/", NEW_EVENT_COL2_X + 76, 28);
   snprintf(buf, sizeof(buf), "%02d", start_month);
-  lv_textarea_set_text(ui->start_month_ta, buf);
-  lv_textarea_set_placeholder_text(ui->start_month_ta, "MM");
-  lv_obj_set_width(ui->start_month_ta, 60);
-  lv_obj_align(ui->start_month_ta, LV_ALIGN_TOP_LEFT, 210, 210);
-  lv_obj_set_style_text_font(ui->start_month_ta, &lv_font_montserrat_14, 0);
-  lv_obj_set_user_data(ui->start_month_ta, (void*)1);
-  lv_obj_add_event_cb(ui->start_month_ta, keyboard_event_cb, LV_EVENT_FOCUSED, ui->start_month_ta);
-  lv_obj_add_event_cb(ui->start_month_ta, keyboard_event_cb, LV_EVENT_DEFOCUSED, ui->start_month_ta);
-  ui->start_day_ta = lv_textarea_create(new_event_popup);
-  lv_textarea_set_one_line(ui->start_day_ta, true);
-  lv_textarea_set_max_length(ui->start_day_ta, 2);
+  ui->start_month_ta = new_event_field(new_event_popup, buf, "MM", 2, true,
+                                       NEW_EVENT_COL2_X + 88, 20, 48, NEW_EVENT_FIELD_H);
+  new_event_hint(new_event_popup, "/", NEW_EVENT_COL2_X + 138, 28);
   snprintf(buf, sizeof(buf), "%02d", start_day);
-  lv_textarea_set_text(ui->start_day_ta, buf);
-  lv_textarea_set_placeholder_text(ui->start_day_ta, "DD");
-  lv_obj_set_width(ui->start_day_ta, 60);
-  lv_obj_align(ui->start_day_ta, LV_ALIGN_TOP_LEFT, 280, 210);
-  lv_obj_set_style_text_font(ui->start_day_ta, &lv_font_montserrat_14, 0);
-  lv_obj_set_user_data(ui->start_day_ta, (void*)1);
-  lv_obj_add_event_cb(ui->start_day_ta, keyboard_event_cb, LV_EVENT_FOCUSED, ui->start_day_ta);
-  lv_obj_add_event_cb(ui->start_day_ta, keyboard_event_cb, LV_EVENT_DEFOCUSED, ui->start_day_ta);
-  ui->start_hour_ta = lv_textarea_create(new_event_popup);
-  lv_textarea_set_one_line(ui->start_hour_ta, true);
-  lv_textarea_set_max_length(ui->start_hour_ta, 2);
+  ui->start_day_ta = new_event_field(new_event_popup, buf, "DD", 2, true,
+                                     NEW_EVENT_COL2_X + 150, 20, 48, NEW_EVENT_FIELD_H);
   snprintf(buf, sizeof(buf), "%02d", start_hour);
-  lv_textarea_set_text(ui->start_hour_ta, buf);
-  lv_textarea_set_placeholder_text(ui->start_hour_ta, "HH");
-  lv_obj_set_width(ui->start_hour_ta, 60);
-  lv_obj_align(ui->start_hour_ta, LV_ALIGN_TOP_LEFT, 350, 210);
-  lv_obj_set_style_text_font(ui->start_hour_ta, &lv_font_montserrat_14, 0);
-  lv_obj_set_user_data(ui->start_hour_ta, (void*)1);
-  lv_obj_add_event_cb(ui->start_hour_ta, keyboard_event_cb, LV_EVENT_FOCUSED, ui->start_hour_ta);
-  lv_obj_add_event_cb(ui->start_hour_ta, keyboard_event_cb, LV_EVENT_DEFOCUSED, ui->start_hour_ta);
-  ui->start_min_ta = lv_textarea_create(new_event_popup);
-  lv_textarea_set_one_line(ui->start_min_ta, true);
-  lv_textarea_set_max_length(ui->start_min_ta, 2);
+  ui->start_hour_ta = new_event_field(new_event_popup, buf, "HH", 2, true,
+                                      NEW_EVENT_COL2_X + 218, 20, 48, NEW_EVENT_FIELD_H);
+  new_event_hint(new_event_popup, ":", NEW_EVENT_COL2_X + 268, 28);
   snprintf(buf, sizeof(buf), "%02d", start_min);
-  lv_textarea_set_text(ui->start_min_ta, buf);
-  lv_textarea_set_placeholder_text(ui->start_min_ta, "MM");
-  lv_obj_set_width(ui->start_min_ta, 60);
-  lv_obj_align(ui->start_min_ta, LV_ALIGN_TOP_LEFT, 420, 210);
-  lv_obj_set_style_text_font(ui->start_min_ta, &lv_font_montserrat_14, 0);
-  lv_obj_set_user_data(ui->start_min_ta, (void*)1);
-  lv_obj_add_event_cb(ui->start_min_ta, keyboard_event_cb, LV_EVENT_FOCUSED, ui->start_min_ta);
-  lv_obj_add_event_cb(ui->start_min_ta, keyboard_event_cb, LV_EVENT_DEFOCUSED, ui->start_min_ta);
-  lv_obj_t *end_label = lv_label_create(new_event_popup);
-  lv_label_set_text(end_label, "End:");
-  lv_obj_align(end_label, LV_ALIGN_TOP_LEFT, 50, 260);
-  lv_obj_set_style_text_font(end_label, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(end_label, lv_color_hex(0xFFFFFF), 0); // Brighter text
-  ui->end_year_ta = lv_textarea_create(new_event_popup);
-  lv_textarea_set_one_line(ui->end_year_ta, true);
-  lv_textarea_set_max_length(ui->end_year_ta, 4);
+  ui->start_min_ta = new_event_field(new_event_popup, buf, "MM", 2, true,
+                                     NEW_EVENT_COL2_X + 280, 20, 48, NEW_EVENT_FIELD_H);
+  new_event_caption(new_event_popup, "End", NEW_EVENT_COL2_X, 60);
   snprintf(buf, sizeof(buf), "%04d", end_year);
-  lv_textarea_set_text(ui->end_year_ta, buf);
-  lv_textarea_set_placeholder_text(ui->end_year_ta, "YYYY");
-  lv_obj_set_width(ui->end_year_ta, 100);
-  lv_obj_align(ui->end_year_ta, LV_ALIGN_TOP_LEFT, 100, 260);
-  lv_obj_set_style_text_font(ui->end_year_ta, &lv_font_montserrat_14, 0);
-  lv_obj_set_user_data(ui->end_year_ta, (void*)1);
-  lv_obj_add_event_cb(ui->end_year_ta, keyboard_event_cb, LV_EVENT_FOCUSED, ui->end_year_ta);
-  lv_obj_add_event_cb(ui->end_year_ta, keyboard_event_cb, LV_EVENT_DEFOCUSED, ui->end_year_ta);
-  ui->end_month_ta = lv_textarea_create(new_event_popup);
-  lv_textarea_set_one_line(ui->end_month_ta, true);
-  lv_textarea_set_max_length(ui->end_month_ta, 2);
+  ui->end_year_ta = new_event_field(new_event_popup, buf, "YYYY", 4, true,
+                                    NEW_EVENT_COL2_X, 80, 74, NEW_EVENT_FIELD_H);
+  new_event_hint(new_event_popup, "/", NEW_EVENT_COL2_X + 76, 88);
   snprintf(buf, sizeof(buf), "%02d", end_month);
-  lv_textarea_set_text(ui->end_month_ta, buf);
-  lv_textarea_set_placeholder_text(ui->end_month_ta, "MM");
-  lv_obj_set_width(ui->end_month_ta, 60);
-  lv_obj_align(ui->end_month_ta, LV_ALIGN_TOP_LEFT, 210, 260);
-  lv_obj_set_style_text_font(ui->end_month_ta, &lv_font_montserrat_14, 0);
-  lv_obj_set_user_data(ui->end_month_ta, (void*)1);
-  lv_obj_add_event_cb(ui->end_month_ta, keyboard_event_cb, LV_EVENT_FOCUSED, ui->end_month_ta);
-  lv_obj_add_event_cb(ui->end_month_ta, keyboard_event_cb, LV_EVENT_DEFOCUSED, ui->end_month_ta);
-  ui->end_day_ta = lv_textarea_create(new_event_popup);
-  lv_textarea_set_one_line(ui->end_day_ta, true);
-  lv_textarea_set_max_length(ui->end_day_ta, 2);
+  ui->end_month_ta = new_event_field(new_event_popup, buf, "MM", 2, true,
+                                     NEW_EVENT_COL2_X + 88, 80, 48, NEW_EVENT_FIELD_H);
+  new_event_hint(new_event_popup, "/", NEW_EVENT_COL2_X + 138, 88);
   snprintf(buf, sizeof(buf), "%02d", end_day);
-  lv_textarea_set_text(ui->end_day_ta, buf);
-  lv_textarea_set_placeholder_text(ui->end_day_ta, "DD");
-  lv_obj_set_width(ui->end_day_ta, 60);
-  lv_obj_align(ui->end_day_ta, LV_ALIGN_TOP_LEFT, 280, 260);
-  lv_obj_set_style_text_font(ui->end_day_ta, &lv_font_montserrat_14, 0);
-  lv_obj_set_user_data(ui->end_day_ta, (void*)1);
-  lv_obj_add_event_cb(ui->end_day_ta, keyboard_event_cb, LV_EVENT_FOCUSED, ui->end_day_ta);
-  lv_obj_add_event_cb(ui->end_day_ta, keyboard_event_cb, LV_EVENT_DEFOCUSED, ui->end_day_ta);
-  ui->end_hour_ta = lv_textarea_create(new_event_popup);
-  lv_textarea_set_one_line(ui->end_hour_ta, true);
-  lv_textarea_set_max_length(ui->end_hour_ta, 2);
+  ui->end_day_ta = new_event_field(new_event_popup, buf, "DD", 2, true,
+                                   NEW_EVENT_COL2_X + 150, 80, 48, NEW_EVENT_FIELD_H);
   snprintf(buf, sizeof(buf), "%02d", end_hour);
-  lv_textarea_set_text(ui->end_hour_ta, buf);
-  lv_textarea_set_placeholder_text(ui->end_hour_ta, "HH");
-  lv_obj_set_width(ui->end_hour_ta, 60);
-  lv_obj_align(ui->end_hour_ta, LV_ALIGN_TOP_LEFT, 350, 260);
-  lv_obj_set_style_text_font(ui->end_hour_ta, &lv_font_montserrat_14, 0);
-  lv_obj_set_user_data(ui->end_hour_ta, (void*)1);
-  lv_obj_add_event_cb(ui->end_hour_ta, keyboard_event_cb, LV_EVENT_FOCUSED, ui->end_hour_ta);
-  lv_obj_add_event_cb(ui->end_hour_ta, keyboard_event_cb, LV_EVENT_DEFOCUSED, ui->end_hour_ta);
-  ui->end_min_ta = lv_textarea_create(new_event_popup);
-  lv_textarea_set_one_line(ui->end_min_ta, true);
-  lv_textarea_set_max_length(ui->end_min_ta, 2);
+  ui->end_hour_ta = new_event_field(new_event_popup, buf, "HH", 2, true,
+                                    NEW_EVENT_COL2_X + 218, 80, 48, NEW_EVENT_FIELD_H);
+  new_event_hint(new_event_popup, ":", NEW_EVENT_COL2_X + 268, 88);
   snprintf(buf, sizeof(buf), "%02d", end_min);
-  lv_textarea_set_text(ui->end_min_ta, buf);
-  lv_textarea_set_placeholder_text(ui->end_min_ta, "MM");
-  lv_obj_set_width(ui->end_min_ta, 60);
-  lv_obj_align(ui->end_min_ta, LV_ALIGN_TOP_LEFT, 420, 260);
-  lv_obj_set_style_text_font(ui->end_min_ta, &lv_font_montserrat_14, 0);
-  lv_obj_set_user_data(ui->end_min_ta, (void*)1);
-  lv_obj_add_event_cb(ui->end_min_ta, keyboard_event_cb, LV_EVENT_FOCUSED, ui->end_min_ta);
-  lv_obj_add_event_cb(ui->end_min_ta, keyboard_event_cb, LV_EVENT_DEFOCUSED, ui->end_min_ta);
+  ui->end_min_ta = new_event_field(new_event_popup, buf, "MM", 2, true,
+                                   NEW_EVENT_COL2_X + 280, 80, 48, NEW_EVENT_FIELD_H);
   lv_obj_t *submit_btn = lv_button_create(new_event_popup);
-  lv_obj_align(submit_btn, LV_ALIGN_TOP_MID, -70, 320);
-  lv_obj_set_size(submit_btn, 120, 40);
+  lv_obj_set_size(submit_btn, 120, 38);
+  lv_obj_align(submit_btn, LV_ALIGN_BOTTOM_RIGHT, -134, -2);
   lv_obj_set_style_bg_color(submit_btn, lv_color_hex(0x00FF00), 0);
   lv_obj_add_event_cb(submit_btn, new_event_submit_cb, LV_EVENT_PRESSED, ui);
   lv_obj_t *submit_label = lv_label_create(submit_btn);
@@ -2197,20 +2213,14 @@ void show_new_event_popup(lv_calendar_date_t *selected_date) {
   lv_obj_center(submit_label);
   lv_obj_set_style_text_font(submit_label, &lv_font_montserrat_14, 0);
   lv_obj_t *cancel_btn = lv_button_create(new_event_popup);
-  lv_obj_align(cancel_btn, LV_ALIGN_TOP_MID, 70, 320);
-  lv_obj_set_size(cancel_btn, 120, 40);
+  lv_obj_set_size(cancel_btn, 120, 38);
+  lv_obj_align(cancel_btn, LV_ALIGN_BOTTOM_RIGHT, -4, -2);
   lv_obj_set_style_bg_color(cancel_btn, lv_color_hex(0xFF0000), 0);
   lv_obj_add_event_cb(cancel_btn, new_event_cancel_cb, LV_EVENT_PRESSED, ui);
   lv_obj_t *cancel_label = lv_label_create(cancel_btn);
   lv_label_set_text(cancel_label, "Cancel");
   lv_obj_center(cancel_label);
   lv_obj_set_style_text_font(cancel_label, &lv_font_montserrat_14, 0);
-  if (!keyboard) {
-    keyboard = lv_keyboard_create(lv_scr_act());
-    lv_obj_align(keyboard, LV_ALIGN_BOTTOM_MID, 0, 0);
-    lv_obj_add_flag(keyboard, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_set_style_text_font(keyboard, &lv_font_montserrat_14, 0);
-  }
 }
 void new_event_submit_cb(lv_event_t * e) {
   if (debug == 1) Serial.println("[APP] New event submit button clicked");
@@ -2224,10 +2234,7 @@ void new_event_submit_cb(lv_event_t * e) {
   }
   if (!ui) {
     if (debug == 1) Serial.println("[APP] Error: UI structure is null");
-    lv_obj_t *error_label = lv_label_create(new_event_popup);
-    lv_label_set_text(error_label, "Internal error");
-    lv_obj_set_style_text_color(error_label, lv_color_hex(0xFF0000), 0);
-    lv_obj_align(error_label, LV_ALIGN_TOP_MID, 0, 320);
+    new_event_error("Internal error");
     return;
   }
   if (!ui->title_ta || !ui->desc_ta || !ui->start_year_ta || !ui->start_month_ta ||
@@ -2235,10 +2242,7 @@ void new_event_submit_cb(lv_event_t * e) {
       !ui->end_year_ta || !ui->end_month_ta || !ui->end_day_ta ||
       !ui->end_hour_ta || !ui->end_min_ta || !ui->remind_before_ta) {
     if (debug == 1) Serial.println("[APP] Error: One or more UI elements are null");
-    lv_obj_t *error_label = lv_label_create(new_event_popup);
-    lv_label_set_text(error_label, "Internal error");
-    lv_obj_set_style_text_color(error_label, lv_color_hex(0xFF0000), 0);
-    lv_obj_align(error_label, LV_ALIGN_TOP_MID, 0, 320);
+    new_event_error("Internal error");
     return;
   }
   String title = String(lv_textarea_get_text(ui->title_ta));
@@ -2280,10 +2284,7 @@ void new_event_submit_cb(lv_event_t * e) {
   time_t end_time = mktime(&end_tm);
   if (start_time == -1 || end_time == -1 || start_time > end_time) {
     if (debug == 1) Serial.println("[APP] Error: Invalid date/time selection");
-    lv_obj_t *error_label = lv_label_create(new_event_popup);
-    lv_label_set_text(error_label, "Invalid date/time");
-    lv_obj_set_style_text_color(error_label, lv_color_hex(0xFF0000), 0);
-    lv_obj_align(error_label, LV_ALIGN_TOP_MID, 0, 320);
+    new_event_error("Invalid date/time");
     return;
   }
   String encoded_title = "";
@@ -2355,20 +2356,13 @@ void new_event_submit_cb(lv_event_t * e) {
     String response = http.getString();
     String error_message = "Submission failed: " + response;
     if (debug == 1) Serial.println("[APP] Event submission failed: HTTP " + String(httpCode) + ", Response: " + response);
-    lv_obj_t *error_label = lv_label_create(new_event_popup);
-    lv_label_set_text(error_label, error_message.c_str());
-    lv_obj_set_style_text_color(error_label, lv_color_hex(0xFF0000), 0);
-    lv_obj_align(error_label, LV_ALIGN_TOP_MID, 0, 320);
+    new_event_error(error_message.c_str());
     http.end();
     return;
   }
   http.end();
   delete ui;
-  if (new_event_popup) {
-    lv_obj_add_flag(new_event_popup, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_del(new_event_popup);
-    new_event_popup = nullptr;
-  }
+  close_new_event_popup();
 }
 void new_event_cancel_cb(lv_event_t * e) {
   if (debug == 1) Serial.println("[APP] New event cancel button clicked");
@@ -2376,11 +2370,7 @@ void new_event_cancel_cb(lv_event_t * e) {
   if (ui) {
     delete ui;
   }
-  if (new_event_popup) {
-    lv_obj_add_flag(new_event_popup, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_del(new_event_popup);
-    new_event_popup = nullptr;
-  }
+  close_new_event_popup();
 }
 void updateDateTimeLabel() {
   if (!date_time_label) {
