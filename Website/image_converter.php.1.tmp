@@ -1,0 +1,415 @@
+<?php
+session_start();
+// Enable error reporting for debugging
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
+// Set default timezone
+date_default_timezone_set('Europe/Warsaw');
+// Database connection
+try {
+    $db = new PDO('sqlite:access.db');
+    $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    // Check and add background_image column if not exists
+    $columns = $db->query("PRAGMA table_info(users)")->fetchAll(PDO::FETCH_ASSOC);
+    $hasBackgroundColumn = false;
+    foreach ($columns as $column) {
+        if ($column['name'] === 'background_image') $hasBackgroundColumn = true;
+    }
+    if (!$hasBackgroundColumn) {
+        $db->exec("ALTER TABLE users ADD COLUMN background_image TEXT");
+    }
+} catch (PDOException $e) {
+    die("Database Error: " . $e->getMessage());
+}
+// Redirect to login.php if not logged in
+if (!isset($_SESSION['user_id'])) {
+    header("Location: login.php");
+    exit;
+}
+// Handle image upload and conversion
+$error = '';
+$success = '';
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['image'])) {
+    $targetDir = "uploads/";
+    $allowedTypes = ['image/jpeg', 'image/png', 'image/bmp'];
+    $maxFileSize = 5 * 1024 * 1024; // 5MB
+
+    // Validate file
+    if (!in_array($_FILES['image']['type'], $allowedTypes)) {
+        $error = "Invalid file type. Only JPEG, PNG, and BMP are allowed.";
+    } elseif ($_FILES['image']['size'] > $maxFileSize) {
+        $error = "File size exceeds 5MB limit.";
+    } elseif ($_FILES['image']['error'] !== UPLOAD_ERR_OK) {
+        $error = "Upload error: " . $_FILES['image']['error'];
+    } else {
+        // Ensure uploads directory exists
+        if (!is_dir($targetDir)) {
+            mkdir($targetDir, 0755, true);
+        }
+
+        // Generate unique filename
+        $access_code = $_SESSION['access_code'];
+        $filename = $access_code . '_background.bin';
+        $outputFile = $targetDir . $filename;
+
+        // Load and resize image
+        $sourceImage = null;
+        switch ($_FILES['image']['type']) {
+            case 'image/jpeg':
+                $sourceImage = imagecreatefromjpeg($_FILES['image']['tmp_name']);
+                break;
+            case 'image/png':
+                $sourceImage = imagecreatefrompng($_FILES['image']['tmp_name']);
+                break;
+            case 'image/bmp':
+                $sourceImage = imagecreatefrombmp($_FILES['image']['tmp_name']);
+                break;
+        }
+
+        if ($sourceImage === false) {
+            $error = "Failed to load image.";
+        } else {
+            // Resize to 800x480
+            // $width = 800;
+            //$height = 480;
+            // resize half
+            $width = 400;
+            $height = 240;
+            $resizedImage = imagecreatetruecolor($width, $height);
+            imagecopyresampled($resizedImage, $sourceImage, 0, 0, 0, 0, $width, $height, imagesx($sourceImage), imagesy($sourceImage));
+
+            // Convert to raw RGB888 format
+            $rawData = '';
+            for ($y = 0; $y < $height; $y++) {
+                for ($x = 0; $x < $width; $x++) {
+                    $rgb = imagecolorat($resizedImage, $x, $y);
+                    $colors = imagecolorsforindex($resizedImage, $rgb);
+                    $rawData .= chr($colors['red']) . chr($colors['green']) . chr($colors['blue']);
+                }
+            }
+
+            // Save raw data to file
+            if (file_put_contents($outputFile, $rawData) !== false) {
+                // Update database
+                $stmt = $db->prepare("UPDATE users SET background_image = ? WHERE access_code = ?");
+                $stmt->execute([$filename, $access_code]);
+                $success = "Image converted and saved. Access it at: " . $_SERVER['HTTP_HOST'] . "/$targetDir" . $filename;
+            } else {
+                $error = "Failed to save converted image.";
+            }
+
+            // Clean up
+            imagedestroy($sourceImage);
+            imagedestroy($resizedImage);
+        }
+    }
+}
+?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#3B82F6">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Image Converter">
+    <link rel="apple-touch-icon" href="icon-192x192.png">
+    <link rel="manifest" href="manifest.json">
+    <title>Image Converter for LVGL</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.2/cropper.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.2/cropper.min.js"></script>
+    <style>
+        body {
+            font-family: 'Poppins', sans-serif;
+            background: linear-gradient(135deg, #6B7280, #3B82F6);
+            color: #fff;
+            overflow-x: hidden;
+        }
+        .converter-section {
+            padding: 4rem 2rem;
+            text-align: center;
+            position: relative;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .converter-section::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.4);
+            z-index: 1;
+        }
+        .converter-content {
+            z-index: 2;
+            max-width: 800px;
+            padding: 2rem;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 1rem;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+        }
+        .converter-title {
+            font-size: 3rem;
+            font-weight: 700;
+            margin-bottom: 1rem;
+            animation: fadeInDown 1s ease-out;
+        }
+        .converter-desc {
+            font-size: 1.5rem;
+            margin-bottom: 2rem;
+            animation: fadeInUp 1s ease-out 0.5s;
+            animation-fill-mode: backwards;
+        }
+        @keyframes fadeInDown {
+            from { opacity: 0; transform: translateY(-50px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(50px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .form {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            max-width: 500px;
+            margin: 0 auto;
+        }
+        .form-input {
+            padding: 0.75rem 1.5rem;
+            border-radius: 50px;
+            background: rgba(255, 255, 255, 0.8);
+            color: #333;
+            border: none;
+            font-size: 1rem;
+        }
+        .cta-btn {
+            background: #34D399;
+            color: white;
+            padding: 1rem 2rem;
+            border-radius: 50px;
+            font-weight: 600;
+            transition: background 0.3s, transform 0.3s;
+            animation: pulse 2s infinite;
+            border: none;
+            cursor: pointer;
+        }
+        .cta-btn:hover {
+            background: #2FB988;
+            transform: scale(1.05);
+        }
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+        .error-msg {
+            color: #ff6b6b;
+            font-size: 1.2rem;
+            margin-bottom: 1rem;
+        }
+        .success-msg {
+            color: #34D399;
+            font-size: 1.2rem;
+            margin-bottom: 1rem;
+        }
+        .preview-container {
+            margin: 1rem auto;
+            max-width: 800px;
+            max-height: 480px;
+            overflow: auto;
+            border: 4px solid white;
+            border-radius: 1rem;
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
+            display: none;
+        }
+        .preview-img {
+            max-width: 100%;
+            max-height: 100%;
+            animation: fadeIn 1s ease-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        .menu {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            padding: 1rem;
+            display: flex;
+            justify-content: center;
+            gap: 2rem;
+            z-index: 10;
+        }
+        .menu a {
+            color: white;
+            text-decoration: none;
+            font-weight: 600;
+            transition: color 0.3s;
+        }
+        .menu a:hover {
+            color: #34D399;
+        }
+        footer {
+            padding: 2rem;
+            text-align: center;
+            background: rgba(0, 0, 0, 0.2);
+        }
+        @media (max-width: 768px) {
+            .converter-title {
+                font-size: 2.5rem;
+            }
+            .converter-desc {
+                font-size: 1.2rem;
+            }
+            .menu {
+                flex-wrap: wrap;
+                gap: 1rem;
+                justify-content: center;
+            }
+            .menu a {
+                font-size: 0.9rem;
+            }
+            .form-input, .cta-btn {
+                padding: 0.75rem 1.5rem;
+                font-size: 0.9rem;
+            }
+            .error-msg, .success-msg {
+                font-size: 1rem;
+            }
+            .converter-content {
+                padding: 1rem;
+            }
+            .preview-container {
+                max-height: 300px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <nav class="menu">
+        <a href="index.php">Home</a>
+        <a href="calendar.php">Calendar</a>
+        <a href="weather.php">Weather</a>
+        <a href="settings.php">Settings</a>
+        <a href="?logout=1">Logout</a>
+    </nav>
+    <section class="converter-section">
+        <div class="converter-content">
+            <h1 class="converter-title">Image Converter for LVGL</h1>
+            <p class="converter-desc">Upload an image, crop a horizontal section to 800x480, and convert it to raw RGB888 format for your device.</p>
+            <?php if (!empty($error)): ?>
+                <p class="error-msg"><?php echo htmlspecialchars($error); ?></p>
+            <?php elseif (!empty($success)): ?>
+                <p class="success-msg"><?php echo htmlspecialchars($success); ?></p>
+            <?php endif; ?>
+            <form id="uploadForm" method="POST" enctype="multipart/form-data" class="form">
+                <input type="file" id="image" accept="image/jpeg,image/png,image/bmp" class="form-input" aria-label="Upload Image">
+                <p class="text-sm text-gray-200">Supported formats: JPEG, PNG, BMP. Max size: 5MB.</p>
+                <div id="preview-container" class="preview-container">
+                    <img id="preview" alt="Image Preview" class="preview-img">
+                </div>
+                <button type="submit" class="cta-btn">Convert and Upload</button>
+            </form>
+        </div>
+    </section>
+    <footer>
+        <p>&copy; 2023 Custom Calendar Service. All rights reserved.</p>
+    </footer>
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/service-worker.js')
+                    .then(registration => {
+                        console.log('Service Worker registered with scope:', registration.scope);
+                    })
+                    .catch(error => {
+                        console.error('Service Worker registration failed:', error);
+                    });
+            });
+        }
+        let cropper;
+        document.getElementById('image').addEventListener('change', function(event) {
+            const file = event.target.files[0];
+            const preview = document.getElementById('preview');
+            const previewContainer = document.getElementById('preview-container');
+            if (file) {
+                const validTypes = ['image/jpeg', 'image/png', 'image/bmp'];
+                if (!validTypes.includes(file.type)) {
+                    alert('Please upload a JPEG, PNG, or BMP image.');
+                    event.target.value = '';
+                    previewContainer.style.display = 'none';
+                    return;
+                }
+                if (file.size > 5 * 1024 * 1024) {
+                    alert('File size exceeds 5MB limit.');
+                    event.target.value = '';
+                    previewContainer.style.display = 'none';
+                    return;
+                }
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    preview.src = e.target.result;
+                    previewContainer.style.display = 'block';
+                    if (cropper) {
+                        cropper.destroy();
+                    }
+                    cropper = new Cropper(preview, {
+                        aspectRatio: 800 / 480,
+                        viewMode: 1, // Restrict crop box to not exceed the canvas
+                        autoCropArea: 1, // Automatically crop the entire image initially
+                        movable: true,
+                        zoomable: true,
+                        rotatable: false,
+                        scalable: false
+                    });
+                };
+                reader.readAsDataURL(file);
+            } else {
+                previewContainer.style.display = 'none';
+                if (cropper) {
+                    cropper.destroy();
+                }
+            }
+        });
+
+        document.getElementById('uploadForm').addEventListener('submit', function(event) {
+            event.preventDefault();
+            if (!cropper) {
+                alert('Please upload and crop an image first.');
+                return;
+            }
+            const canvas = cropper.getCroppedCanvas({
+                width: 400,
+                height: 240,
+                imageSmoothingQuality: 'high'
+            });
+            canvas.toBlob(function(blob) {
+                const formData = new FormData();
+                formData.append('image', blob, 'cropped.jpg'); // Send as JPEG for PHP processing
+                fetch(window.location.href, {
+                    method: 'POST',
+                    body: formData
+                }).then(response => response.text())
+                  .then(data => {
+                      document.body.innerHTML = data; // Reload the page with PHP output
+                  }).catch(error => {
+                      console.error('Error:', error);
+                      alert('Failed to upload cropped image.');
+                  });
+            }, 'image/jpeg', 0.75); // Use JPEG with 95% quality
+        });
+    </script>
+</body>
+</html>

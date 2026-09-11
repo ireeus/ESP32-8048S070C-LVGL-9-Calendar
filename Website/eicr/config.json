@@ -1,0 +1,22 @@
+{
+    "admin_user": "admin",
+    "admin_pass": "EicrAdmin2026!",
+    "environment": "sandbox",
+    "paypal_sandbox_client_id": "sb",
+    "paypal_sandbox_secret": "",
+    "paypal_production_client_id": "",
+    "paypal_production_secret": "",
+    "price_studio": 100,
+    "price_2bed": 130,
+    "price_3bed": 160,
+    "price_4bed": 195,
+    "price_hmo": 240,
+    "price_extra_circuit": 15,
+    "price_pat_base": 50,
+    "pat_base_items": 15,
+    "price_pat_extra": 2,
+    "discount_tier1_pct": 10,
+    "discount_tier1_mins": 60,
+    "discount_tier2_pct": 5,
+    "discount_tier2_mins": 60
+}

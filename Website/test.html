@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Camera Capture with Background Removal</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            font-family: Arial, sans-serif;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            background-color: #ff4d94;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        button:hover {
+            background-color: #e04385;
+        }
+        video, canvas, #resultCanvas {
+            width: 100%;
+            max-width: 640px;
+            margin-bottom: 10px;
+        }
+        #canvas, #resultCanvas {
+            display: none;
+        }
+        #downloadLink {
+            display: none;
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            margin-bottom: 10px;
+        }
+        #removeBgButton {
+            display: none;
+            padding: 10px 20px;
+            background-color: #2196F3;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-bottom: 10px;
+        }
+        #removeBgButton:hover {
+            background-color: #1976D2;
+        }
+        #status {
+            color: #666;
+            font-style: italic;
+            text-align: center;
+            max-width: 640px;
+        }
+    </style>
+</head>
+<body>
+    <button>Anastasia &#x2665;&#xfe0f;</button>
+    <video id="video" autoplay></video>
+    <canvas id="canvas"></canvas>
+    <button id="removeBgButton">Remove Background</button>
+    <canvas id="resultCanvas"></canvas>
+    <div id="status"></div>
+    <a id="downloadLink" href="#" download="capture_no_bg.png">Download Image</a>
+
+    <!-- Load the background removal library -->
+    <script src="https://cdn.jsdelivr.net/npm/@imgly/background-removal@latest/dist/index.umd.js"></script>
+    
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const resultCanvas = document.getElementById('resultCanvas');
+        const button = document.querySelector('button');
+        const removeBgButton = document.getElementById('removeBgButton');
+        const downloadLink = document.getElementById('downloadLink');
+        const status = document.getElementById('status');
+
+        let capturedImageData = null;
+
+        // Check for SharedArrayBuffer support
+        if (typeof SharedArrayBuffer === 'undefined') {
+            status.textContent = 'Error: SharedArrayBuffer is not supported. Ensure the page is served over HTTPS with correct COOP/COEP headers.';
+        }
+
+        // Access the camera when the button is clicked
+        button.addEventListener('click', async () => {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { 
+                        width: { ideal: 640 },
+                        height: { ideal: 480 }
+                    }
+                });
+                video.srcObject = stream;
+                button.style.display = 'none';
+                video.style.display = 'block';
+                status.textContent = 'Click the video to capture a photo.';
+                video.addEventListener('click', capturePhoto);
+            } catch (error) {
+                console.error('Error accessing camera:', error);
+                status.textContent = 'Unable to access the camera. Please ensure camera permissions are granted.';
+            }
+        });
+
+        // Capture photo
+        function capturePhoto() {
+            canvas.width = 640; // Fixed size for performance
+            canvas.height = 480;
+            const context = canvas.getContext('2d');
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+            capturedImageData = canvas.toDataURL('image/jpeg', 0.8); // Reduced quality for faster processing
+            canvas.style.display = 'block';
+            removeBgButton.style.display = 'inline-block';
+            status.textContent = 'Photo captured. Click "Remove Background" to process or download the original below.';
+            downloadLink.href = capturedImageData;
+            downloadLink.download = 'capture_original.jpg';
+            downloadLink.style.display = 'inline-block';
+            video.srcObject.getTracks().forEach(track => track.stop());
+            video.style.display = 'none';
+        }
+
+        // Remove background using the library
+        removeBgButton.addEventListener('click', async () => {
+            if (!capturedImageData) {
+                status.textContent = 'No image captured. Please capture a photo first.';
+                return;
+            }
+
+            status.textContent = 'Processing image... (This may take a few seconds)';
+            removeBgButton.disabled = true;
+
+            try {
+                if (!window.BackgroundRemoval) {
+                    throw new Error('Background removal library not loaded. Check CDN availability.');
+                }
+
+                // Initialize the library
+                status.textContent = 'Initializing background removal model...';
+                await window.BackgroundRemoval.init();
+
+                // Convert data URL to Uint8Array
+                const response = await fetch(capturedImageData);
+                const blob = await response.blob();
+                const arrayBuffer = await blob.arrayBuffer();
+                const uint8Array = new Uint8Array(arrayBuffer);
+
+                // Remove background
+                status.textContent = 'Removing background...';
+                const result = await window.BackgroundRemoval.removeBackground(uint8Array);
+
+                // Convert result to data URL
+                const resultBlob = new Blob([result], { type: 'image/png' });
+                const resultUrl = URL.createObjectURL(resultBlob);
+
+                // Display result
+                resultCanvas.width = canvas.width;
+                resultCanvas.height = canvas.height;
+                const resultCtx = resultCanvas.getContext('2d');
+                const img = new Image();
+                img.onload = () => {
+                    resultCtx.drawImage(img, 0, 0);
+                    resultCanvas.style.display = 'block';
+                    downloadLink.href = resultUrl;
+                    downloadLink.download = 'capture_no_bg.png';
+                    status.textContent = 'Background removed successfully! Download the image below.';
+                };
+                img.onerror = () => {
+                    status.textContent = 'Error rendering processed image.';
+                };
+                img.src = resultUrl;
+            } catch (error) {
+                console.error('Error removing background:', error);
+                status.textContent = `Error: ${error.message}. Download the original image or try again.`;
+                downloadLink.href = capturedImageData;
+                downloadLink.download = 'capture_original.jpg';
+                downloadLink.style.display = 'inline-block';
+            }
+
+            removeBgButton.disabled = false;
+        });
+    </script>
+</body>
+</html>

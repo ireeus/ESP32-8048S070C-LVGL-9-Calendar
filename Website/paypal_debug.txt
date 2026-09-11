@@ -1,0 +1,345 @@
+2026-08-26 21:57:32
+Capture ID: 1DP99512KB9629720
+Odpowiedz PayPal:
+Array
+(
+    [id] => 1DP99512KB9629720
+    [amount] => Array
+        (
+            [currency_code] => GBP
+            [value] => 50.00
+        )
+
+    [final_capture] => 1
+    [seller_protection] => Array
+        (
+            [status] => NOT_ELIGIBLE
+        )
+
+    [status] => PENDING
+    [status_details] => Array
+        (
+            [reason] => PENDING_REVIEW
+        )
+
+    [supplementary_data] => Array
+        (
+            [related_ids] => Array
+                (
+                    [order_id] => 9HT04116L47332419
+                )
+
+        )
+
+    [payee] => Array
+        (
+            [email_address] => vibes4tech@gmail.com
+            [merchant_id] => AMNRCM5WY6RSG
+        )
+
+    [create_time] => 2026-08-26T19:57:28Z
+    [update_time] => 2026-08-26T19:57:28Z
+    [links] => Array
+        (
+            [0] => Array
+                (
+                    [href] => https://api.sandbox.paypal.com/v2/payments/captures/1DP99512KB9629720
+                    [rel] => self
+                    [method] => GET
+                )
+
+            [1] => Array
+                (
+                    [href] => https://api.sandbox.paypal.com/v2/payments/captures/1DP99512KB9629720/refund
+                    [rel] => refund
+                    [method] => POST
+                )
+
+            [2] => Array
+                (
+                    [href] => https://api.sandbox.paypal.com/v2/checkout/orders/9HT04116L47332419
+                    [rel] => up
+                    [method] => GET
+                )
+
+        )
+
+)
+
+-------------------
+2026-08-26 21:58:20
+Capture ID: 59205511FV667834L
+Odpowiedz PayPal:
+Array
+(
+    [id] => 59205511FV667834L
+    [amount] => Array
+        (
+            [currency_code] => GBP
+            [value] => 50.00
+        )
+
+    [final_capture] => 1
+    [seller_protection] => Array
+        (
+            [status] => NOT_ELIGIBLE
+        )
+
+    [status] => PENDING
+    [status_details] => Array
+        (
+            [reason] => PENDING_REVIEW
+        )
+
+    [supplementary_data] => Array
+        (
+            [related_ids] => Array
+                (
+                    [order_id] => 6FT82883U9218413P
+                )
+
+        )
+
+    [payee] => Array
+        (
+            [email_address] => vibes4tech@gmail.com
+            [merchant_id] => AMNRCM5WY6RSG
+        )
+
+    [create_time] => 2026-08-26T19:58:17Z
+    [update_time] => 2026-08-26T19:58:17Z
+    [links] => Array
+        (
+            [0] => Array
+                (
+                    [href] => https://api.sandbox.paypal.com/v2/payments/captures/59205511FV667834L
+                    [rel] => self
+                    [method] => GET
+                )
+
+            [1] => Array
+                (
+                    [href] => https://api.sandbox.paypal.com/v2/payments/captures/59205511FV667834L/refund
+                    [rel] => refund
+                    [method] => POST
+                )
+
+            [2] => Array
+                (
+                    [href] => https://api.sandbox.paypal.com/v2/checkout/orders/6FT82883U9218413P
+                    [rel] => up
+                    [method] => GET
+                )
+
+        )
+
+)
+
+-------------------
+2026-08-26 22:02:41
+Capture ID: 59205511FV667834L
+Odpowiedz PayPal:
+Array
+(
+    [id] => 59205511FV667834L
+    [amount] => Array
+        (
+            [currency_code] => GBP
+            [value] => 50.00
+        )
+
+    [final_capture] => 1
+    [seller_protection] => Array
+        (
+            [status] => NOT_ELIGIBLE
+        )
+
+    [status] => PENDING
+    [status_details] => Array
+        (
+            [reason] => PENDING_REVIEW
+        )
+
+    [supplementary_data] => Array
+        (
+            [related_ids] => Array
+                (
+                    [order_id] => 6FT82883U9218413P
+                )
+
+        )
+
+    [payee] => Array
+        (
+            [email_address] => vibes4tech@gmail.com
+            [merchant_id] => AMNRCM5WY6RSG
+        )
+
+    [create_time] => 2026-08-26T19:58:17Z
+    [update_time] => 2026-08-26T19:58:17Z
+    [links] => Array
+        (
+            [0] => Array
+                (
+                    [href] => https://api.sandbox.paypal.com/v2/payments/captures/59205511FV667834L
+                    [rel] => self
+                    [method] => GET
+                )
+
+            [1] => Array
+                (
+                    [href] => https://api.sandbox.paypal.com/v2/payments/captures/59205511FV667834L/refund
+                    [rel] => refund
+                    [method] => POST
+                )
+
+            [2] => Array
+                (
+                    [href] => https://api.sandbox.paypal.com/v2/checkout/orders/6FT82883U9218413P
+                    [rel] => up
+                    [method] => GET
+                )
+
+        )
+
+)
+
+-------------------
+2026-08-26 22:04:07
+Capture ID: 8FU62997HB9638840
+Odpowiedz PayPal:
+Array
+(
+    [id] => 8FU62997HB9638840
+    [amount] => Array
+        (
+            [currency_code] => GBP
+            [value] => 50.00
+        )
+
+    [final_capture] => 1
+    [seller_protection] => Array
+        (
+            [status] => NOT_ELIGIBLE
+        )
+
+    [status] => PENDING
+    [status_details] => Array
+        (
+            [reason] => PENDING_REVIEW
+        )
+
+    [supplementary_data] => Array
+        (
+            [related_ids] => Array
+                (
+                    [order_id] => 87143199H5714233N
+                )
+
+        )
+
+    [payee] => Array
+        (
+            [email_address] => vibes4tech@gmail.com
+            [merchant_id] => AMNRCM5WY6RSG
+        )
+
+    [create_time] => 2026-08-26T20:04:04Z
+    [update_time] => 2026-08-26T20:04:04Z
+    [links] => Array
+        (
+            [0] => Array
+                (
+                    [href] => https://api.sandbox.paypal.com/v2/payments/captures/8FU62997HB9638840
+                    [rel] => self
+                    [method] => GET
+                )
+
+            [1] => Array
+                (
+                    [href] => https://api.sandbox.paypal.com/v2/payments/captures/8FU62997HB9638840/refund
+                    [rel] => refund
+                    [method] => POST
+                )
+
+            [2] => Array
+                (
+                    [href] => https://api.sandbox.paypal.com/v2/checkout/orders/87143199H5714233N
+                    [rel] => up
+                    [method] => GET
+                )
+
+        )
+
+)
+
+-------------------
+2026-08-26 22:14:16
+Capture ID: 4CR06615SX432974Y
+Odpowiedz PayPal:
+Array
+(
+    [id] => 4CR06615SX432974Y
+    [amount] => Array
+        (
+            [currency_code] => GBP
+            [value] => 50.00
+        )
+
+    [final_capture] => 1
+    [seller_protection] => Array
+        (
+            [status] => NOT_ELIGIBLE
+        )
+
+    [status] => PENDING
+    [status_details] => Array
+        (
+            [reason] => PENDING_REVIEW
+        )
+
+    [supplementary_data] => Array
+        (
+            [related_ids] => Array
+                (
+                    [order_id] => 5YU34236KA860890G
+                )
+
+        )
+
+    [payee] => Array
+        (
+            [email_address] => vibes4tech@gmail.com
+            [merchant_id] => AMNRCM5WY6RSG
+        )
+
+    [create_time] => 2026-08-26T20:14:13Z
+    [update_time] => 2026-08-26T20:14:13Z
+    [links] => Array
+        (
+            [0] => Array
+                (
+                    [href] => https://api.sandbox.paypal.com/v2/payments/captures/4CR06615SX432974Y
+                    [rel] => self
+                    [method] => GET
+                )
+
+            [1] => Array
+                (
+                    [href] => https://api.sandbox.paypal.com/v2/payments/captures/4CR06615SX432974Y/refund
+                    [rel] => refund
+                    [method] => POST
+                )
+
+            [2] => Array
+                (
+                    [href] => https://api.sandbox.paypal.com/v2/checkout/orders/5YU34236KA860890G
+                    [rel] => up
+                    [method] => GET
+                )
+
+        )
+
+)
+
+-------------------
