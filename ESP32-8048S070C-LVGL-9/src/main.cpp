@@ -9,7 +9,7 @@
 #include <esp_system.h>  // For ESP.restart()
 extern const lv_font_t technology_98;
 // Build version
-const String build_version = "1.4";
+const String build_version = "2.0";
 int debug =0; // Change to 1 to enable serial prints
 // Firmware check interval variable
 const unsigned long firmwareCheckInterval = 100000UL; // 5 minutes in milliseconds
