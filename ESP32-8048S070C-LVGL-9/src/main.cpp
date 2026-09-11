@@ -103,6 +103,11 @@ void fetchAfterUiReady(); // Post-UI fetch sequence (bank holidays last)
 void updateHolidayLabel(); // New function to update holiday label
 void notification_toggle_cb(lv_timer_t *timer);
 void notification_hide();
+// Parcel-notification dialog. Defined next to show_confirm_popup() further down,
+// but declared here because notification_hide() and fetchNotifications() (which
+// both sit above it) use them.
+static void notification_popup_close();
+static bool show_notification_popup(const char *title, const char *message);
 
 
 
@@ -169,6 +174,17 @@ static lv_obj_t *next_btn_obj = nullptr;   // recoloured on scheme change
 static lv_obj_t *color_cont = nullptr;     // floating scheme-swatch strip
 static lv_obj_t *color_btn = nullptr;      // floating round palette button
 static lv_obj_t *notification_img = nullptr; // New: Object for the notification image
+static lv_obj_t *notification_popup = nullptr;        // parcel notification dialog
+static lv_obj_t *notification_popup_status = nullptr; // its inline failure line
+// The notification a dialog has already been raised for. Kept separate from
+// last_ignored_notification, which means "acknowledged, stop showing anything":
+// dismissing the dialog must not silence the blinking icon, and it must not make
+// the dialog come straight back on the next 10s poll either.
+static String notification_popup_shown_for = "";
+// Title and body are stored separately because current_notification_text is
+// title + "_" + text, and a title may itself contain underscores.
+static String current_notification_title = "";
+static String current_notification_body = "";
 static lv_obj_t *wifi_icon = nullptr; // New: Object for the WiFi signal icon
 static bool notification_visible = false;
 static lv_timer_t *notification_timer = NULL;
@@ -598,6 +614,9 @@ void notification_hide() {
     notification_img = nullptr;
   }
   notification_visible = false;
+  // The dialog and the blinking icon always go together: both are cleared when
+  // the server reports no notification, and after a successful acknowledgement.
+  notification_popup_close();
 }
 // New function to fetch notifications and display image if new event
 void fetchNotifications() {
@@ -628,6 +647,8 @@ void fetchNotifications() {
     if (cookie != "unknown" && !text.isEmpty() && this_notification != last_ignored_notification && title != "No Data") {
       if (debug == 1) Serial.println("[APP] New notification event detected, displaying image");
       current_notification_text = this_notification;
+      current_notification_title = title;
+      current_notification_body = text;
       if (!notification_img) {
         notification_img = lv_img_create(lv_scr_act());
         lv_obj_null_on_delete(&notification_img); // Auto-null if deleted elsewhere
@@ -640,34 +661,35 @@ void fetchNotifications() {
         notification_visible = true;
         notification_timer = lv_timer_create(notification_toggle_cb, 2000, NULL);
       }
+      // Raise the dialog once per notification. show_notification_popup() refuses
+      // while another dialog is open; in that case the flag is left unset so the
+      // next poll retries and the popup appears as soon as the way is clear.
+      if (notification_popup_shown_for != this_notification &&
+          show_notification_popup(title.c_str(), text.c_str())) {
+        notification_popup_shown_for = this_notification;
+      }
     } else {
       if (debug == 1) Serial.println("[APP] No new notification event, hiding image");
-      notification_hide();
+      notification_hide(); // this also closes the dialog
+      // Cleared so a later notification pops up again - but only when it holds
+      // something, because this branch runs on every 10s poll and an Arduino
+      // String assignment reallocates even for "".
+      if (!notification_popup_shown_for.isEmpty()) notification_popup_shown_for = "";
     }
   } else {
     if (debug == 1) Serial.println("[APP] Notification HTTP request failed: " + String(httpCode));
   }
   http.end();
 }
+// The blinking icon is a ~20px tap target, so it no longer acknowledges anything
+// by itself: it re-opens the dialog, where the button is big enough to hit, and
+// the acknowledgement (and its confirmation from the server) happens there.
 void notification_click_cb(lv_event_t *e) {
-  notification_hide();
-  last_ignored_notification = current_notification_text;
-  // Mark as read
-  HTTPClient http;
-  String url = "https://cloudapps.zapto.org/spb/api.php?device_id=" + device_id + "&username=" + username + "&id_read_status=1";
-  if (debug == 1) Serial.println("[DEBUG] Starting mark as read process");
-  if (debug == 1) Serial.println("[DEBUG] Constructed URL: " + url);
-  http.begin(url);
-  if (debug == 1) Serial.println("[DEBUG] HTTP client initialized with URL");
-  int httpCode = http.GET();
-  if (debug == 1) Serial.println("[DEBUG] HTTP GET request sent, response code: " + String(httpCode));
-  if (httpCode == HTTP_CODE_OK) {
-    if (debug == 1) Serial.println("[APP] Marked as read successfully");
-  } else {
-    if (debug == 1) Serial.println("[APP] Failed to mark as read: " + String(httpCode));
+  if (current_notification_title.isEmpty() && current_notification_body.isEmpty()) return;
+  if (show_notification_popup(current_notification_title.c_str(),
+                              current_notification_body.c_str())) {
+    notification_popup_shown_for = current_notification_text;
   }
-  http.end();
-  if (debug == 1) Serial.println("[DEBUG] HTTP client ended");
 }
 void blink_animation_cb(void * var, int32_t v) {
   lv_obj_set_style_img_opa((lv_obj_t *)var, v, 0);
@@ -1523,6 +1545,145 @@ void show_confirm_popup(const char *title, const char *message, const char *conf
   lv_label_set_text(ok_lbl, confirm_label);
   lv_obj_center(ok_lbl);
   lv_obj_set_style_text_font(ok_lbl, &lv_font_montserrat_14, 0);
+}
+
+// ---------------------------------------------------------------------------
+// Parcel-box notification dialog.
+// A new parcel notification raises this instead of relying on the small blinking
+// icon next to the clock. "Acknowledge" sends the same mark-as-read request the
+// icon used to send, and the dialog closes ONLY when the server accepted it -
+// otherwise it stays put with an error so the request can be retried.
+// ---------------------------------------------------------------------------
+static bool notification_mark_read() {
+  HTTPClient http;
+  String url = "https://cloudapps.zapto.org/spb/api.php?device_id=" + device_id +
+               "&username=" + username + "&id_read_status=1";
+  if (debug == 1) Serial.println("[APP] Marking notification as read: " + url);
+  http.begin(url);
+  int httpCode = http.GET();
+  bool accepted = (httpCode == HTTP_CODE_OK);
+  if (debug == 1) {
+    Serial.println(accepted ? String("[APP] Marked as read successfully")
+                            : String("[APP] Failed to mark as read: ") + String(httpCode));
+  }
+  http.end();
+  // Stops the poll raising this same notification again.
+  if (accepted) last_ignored_notification = current_notification_text;
+  return accepted;
+}
+static void notification_popup_close() {
+  if (notification_popup) {
+    lv_obj_del(notification_popup);
+    notification_popup = nullptr;
+  }
+  notification_popup_status = nullptr; // it was a child, so it died with the dialog
+}
+static void notification_dismiss_cb(lv_event_t *e) {
+  // Closed without acknowledging: the icon keeps blinking and this notification
+  // will not pop up again (notification_popup_shown_for still holds it). Tapping
+  // the icon brings the dialog back.
+  notification_popup_close();
+}
+static void notification_ack_cb(lv_event_t *e) {
+  if (notification_mark_read()) {
+    // Accepted by the server, so the dialog goes away - and so does the icon.
+    notification_hide();
+  } else if (notification_popup_status) {
+    // Keep the dialog up so the request can be retried.
+    lv_label_set_text(notification_popup_status,
+                      "Server did not accept it. Tap Acknowledge to try again.");
+  }
+}
+static bool show_notification_popup(const char *title, const char *message) {
+  if (notification_popup) return false; // one at a time
+  // Never stack on top of a dialog the user already has open. The caller leaves
+  // its "already shown" flag unset, so it retries on the next poll.
+  if (new_event_popup || event_details_popup || day_events_popup || settings_popup ||
+      update_popup || confirm_popup) return false;
+
+  // Bound the height: the popup is content-sized, and a very long parcel message
+  // would otherwise grow it past the bottom of the screen. lv_label_set_text()
+  // copies, so these locals can go out of scope safely.
+  String head = title ? String(title) : String("");
+  String body = message ? String(message) : String("");
+  if (head.length() > 60) head = head.substring(0, 60) + "...";
+  if (body.length() > 180) body = body.substring(0, 180) + "...";
+
+  notification_popup = lv_obj_create(lv_scr_act());
+  lv_obj_set_width(notification_popup, 600);
+  lv_obj_set_height(notification_popup, LV_SIZE_CONTENT);
+  lv_obj_align(notification_popup, LV_ALIGN_CENTER, 0, 0);
+  lv_obj_set_style_bg_color(notification_popup, lv_color_hex(0x1A1A1A), 0);
+  lv_obj_set_style_border_color(notification_popup, scheme_accent(), 0);
+  lv_obj_set_style_border_width(notification_popup, 3, 0);
+  lv_obj_set_style_radius(notification_popup, 10, 0);
+  lv_obj_set_style_pad_all(notification_popup, 14, 0);
+  lv_obj_set_style_pad_row(notification_popup, 8, 0);
+  lv_obj_set_flex_flow(notification_popup, LV_FLEX_FLOW_COLUMN);
+  lv_obj_set_flex_align(notification_popup, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+                        LV_FLEX_ALIGN_CENTER);
+  lv_obj_clear_flag(notification_popup, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scrollbar_mode(notification_popup, LV_SCROLLBAR_MODE_OFF);
+
+  lv_obj_t *title_lbl = lv_label_create(notification_popup);
+  lv_label_set_text(title_lbl, (String(LV_SYMBOL_BELL "  ") + head).c_str());
+  lv_obj_set_style_text_font(title_lbl, &lv_font_montserrat_24, 0);
+  lv_obj_set_style_text_color(title_lbl, scheme_accent(), 0);
+  lv_obj_set_width(title_lbl, LV_PCT(100));
+  lv_obj_set_style_text_align(title_lbl, LV_TEXT_ALIGN_CENTER, 0);
+  lv_label_set_long_mode(title_lbl, LV_LABEL_LONG_WRAP);
+
+  lv_obj_t *msg_lbl = lv_label_create(notification_popup);
+  lv_label_set_text(msg_lbl, body.c_str());
+  lv_obj_set_style_text_font(msg_lbl, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(msg_lbl, lv_color_hex(0xFFFFFF), 0);
+  lv_obj_set_width(msg_lbl, LV_PCT(100));
+  lv_obj_set_style_text_align(msg_lbl, LV_TEXT_ALIGN_CENTER, 0);
+  lv_label_set_long_mode(msg_lbl, LV_LABEL_LONG_WRAP);
+
+  // Empty until the server rejects an acknowledgement, so it costs no height.
+  notification_popup_status = lv_label_create(notification_popup);
+  lv_label_set_text(notification_popup_status, "");
+  lv_obj_set_style_text_font(notification_popup_status, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(notification_popup_status, lv_color_hex(0xFF5252), 0);
+  lv_obj_set_width(notification_popup_status, LV_PCT(100));
+  lv_obj_set_style_text_align(notification_popup_status, LV_TEXT_ALIGN_CENTER, 0);
+  lv_label_set_long_mode(notification_popup_status, LV_LABEL_LONG_WRAP);
+
+  lv_obj_t *btn_row = lv_obj_create(notification_popup);
+  lv_obj_set_width(btn_row, LV_PCT(100));
+  lv_obj_set_height(btn_row, LV_SIZE_CONTENT);
+  lv_obj_set_style_bg_opa(btn_row, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(btn_row, 0, 0);
+  lv_obj_set_style_pad_all(btn_row, 0, 0);
+  lv_obj_set_style_pad_column(btn_row, 16, 0);
+  lv_obj_set_flex_flow(btn_row, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(btn_row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+                        LV_FLEX_ALIGN_CENTER);
+  lv_obj_clear_flag(btn_row, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scrollbar_mode(btn_row, LV_SCROLLBAR_MODE_OFF);
+
+  lv_obj_t *dismiss_btn = lv_button_create(btn_row);
+  lv_obj_set_size(dismiss_btn, 150, 46);
+  lv_obj_set_style_bg_color(dismiss_btn, lv_color_hex(0x555555), 0);
+  lv_obj_set_style_radius(dismiss_btn, 10, 0);
+  lv_obj_add_event_cb(dismiss_btn, notification_dismiss_cb, LV_EVENT_PRESSED, NULL);
+  lv_obj_t *dismiss_lbl = lv_label_create(dismiss_btn);
+  lv_label_set_text(dismiss_lbl, "Dismiss");
+  lv_obj_center(dismiss_lbl);
+  lv_obj_set_style_text_font(dismiss_lbl, &lv_font_montserrat_14, 0);
+
+  lv_obj_t *ack_btn = lv_button_create(btn_row);
+  lv_obj_set_size(ack_btn, 220, 46);
+  lv_obj_set_style_bg_color(ack_btn, scheme_accent(), 0);
+  lv_obj_set_style_bg_color(ack_btn, scheme_accent_dark(), LV_STATE_PRESSED);
+  lv_obj_set_style_radius(ack_btn, 10, 0);
+  lv_obj_add_event_cb(ack_btn, notification_ack_cb, LV_EVENT_PRESSED, NULL);
+  lv_obj_t *ack_lbl = lv_label_create(ack_btn);
+  lv_label_set_text(ack_lbl, "Acknowledge");
+  lv_obj_center(ack_lbl);
+  lv_obj_set_style_text_font(ack_lbl, &lv_font_montserrat_14, 0);
+  return true;
 }
 
 static void do_wifi_logout() {
