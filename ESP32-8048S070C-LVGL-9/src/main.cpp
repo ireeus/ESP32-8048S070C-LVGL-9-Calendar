@@ -1360,17 +1360,102 @@ void location_submit_cb(lv_event_t * e) {
   }
   setup_calendar();
 }
-void wifi_logout_cb(lv_event_t * e) {
-  if (debug == 1) Serial.println("[APP] WiFi logout button clicked");
+// ---------------------------------------------------------------------------
+// Confirmation dialog for destructive actions (log out / factory reset).
+// ---------------------------------------------------------------------------
+static lv_obj_t *confirm_popup = nullptr;
+static void (*confirm_action)() = nullptr;
+
+void close_confirm_popup() {
+  if (confirm_popup) {
+    lv_obj_del(confirm_popup);
+    confirm_popup = nullptr;
+  }
+  confirm_action = nullptr;
+}
+static void confirm_cancel_cb(lv_event_t *e) {
+  close_confirm_popup();
+}
+static void confirm_ok_cb(lv_event_t *e) {
+  void (*action)() = confirm_action;
+  close_confirm_popup(); // also clears confirm_action
+  if (action) action();
+}
+// Warning dialog. `action` runs ONLY after the user presses the confirm button,
+// so nothing destructive happens on a stray tap.
+void show_confirm_popup(const char *title, const char *message, const char *confirm_label,
+                        void (*action)()) {
+  if (confirm_popup) return; // one at a time
+  confirm_action = action;
+
+  confirm_popup = lv_obj_create(lv_scr_act());
+  lv_obj_set_size(confirm_popup, 560, 250);
+  lv_obj_align(confirm_popup, LV_ALIGN_CENTER, 0, 0);
+  lv_obj_set_style_bg_color(confirm_popup, lv_color_hex(0x1A1A1A), 0);
+  lv_obj_set_style_border_color(confirm_popup, lv_color_hex(0xFFB300), 0); // amber warning
+  lv_obj_set_style_border_width(confirm_popup, 3, 0);
+  lv_obj_set_style_radius(confirm_popup, 10, 0);
+  lv_obj_set_style_pad_all(confirm_popup, 14, 0);
+  lv_obj_set_style_pad_row(confirm_popup, 10, 0);
+  lv_obj_set_flex_flow(confirm_popup, LV_FLEX_FLOW_COLUMN);
+  lv_obj_set_flex_align(confirm_popup, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  lv_obj_clear_flag(confirm_popup, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scrollbar_mode(confirm_popup, LV_SCROLLBAR_MODE_OFF);
+
+  lv_obj_t *title_lbl = lv_label_create(confirm_popup);
+  lv_label_set_text(title_lbl, (String(LV_SYMBOL_WARNING "  ") + title).c_str());
+  lv_obj_set_style_text_font(title_lbl, &lv_font_montserrat_24, 0);
+  lv_obj_set_style_text_color(title_lbl, lv_color_hex(0xFFB300), 0);
+
+  lv_obj_t *msg_lbl = lv_label_create(confirm_popup);
+  lv_label_set_text(msg_lbl, message);
+  lv_obj_set_style_text_font(msg_lbl, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(msg_lbl, lv_color_hex(0xFFFFFF), 0);
+  lv_obj_set_width(msg_lbl, LV_PCT(100));
+  lv_obj_set_style_text_align(msg_lbl, LV_TEXT_ALIGN_CENTER, 0);
+  lv_label_set_long_mode(msg_lbl, LV_LABEL_LONG_WRAP);
+
+  lv_obj_t *btn_row = lv_obj_create(confirm_popup);
+  lv_obj_set_width(btn_row, LV_PCT(100));
+  lv_obj_set_height(btn_row, LV_SIZE_CONTENT);
+  lv_obj_set_style_bg_opa(btn_row, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(btn_row, 0, 0);
+  lv_obj_set_style_pad_all(btn_row, 0, 0);
+  lv_obj_set_style_pad_column(btn_row, 16, 0);
+  lv_obj_set_flex_flow(btn_row, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(btn_row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  lv_obj_clear_flag(btn_row, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scrollbar_mode(btn_row, LV_SCROLLBAR_MODE_OFF);
+
+  lv_obj_t *cancel_btn = lv_button_create(btn_row);
+  lv_obj_set_size(cancel_btn, 150, 46);
+  lv_obj_set_style_bg_color(cancel_btn, lv_color_hex(0x555555), 0);
+  lv_obj_set_style_radius(cancel_btn, 10, 0);
+  lv_obj_add_event_cb(cancel_btn, confirm_cancel_cb, LV_EVENT_PRESSED, NULL);
+  lv_obj_t *cancel_lbl = lv_label_create(cancel_btn);
+  lv_label_set_text(cancel_lbl, "Cancel");
+  lv_obj_center(cancel_lbl);
+  lv_obj_set_style_text_font(cancel_lbl, &lv_font_montserrat_14, 0);
+
+  lv_obj_t *ok_btn = lv_button_create(btn_row);
+  lv_obj_set_size(ok_btn, 180, 46);
+  lv_obj_set_style_bg_color(ok_btn, lv_color_hex(0xD32F2F), 0);
+  lv_obj_set_style_radius(ok_btn, 10, 0);
+  lv_obj_add_event_cb(ok_btn, confirm_ok_cb, LV_EVENT_PRESSED, NULL);
+  lv_obj_t *ok_lbl = lv_label_create(ok_btn);
+  lv_label_set_text(ok_lbl, confirm_label);
+  lv_obj_center(ok_lbl);
+  lv_obj_set_style_text_font(ok_lbl, &lv_font_montserrat_14, 0);
+}
+
+static void do_wifi_logout() {
   preferences.begin("wifi", false);
   preferences.clear();
   preferences.end();
-  if (debug == 1) Serial.println("[APP] WiFi credentials cleared");
   WiFi.disconnect();
   if (wifi_setup_screen) {
     lv_obj_del(wifi_setup_screen);
     wifi_setup_screen = nullptr;
-	lv_obj_del(wifi_setup_screen);  // This will cascade-delete children, including QR
   }
   if (settings_popup) {
     lv_obj_add_flag(settings_popup, LV_OBJ_FLAG_HIDDEN);
@@ -1379,18 +1464,27 @@ void wifi_logout_cb(lv_event_t * e) {
   }
   show_wifi_setup_screen();
 }
-void api_logout_cb(lv_event_t * e) {
-  if (debug == 1) Serial.println("[APP] API logout button clicked");
+void wifi_logout_cb(lv_event_t * e) {
+  show_confirm_popup("WiFi Logout",
+                     "This erases the saved WiFi network and reopens the WiFi setup screen. Continue?",
+                     "Log Out", do_wifi_logout);
+}
+
+static void do_api_logout() {
   preferences.begin("api", false);
   preferences.clear();
   preferences.end();
-  if (debug == 1) Serial.println("[APP] API code cleared");
   if (settings_popup) {
     lv_obj_add_flag(settings_popup, LV_OBJ_FLAG_HIDDEN);
     lv_obj_del(settings_popup);
     settings_popup = nullptr;
   }
   show_api_code_screen();
+}
+void api_logout_cb(lv_event_t * e) {
+  show_confirm_popup("API Logout",
+                     "This erases the saved API code and reopens the API setup screen. Continue?",
+                     "Log Out", do_api_logout);
 }
 // True when 'obj' is 'ancestor' itself or one of its descendants.
 static bool is_descendant_of(lv_obj_t *obj, lv_obj_t *ancestor) {
@@ -1611,6 +1705,7 @@ void show_location_screen() {
   }
 }
 void close_settings_cb(lv_event_t * e) {
+  close_confirm_popup(); // never leave a warning dialog orphaned
   if (settings_popup) {
     lv_obj_add_flag(settings_popup, LV_OBJ_FLAG_HIDDEN);
     lv_obj_del(settings_popup);
@@ -1757,15 +1852,6 @@ void show_settings_popup() {
     lv_obj_set_style_text_font(qr_hint, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(qr_hint, lv_color_hex(0xFFFFFF), 0);
 
-    // Firmware version floated into the bottom-right corner. IGNORE_LAYOUT keeps
-    // it out of the flex flow so it costs no vertical space.
-    lv_obj_t *version_settings_label = lv_label_create(settings_popup);
-    lv_label_set_text(version_settings_label, ("Firmware: " + currentFirmwareVersion).c_str());
-    lv_obj_set_style_text_font(version_settings_label, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(version_settings_label, lv_color_hex(0x777777), 0);
-    lv_obj_add_flag(version_settings_label, LV_OBJ_FLAG_IGNORE_LAYOUT);
-    lv_obj_align(version_settings_label, LV_ALIGN_BOTTOM_RIGHT, -14, -12);
-
     lv_obj_t *brightness_card = make_card(left_col, 0x1e1e1e, 0x1e1e1e);
     make_card_title(brightness_card, "UI Brightness");
     lv_obj_t *darkness_slider = lv_slider_create(brightness_card);
@@ -1795,6 +1881,14 @@ void show_settings_popup() {
     lv_obj_t *temp_cont = make_card(right_col, 0xfd79a8, 0xe84393);
     make_card_title(temp_cont, "Temperature Adjustment");
     lv_obj_t *temp_adjust_ta = make_field(temp_cont, "Adjust (\xC2\xB0" "C)", "0", String(temp_adjust), 1, LV_PCT(100), 0);
+
+    // Firmware version sits directly under the Temperature Adjustment card as a
+    // normal child of the column, so it starts at the same left edge as that
+    // card rather than floating in a corner.
+    lv_obj_t *version_settings_label = lv_label_create(right_col);
+    lv_label_set_text(version_settings_label, ("Firmware: " + currentFirmwareVersion).c_str());
+    lv_obj_set_style_text_font(version_settings_label, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(version_settings_label, lv_color_hex(0xDDDDDD), 0);
 
     // ---- footer buttons ---------------------------------------------------
     lv_obj_t *settings_footer = make_panel(settings_popup);
@@ -1828,7 +1922,7 @@ void show_settings_popup() {
       lv_obj_set_style_text_font(keyboard, &lv_font_montserrat_14, 0);
     }
 }
-void factory_reset_cb(lv_event_t *e) {
+static void do_factory_reset() {
   const char* namespaces[] = {"wifi", "api", "location", "firmware", "ui", "cloudapps", "event_states"};
   for (int i = 0; i < 7; i++) {
     preferences.begin(namespaces[i], false);
@@ -1842,6 +1936,11 @@ void factory_reset_cb(lv_event_t *e) {
     settings_popup = nullptr;
   }
   ESP.restart();
+}
+void factory_reset_cb(lv_event_t *e) {
+  show_confirm_popup("Factory Reset",
+                     "This erases ALL settings (WiFi, API code, location, brightness, parcel box and reminder state) and restarts the device. This cannot be undone.",
+                     "Reset", do_factory_reset);
 }
 void settings_btn_cb(lv_event_t * e) {
   if (debug == 1) Serial.println("[APP] Settings button clicked");
