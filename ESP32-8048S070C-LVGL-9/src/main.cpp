@@ -32,6 +32,9 @@ const unsigned long firmwareCheckInterval = 100000UL; // 5 minutes in millisecon
 #define NEW_EVENT_ROW 34       // height of one single-line field
 #define NEW_EVENT_COL2_X 344   // x of the date/time column (left column is 320 wide)
 #define NEW_EVENT_FIELD_H 34   // height of a date/time field
+// Floating colour-scheme selector (see create_color_changer).
+#define SCHEME_BTN_SIZE 44
+#define SCHEME_SWATCH_SIZE 26
 // Upper bound on event cards built in the side panel. Each card is 3+ LVGL
 // objects carrying local styles; building one per event (up to 300) exhausted
 // the LVGL heap, so lv_obj_create() started returning NULL and the next call
@@ -155,6 +158,10 @@ static lv_obj_t *day_events_popup = nullptr; // Day preview (events on a tapped 
 static lv_calendar_date_t day_preview_date = {0, 0, 0}; // Date shown by the day preview
 static lv_obj_t *firmware_update_btn = nullptr;
 static lv_obj_t *button_bar = nullptr;
+static lv_obj_t *prev_btn_obj = nullptr;   // recoloured on scheme change
+static lv_obj_t *next_btn_obj = nullptr;   // recoloured on scheme change
+static lv_obj_t *color_cont = nullptr;     // floating scheme-swatch strip
+static lv_obj_t *color_btn = nullptr;      // floating round palette button
 static lv_obj_t *notification_img = nullptr; // New: Object for the notification image
 static lv_obj_t *wifi_icon = nullptr; // New: Object for the WiFi signal icon
 static bool notification_visible = false;
@@ -162,6 +169,45 @@ static lv_timer_t *notification_timer = NULL;
 static lv_timer_t *blink_timer = NULL;
 static lv_obj_t *bg_img = nullptr;  // Global for background image
 static int g_ui_darkness = 0; // Global darkness level (0: light, 100: dark)
+
+// ---- Colour schemes --------------------------------------------------------
+// Ported from LVGL's Widgets demo, which swaps between the LV_PALETTE_* accents
+// listed below. Two things make this actually do something here:
+//   1. LVGL's calendar draws the "today" marker with
+//      lv_theme_get_color_primary(), so re-initialising the theme moves it.
+//      Widgets that keep their default theme style (keyboard, textareas,
+//      dropdown, slider) follow it too.
+//   2. Everything this app pins an explicit colour on (129 lv_color_hex() calls,
+//      zero lv_theme_* calls) reads the accent from these helpers instead, so a
+//      theme swap alone would NOT have been enough.
+struct ColorScheme {
+  const char *name;
+  lv_palette_t palette;
+};
+static const ColorScheme color_schemes[] = {
+  {"Blue",      LV_PALETTE_BLUE},
+  {"Green",     LV_PALETTE_GREEN},
+  {"Blue Grey", LV_PALETTE_BLUE_GREY},
+  {"Orange",    LV_PALETTE_ORANGE},
+  {"Red",       LV_PALETTE_RED},
+  {"Purple",    LV_PALETTE_PURPLE},
+  {"Teal",      LV_PALETTE_TEAL},
+  {"Indigo",    LV_PALETTE_INDIGO},
+};
+#define COLOR_SCHEME_COUNT ((int)(sizeof(color_schemes) / sizeof(color_schemes[0])))
+static int g_ui_scheme = 0;
+
+static lv_palette_t scheme_palette()     { return color_schemes[g_ui_scheme].palette; }
+static lv_color_t scheme_accent()        { return lv_palette_main(scheme_palette()); }
+static lv_color_t scheme_accent_dark()   { return lv_palette_darken(scheme_palette(), 2); }
+static lv_color_t scheme_accent_deep()   { return lv_palette_darken(scheme_palette(), 4); }
+static lv_color_t scheme_accent_soft()   { return lv_palette_lighten(scheme_palette(), 3); }
+static lv_color_t scheme_accent_tint(int lvl) { return lv_palette_lighten(scheme_palette(), (uint8_t)lvl); }
+// Event-card colours: light cards get a pale accent wash with deep accent text,
+// dark mode gets the dark end of the same palette.
+static lv_color_t scheme_card_a()        { return (g_ui_darkness > 50) ? scheme_accent_dark() : scheme_accent_soft(); }
+static lv_color_t scheme_card_b()        { return (g_ui_darkness > 50) ? scheme_accent_deep() : scheme_accent(); }
+static lv_color_t scheme_card_text()     { return (g_ui_darkness > 50) ? lv_color_hex(0xECEFF1) : scheme_accent_deep(); }
 static int temp_adjust = 0;// Global temperature adjustment
 static lv_obj_t *build_version_label = nullptr;// Global variable for build version label
 static unsigned long lastHolidayUpdate = 0;
@@ -858,8 +904,11 @@ void updateWeatherDisplay() {
   // Humidity (UPDATED: Dark text color)
   lv_obj_t *hum_cont = lv_obj_create(buttons_cont);
   lv_obj_set_size(hum_cont, 108, 55);
-  lv_obj_set_style_bg_color(hum_cont, lv_color_hex(0x00b894), 0);
-  lv_obj_set_style_bg_grad_color(hum_cont, lv_color_hex(0x00a085), 0);
+  // The three chips were a teal / pink / blue jumble. They are now three tints
+  // of the active scheme's accent - still distinguishable, but they read as one
+  // set instead of three unrelated hues.
+  lv_obj_set_style_bg_color(hum_cont, scheme_accent_tint(4), 0);
+  lv_obj_set_style_bg_grad_color(hum_cont, scheme_accent_tint(3), 0);
   lv_obj_set_style_bg_grad_dir(hum_cont, LV_GRAD_DIR_HOR, 0);
   lv_obj_set_style_radius(hum_cont, 10, 0);
   lv_obj_t *hum_val = lv_label_create(hum_cont);
@@ -871,8 +920,8 @@ void updateWeatherDisplay() {
   // Wind (UPDATED: Dark text color)
   lv_obj_t *wind_cont = lv_obj_create(buttons_cont);
   lv_obj_set_size(wind_cont, 108, 50);
-  lv_obj_set_style_bg_color(wind_cont, lv_color_hex(0xfd79a8), 0);
-  lv_obj_set_style_bg_grad_color(wind_cont, lv_color_hex(0xe84393), 0);
+  lv_obj_set_style_bg_color(wind_cont, scheme_accent_tint(3), 0);
+  lv_obj_set_style_bg_grad_color(wind_cont, scheme_accent_tint(2), 0);
   lv_obj_set_style_bg_grad_dir(wind_cont, LV_GRAD_DIR_HOR, 0);
   lv_obj_set_style_radius(wind_cont, 10, 0);
   lv_obj_t *wind_val = lv_label_create(wind_cont);
@@ -884,8 +933,8 @@ void updateWeatherDisplay() {
 // Pressure (REPLACED: Atmospheric pressure in hPa instead of precipitation)
 lv_obj_t *pressure_cont = lv_obj_create(buttons_cont);
 lv_obj_set_size(pressure_cont, 108, 50);
-lv_obj_set_style_bg_color(pressure_cont, lv_color_hex(0x55a3ff), 0);
-lv_obj_set_style_bg_grad_color(pressure_cont, lv_color_hex(0x007acc), 0);
+lv_obj_set_style_bg_color(pressure_cont, scheme_accent_tint(2), 0);
+lv_obj_set_style_bg_grad_color(pressure_cont, scheme_accent_tint(1), 0);
 lv_obj_set_style_bg_grad_dir(pressure_cont, LV_GRAD_DIR_HOR, 0);
 lv_obj_set_style_radius(pressure_cont, 10, 0);
 lv_obj_t *pressure_val = lv_label_create(pressure_cont);
@@ -1052,8 +1101,11 @@ void updateEventDisplay(lv_obj_t *calendar) {
       lv_obj_t *event_cont = lv_obj_create(eventContainer);
       lv_obj_set_size(event_cont, 361, 65);
       lv_obj_align(event_cont, LV_ALIGN_TOP_MID, 0, y_offset);
-      lv_obj_set_style_bg_color(event_cont, lv_color_hex(0xfd79a8), 0);
-      lv_obj_set_style_bg_grad_color(event_cont, lv_color_hex(0xe84393), 0);
+      // Card tint now follows the active scheme. The fixed pink gradient with
+      // pure-blue and maroon text on top of it was the worst offender for
+      // contrast, and it is where most of the "poor colours" impression came from.
+      lv_obj_set_style_bg_color(event_cont, scheme_card_a(), 0);
+      lv_obj_set_style_bg_grad_color(event_cont, scheme_card_b(), 0);
       lv_obj_set_style_bg_grad_dir(event_cont, LV_GRAD_DIR_HOR, 0);
       lv_obj_set_style_radius(event_cont, 10, 0);
       lv_obj_set_style_pad_all(event_cont, 5, 0);
@@ -1070,7 +1122,7 @@ void updateEventDisplay(lv_obj_t *calendar) {
       // Title label (blue)
       lv_obj_t *title_label = lv_label_create(event_cont);
       lv_label_set_text(title_label, summary.c_str());
-      lv_obj_set_style_text_color(title_label, lv_color_hex(0x0000FF), 0);
+      lv_obj_set_style_text_color(title_label, scheme_card_text(), 0);
       lv_obj_set_style_text_font(title_label, &lv_font_montserrat_14, 0);
       lv_obj_set_style_text_align(title_label, LV_TEXT_ALIGN_LEFT, 0);
       lv_label_set_long_mode(title_label, LV_LABEL_LONG_WRAP);
@@ -1082,7 +1134,7 @@ void updateEventDisplay(lv_obj_t *calendar) {
       if (events[i].isAllDay) {
         lv_obj_t *all_day_label = lv_label_create(event_cont);
         lv_label_set_text(all_day_label, "All day");
-        lv_obj_set_style_text_color(all_day_label, lv_color_hex(0x800000), 0);
+        lv_obj_set_style_text_color(all_day_label, scheme_card_text(), 0);
         lv_obj_set_style_text_font(all_day_label, &lv_font_montserrat_14, 0);
         lv_obj_set_style_text_align(all_day_label, LV_TEXT_ALIGN_LEFT, 0);
         lv_obj_align_to(all_day_label, title_label, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 0);
@@ -1090,22 +1142,22 @@ void updateEventDisplay(lv_obj_t *calendar) {
       } else {
         lv_obj_t *from_label = lv_label_create(event_cont);
         lv_label_set_text(from_label, "from ");
-        lv_obj_set_style_text_color(from_label, lv_color_hex(0x800000), 0);
+        lv_obj_set_style_text_color(from_label, scheme_card_text(), 0);
         lv_obj_set_style_text_font(from_label, &lv_font_montserrat_14, 0);
         lv_obj_align_to(from_label, title_label, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 0);
         lv_obj_t *start_time_label = lv_label_create(event_cont);
         lv_label_set_text(start_time_label, start_time_str.c_str());
-        lv_obj_set_style_text_color(start_time_label, lv_color_hex(0x800000), 0);
+        lv_obj_set_style_text_color(start_time_label, scheme_card_text(), 0);
         lv_obj_set_style_text_font(start_time_label, &lv_font_montserrat_14, 0);
         lv_obj_align_to(start_time_label, from_label, LV_ALIGN_OUT_RIGHT_MID, 0, 0);
         lv_obj_t *to_label = lv_label_create(event_cont);
         lv_label_set_text(to_label, " to ");
-        lv_obj_set_style_text_color(to_label, lv_color_hex(0x800000), 0);
+        lv_obj_set_style_text_color(to_label, scheme_card_text(), 0);
         lv_obj_set_style_text_font(to_label, &lv_font_montserrat_14, 0);
         lv_obj_align_to(to_label, start_time_label, LV_ALIGN_OUT_RIGHT_MID, 0, 0);
         lv_obj_t *end_time_label = lv_label_create(event_cont);
         lv_label_set_text(end_time_label, end_time_str.c_str());
-        lv_obj_set_style_text_color(end_time_label, lv_color_hex(0x800000), 0);
+        lv_obj_set_style_text_color(end_time_label, scheme_card_text(), 0);
         lv_obj_set_style_text_font(end_time_label, &lv_font_montserrat_14, 0);
         lv_obj_align_to(end_time_label, to_label, LV_ALIGN_OUT_RIGHT_MID, 0, 0);
         time_base = from_label;
@@ -1167,7 +1219,7 @@ void updateEventDisplay(lv_obj_t *calendar) {
         // Title label (blue)
         lv_obj_t *title_label = lv_label_create(event_cont);
         lv_label_set_text(title_label, summary.c_str());
-        lv_obj_set_style_text_color(title_label, lv_color_hex(0x0000FF), 0);
+        lv_obj_set_style_text_color(title_label, scheme_card_text(), 0);
         lv_obj_set_style_text_font(title_label, &lv_font_montserrat_14, 0);
         lv_obj_set_style_text_align(title_label, LV_TEXT_ALIGN_LEFT, 0);
         lv_label_set_long_mode(title_label, LV_LABEL_LONG_WRAP);
@@ -1177,7 +1229,7 @@ void updateEventDisplay(lv_obj_t *calendar) {
         // Date row
         lv_obj_t *date_label = lv_label_create(event_cont);
         lv_label_set_text(date_label, ("On " + start_date_str).c_str());
-        lv_obj_set_style_text_color(date_label, lv_color_hex(0x800000), 0);
+        lv_obj_set_style_text_color(date_label, scheme_card_text(), 0);
         lv_obj_set_style_text_font(date_label, &lv_font_montserrat_14, 0);
         lv_obj_set_style_text_align(date_label, LV_TEXT_ALIGN_LEFT, 0);
         lv_obj_align_to(date_label, title_label, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 0);
@@ -1785,12 +1837,15 @@ void show_settings_popup() {
       lv_obj_set_scrollbar_mode(o, LV_SCROLLBAR_MODE_OFF);
       return o;
     };
-    auto make_card = [](lv_obj_t *parent, uint32_t bg, uint32_t grad) {
+    // Takes lv_color_t rather than raw hex so the section cards can follow the
+    // active colour scheme. All three use mid-to-dark accent shades because
+    // make_card_title() draws the headings in white.
+    auto make_card = [](lv_obj_t *parent, lv_color_t bg, lv_color_t grad) {
       lv_obj_t *card = lv_obj_create(parent);
       lv_obj_set_width(card, LV_PCT(100));
       lv_obj_set_height(card, LV_SIZE_CONTENT);
-      lv_obj_set_style_bg_color(card, lv_color_hex(bg), 0);
-      lv_obj_set_style_bg_grad_color(card, lv_color_hex(grad), 0);
+      lv_obj_set_style_bg_color(card, bg, 0);
+      lv_obj_set_style_bg_grad_color(card, grad, 0);
       lv_obj_set_style_bg_grad_dir(card, LV_GRAD_DIR_HOR, 0);
       lv_obj_set_style_radius(card, 8, 0);
       lv_obj_set_style_pad_all(card, 6, 0);
@@ -1874,7 +1929,7 @@ void show_settings_popup() {
     lv_obj_set_flex_flow(right_col, LV_FLEX_FLOW_COLUMN);
 
     // Left column: QR code, firmware version, brightness.
-    lv_obj_t *qr_card = make_card(left_col, 0x151515, 0x151515);
+    lv_obj_t *qr_card = make_card(left_col, lv_color_hex(0x151515), lv_color_hex(0x151515));
     lv_obj_set_flex_align(qr_card, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_t *qr_img = lv_img_create(qr_card);
     lv_img_set_src(qr_img, &qr);
@@ -1884,7 +1939,7 @@ void show_settings_popup() {
     lv_obj_set_style_text_font(qr_hint, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(qr_hint, lv_color_hex(0xFFFFFF), 0);
 
-    lv_obj_t *brightness_card = make_card(left_col, 0x1e1e1e, 0x1e1e1e);
+    lv_obj_t *brightness_card = make_card(left_col, lv_color_hex(0x1e1e1e), lv_color_hex(0x1e1e1e));
     make_card_title(brightness_card, "UI Brightness");
     lv_obj_t *darkness_slider = lv_slider_create(brightness_card);
     lv_slider_set_range(darkness_slider, 0, 100);
@@ -1893,11 +1948,11 @@ void show_settings_popup() {
     lv_obj_add_event_cb(darkness_slider, darkness_slider_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
     // Right column: weather location, ParcelBox, temperature.
-    lv_obj_t *weather_cont = make_card(right_col, 0x55a3ff, 0x007acc);
+    lv_obj_t *weather_cont = make_card(right_col, scheme_accent(), scheme_accent_dark());
     make_card_title(weather_cont, "Weather Location");
     lv_obj_t *location_ta = make_field(weather_cont, "City", "City", location, 0, LV_PCT(100), 0);
 
-    lv_obj_t *parcelbox_cont = make_card(right_col, 0x00b894, 0x00a085);
+    lv_obj_t *parcelbox_cont = make_card(right_col, scheme_accent_dark(), scheme_accent_deep());
     make_card_title(parcelbox_cont, "ParcelBox");
     // Username and Device ID side by side, each with its description underneath.
     // (The old Device ID "Preview" row was removed.)
@@ -1910,7 +1965,8 @@ void show_settings_popup() {
     lv_obj_t *username_ta = make_field(parcel_pair, "Username", "Username", username, 0, 0, 1);
     lv_obj_t *device_id_ta = make_field(parcel_pair, "Device ID", "Device ID", device_id, 0, 0, 1);
 
-    lv_obj_t *temp_cont = make_card(right_col, 0xfd79a8, 0xe84393);
+    lv_obj_t *temp_cont = make_card(right_col, scheme_accent_deep(),
+                                    lv_palette_darken(scheme_palette(), 5));
     make_card_title(temp_cont, "Temperature Adjustment");
     lv_obj_t *temp_adjust_ta = make_field(temp_cont, "Adjust (\xC2\xB0" "C)", "0", String(temp_adjust), 1, LV_PCT(100), 0);
 
@@ -2726,7 +2782,7 @@ void apply_calendar_theme(lv_obj_t *cal) {
   const lv_color_t card_bg    = dark ? lv_color_hex(0x1B1B1B) : lv_color_hex(0xFFFFFF);
   const lv_color_t card_line  = dark ? lv_color_hex(0x333333) : lv_color_hex(0xD8DEE4);
   const lv_color_t cell_bg    = dark ? lv_color_hex(0x262626) : lv_color_hex(0xF2F5F8);
-  const lv_color_t cell_press = dark ? lv_color_hex(0x35404D) : lv_color_hex(0xDCE7F5);
+  const lv_color_t cell_press = dark ? scheme_accent_deep() : scheme_accent_soft();
   const lv_color_t text       = dark ? lv_color_hex(0xECEFF1) : lv_color_hex(0x2C3E50);
 
   lv_obj_set_style_bg_color(cal, card_bg, LV_PART_MAIN);
@@ -2742,6 +2798,18 @@ void apply_calendar_theme(lv_obj_t *cal) {
   // recolours (and thickens) to mark "today", so it has to exist.
   lv_obj_set_style_border_color(cal, cell_bg, LV_PART_ITEMS);
   lv_obj_set_style_border_opa(cal, LV_OPA_COVER, LV_PART_ITEMS);
+  // Days that carry events are marked CHECKED and get the scheme accent as an
+  // outline. "Today" is drawn separately by LVGL's own calendar draw callback
+  // (it tags that button LV_CALENDAR_CTRL_TODAY and pulls
+  // lv_theme_get_color_primary()), which apply_theme_accent() drives. A
+  // LV_STATE_USER_1 style would never fire: lv_buttonmatrix only maps
+  // CHECKED/DISABLED/PRESSED/... to states, never CUSTOM_1..4 -> USER_1..4.
+  // Setting these on the object (rather than through a local lv_style_t) is what
+  // makes a scheme change a plain re-call of this function.
+  lv_obj_set_style_radius(cal, 7, LV_PART_ITEMS | LV_STATE_CHECKED);
+  lv_obj_set_style_border_width(cal, 2, LV_PART_ITEMS | LV_STATE_CHECKED);
+  lv_obj_set_style_border_opa(cal, LV_OPA_COVER, LV_PART_ITEMS | LV_STATE_CHECKED);
+  lv_obj_set_style_border_color(cal, scheme_accent(), LV_PART_ITEMS | LV_STATE_CHECKED);
 }
 void darkness_slider_cb(lv_event_t *e) {
   lv_obj_t *slider = (lv_obj_t*)lv_event_get_target(e);
@@ -2758,6 +2826,7 @@ void darkness_slider_cb(lv_event_t *e) {
   if (date_time_label) lv_obj_set_style_text_color(date_time_label, text_color, 0);
   if (holiday_label) lv_obj_set_style_text_color(holiday_label, text_color, 0);
   if (build_version_label) lv_obj_set_style_text_color(build_version_label, text_color, 0);
+  apply_theme_accent(); // keep the theme's dark flag in step with the slider
   apply_calendar_theme(calendar);
   // Redraw weather and events to apply changes
   updateWeatherDisplay();
@@ -2766,6 +2835,142 @@ void darkness_slider_cb(lv_event_t *e) {
   preferences.begin("ui", false);
   preferences.putInt("ui_darkness", g_ui_darkness);
   preferences.end();
+}
+// Re-initialise the LVGL theme with the active scheme's accent. Cheap and safe
+// to call repeatedly: lv_theme_default_init() allocates its theme object once
+// (lv_theme_default_is_inited()) and returns early when nothing changed.
+static void apply_theme_accent() {
+  lv_palette_t p = scheme_palette();
+  lv_palette_t secondary = (lv_palette_t)((p + 3) % LV_PALETTE_LAST); // same pairing the demo uses
+  lv_theme_default_init(lv_display_get_default(), lv_palette_main(p),
+                        lv_palette_main(secondary), g_ui_darkness > 50,
+                        &lv_font_montserrat_14);
+}
+// Push the active scheme through every object this app colours explicitly.
+// Mirrors the refresh darkness_slider_cb() already does for the light/dark
+// switch. Both displays rebuild their widgets, so both need a re-render.
+static void apply_color_scheme() {
+  apply_theme_accent();
+  if (prev_btn_obj) {
+    lv_obj_set_style_bg_color(prev_btn_obj, scheme_accent(), 0);
+    lv_obj_set_style_bg_color(prev_btn_obj, scheme_accent_dark(), LV_STATE_PRESSED);
+  }
+  if (next_btn_obj) {
+    lv_obj_set_style_bg_color(next_btn_obj, scheme_accent(), 0);
+    lv_obj_set_style_bg_color(next_btn_obj, scheme_accent_dark(), LV_STATE_PRESSED);
+  }
+  if (color_btn) {
+    lv_obj_set_style_bg_color(color_btn, scheme_accent(), 0);
+    lv_obj_set_style_bg_color(color_btn, scheme_accent_dark(), LV_STATE_PRESSED);
+  }
+  apply_calendar_theme(calendar);
+  updateEventDisplay(calendar);   // event cards bake their colours in at creation
+  updateWeatherDisplay();         // ...as do the three weather chips
+}
+
+// ---- Floating colour-scheme selector (ported from LVGL's Widgets demo) -----
+// A round accent-coloured button in the bottom-right corner. Tapping it animates
+// a pill-shaped strip of swatches out to the left; tapping a swatch applies that
+// scheme and collapses the strip again. The strip is FLOATING so it overlays the
+// weather card while open - an 800x480 screen this full has no genuinely free
+// corner left.
+static void color_changer_anim_cb(void *var, int32_t v) {
+  lv_obj_t *obj = (lv_obj_t *)var;
+  if (!obj) return;
+  lv_obj_t *par = lv_obj_get_parent(obj);
+  if (!par) return;
+  int32_t max_w = lv_obj_get_width(par) - 24;
+  lv_obj_set_width(obj, lv_map(v, 0, 256, SCHEME_BTN_SIZE, max_w));
+  lv_obj_align(obj, LV_ALIGN_BOTTOM_RIGHT, -12, -12);
+  if (v > LV_OPA_COVER) v = LV_OPA_COVER;
+  for (uint32_t i = 0; i < lv_obj_get_child_count(obj); i++) {
+    lv_obj_set_style_opa(lv_obj_get_child(obj, i), (lv_opa_t)v, 0);
+  }
+}
+static bool color_strip_is_collapsed() {
+  if (!color_cont) return true;
+  return lv_obj_get_width(color_cont) < lv_disp_get_hor_res(lv_disp_get_default()) / 2;
+}
+static void color_changer_toggle() {
+  if (!color_cont) return;
+  bool collapsed = color_strip_is_collapsed();
+  lv_anim_t a;
+  lv_anim_init(&a);
+  lv_anim_set_var(&a, color_cont);
+  lv_anim_set_exec_cb(&a, color_changer_anim_cb);
+  lv_anim_set_duration(&a, 200);
+  lv_anim_set_values(&a, collapsed ? 0 : 256, collapsed ? 256 : 0);
+  lv_anim_start(&a);
+}
+static void color_changer_event_cb(lv_event_t *e) {
+  if (lv_event_get_code(e) == LV_EVENT_CLICKED) color_changer_toggle();
+}
+static void color_event_cb(lv_event_t *e) {
+  if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
+  // The swatches are only opacity-faded, so they still receive clicks while the
+  // strip is collapsed. Ignore those, otherwise a stray tap near the round
+  // button would silently change the scheme.
+  if (color_strip_is_collapsed()) return;
+  intptr_t idx = (intptr_t)lv_event_get_user_data(e);
+  if (idx < 0 || idx >= COLOR_SCHEME_COUNT) return;
+  g_ui_scheme = (int)idx;
+  apply_color_scheme();
+  preferences.begin("ui", false);
+  preferences.putInt("ui_scheme", g_ui_scheme);
+  preferences.end();
+  color_changer_toggle(); // collapse again once a choice is made
+}
+static void create_color_changer() {
+  if (color_cont) return;
+  color_cont = lv_obj_create(lv_scr_act());
+  lv_obj_remove_style_all(color_cont);
+  lv_obj_set_flex_flow(color_cont, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(color_cont, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER,
+                        LV_FLEX_ALIGN_CENTER);
+  lv_obj_add_flag(color_cont, LV_OBJ_FLAG_FLOATING);
+  lv_obj_clear_flag(color_cont, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_style_bg_color(color_cont, lv_color_white(), 0);
+  lv_obj_set_style_bg_opa(color_cont, LV_OPA_COVER, 0);
+  lv_obj_set_style_radius(color_cont, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_pad_left(color_cont, 10, 0);
+  // Right padding the width of the button, so the collapsed strip is exactly a
+  // circle hidden underneath it.
+  lv_obj_set_style_pad_right(color_cont, SCHEME_BTN_SIZE, 0);
+  lv_obj_set_style_pad_column(color_cont, 4, 0);
+  lv_obj_set_size(color_cont, SCHEME_BTN_SIZE, SCHEME_BTN_SIZE);
+  lv_obj_align(color_cont, LV_ALIGN_BOTTOM_RIGHT, -12, -12);
+  for (int i = 0; i < COLOR_SCHEME_COUNT; i++) {
+    lv_obj_t *c = lv_button_create(color_cont);
+    lv_obj_set_style_bg_color(c, lv_palette_main(color_schemes[i].palette), 0);
+    lv_obj_set_style_radius(c, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_shadow_width(c, 0, 0);
+    lv_obj_set_style_opa(c, LV_OPA_TRANSP, 0); // faded in by color_changer_anim_cb
+    lv_obj_set_size(c, SCHEME_SWATCH_SIZE, SCHEME_SWATCH_SIZE);
+    lv_obj_clear_flag(c, LV_OBJ_FLAG_SCROLL_ON_FOCUS);
+    lv_obj_add_event_cb(c, color_event_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+  }
+  // Created after the strip, so it paints on top of the collapsed swatches.
+  color_btn = lv_button_create(lv_scr_act());
+  // NOTE: LV_OBJ_FLAG_A | LV_OBJ_FLAG_B is fine in the demo's C source but a
+  // hard error in C++, because lv_obj_add_flag() takes a single lv_obj_flag_t.
+  lv_obj_add_flag(color_btn, LV_OBJ_FLAG_FLOATING);
+  lv_obj_add_flag(color_btn, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_style_bg_color(color_btn, scheme_accent(), 0);
+  lv_obj_set_style_bg_color(color_btn, scheme_accent_dark(), LV_STATE_PRESSED);
+  lv_obj_set_style_radius(color_btn, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_shadow_color(color_btn, lv_color_hex(0x000000), 0);
+  lv_obj_set_style_shadow_width(color_btn, 10, 0);
+  lv_obj_set_style_shadow_opa(color_btn, LV_OPA_30, 0);
+  lv_obj_set_size(color_btn, SCHEME_BTN_SIZE, SCHEME_BTN_SIZE);
+  lv_obj_align(color_btn, LV_ALIGN_BOTTOM_RIGHT, -12, -12);
+  lv_obj_add_event_cb(color_btn, color_changer_event_cb, LV_EVENT_CLICKED, NULL);
+  // The demo paints LV_SYMBOL_TINT as a bg_image; a centred label is the same
+  // glyph without depending on bg-image tiling.
+  lv_obj_t *icon = lv_label_create(color_btn);
+  lv_label_set_text(icon, LV_SYMBOL_TINT);
+  lv_obj_set_style_text_font(icon, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(icon, lv_color_white(), 0);
+  lv_obj_center(icon);
 }
 void setup_calendar() {
   if (debug == 1) Serial.println("[APP] Setting up calendar...");
@@ -2780,6 +2985,9 @@ void setup_calendar() {
   printMemoryUsage();
   if (debug == 1) Serial.println("[APP] Starting display setup...");
   setup_display();
+  // setup_display() created the display (and with it LVGL's default blue theme),
+  // so push the stored scheme's accent into the theme now.
+  apply_theme_accent();
   lv_obj_set_scrollbar_mode(lv_scr_act(), LV_SCROLLBAR_MODE_OFF);
   if (debug == 1) Serial.println("[APP] Display setup complete");
   // Apply initial darkness
@@ -2848,18 +3056,9 @@ void setup_calendar() {
     lv_obj_set_style_pad_column(cal_btnm, 4, LV_PART_MAIN);
     lv_obj_set_style_pad_all(cal_btnm, 0, LV_PART_MAIN);
   }
-  // Days that have events: theme tint plus an accent outline.
-  static lv_style_t style_highlight;
-  lv_style_init(&style_highlight);
-  lv_style_set_radius(&style_highlight, 7);
-  lv_style_set_border_width(&style_highlight, 2);
-  lv_style_set_border_opa(&style_highlight, LV_OPA_COVER);
-  lv_style_set_border_color(&style_highlight, lv_color_hex(0x007ACC));
-  lv_obj_add_style(calendar, &style_highlight, LV_PART_ITEMS | LV_STATE_CHECKED);
-  // "Today" is drawn by LVGL's calendar draw callback (the button it tagged with
-  // LV_CALENDAR_CTRL_TODAY gets an accent-coloured, +1px border). A
-  // LV_STATE_USER_1 style would never fire: lv_buttonmatrix only maps
-  // CHECKED/DISABLED/PRESSED/... to states, never CUSTOM_1..4 -> USER_1..4.
+  // Everything accent-coloured about the calendar (event-day outline, pressed
+  // cells, and the "today" marker LVGL draws from the theme primary) is applied
+  // here, so a colour-scheme change is just another call to it.
   apply_calendar_theme(calendar);
   const char * day_names[7] = {"Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"};
   lv_calendar_set_day_names(calendar, day_names);
@@ -2909,8 +3108,9 @@ void setup_calendar() {
   lv_obj_t *prev_btn = lv_button_create(button_bar);
   lv_obj_add_event_cb(prev_btn, prev_month_cb, LV_EVENT_PRESSED, NULL);
   lv_obj_set_size(prev_btn, 40, 40);
-  lv_obj_set_style_bg_color(prev_btn, lv_color_hex(0x007ACC), 0);
-  lv_obj_set_style_bg_color(prev_btn, lv_color_hex(0x005A9E), LV_STATE_PRESSED);
+  prev_btn_obj = prev_btn;
+  lv_obj_set_style_bg_color(prev_btn, scheme_accent(), 0);
+  lv_obj_set_style_bg_color(prev_btn, scheme_accent_dark(), LV_STATE_PRESSED);
   lv_obj_set_style_radius(prev_btn, 10, 0);
   lv_obj_set_style_shadow_color(prev_btn, lv_color_hex(0x000000), 0);
   lv_obj_set_style_shadow_width(prev_btn, 8, 0);
@@ -2937,8 +3137,9 @@ void setup_calendar() {
   lv_obj_t *next_btn = lv_button_create(button_bar);
   lv_obj_add_event_cb(next_btn, next_month_cb, LV_EVENT_PRESSED, NULL);
   lv_obj_set_size(next_btn, 40, 40);
-  lv_obj_set_style_bg_color(next_btn, lv_color_hex(0x007ACC), 0);
-  lv_obj_set_style_bg_color(next_btn, lv_color_hex(0x005A9E), LV_STATE_PRESSED);
+  next_btn_obj = next_btn;
+  lv_obj_set_style_bg_color(next_btn, scheme_accent(), 0);
+  lv_obj_set_style_bg_color(next_btn, scheme_accent_dark(), LV_STATE_PRESSED);
   lv_obj_set_style_radius(next_btn, 10, 0);
   lv_obj_set_style_shadow_color(next_btn, lv_color_hex(0x000000), 0);
   lv_obj_set_style_shadow_width(next_btn, 8, 0);
@@ -2961,6 +3162,7 @@ void setup_calendar() {
     lv_obj_del(loading_img);
     splash_img = nullptr;
   }
+  create_color_changer();
   lv_obj_set_style_bg_color(lv_scr_act(), original_bg_color, LV_PART_MAIN);
   lv_tick_inc(5);
 }
@@ -3066,8 +3268,8 @@ void show_day_events_popup(lv_calendar_date_t *date, const int *indices, int cou
     lv_obj_t *chip = lv_obj_create(day_events_popup);
     lv_obj_set_width(chip, LV_PCT(100));
     lv_obj_set_height(chip, LV_SIZE_CONTENT);
-    lv_obj_set_style_bg_color(chip, lv_color_hex(0x22303F), 0);
-    lv_obj_set_style_bg_grad_color(chip, lv_color_hex(0x1A2430), 0);
+    lv_obj_set_style_bg_color(chip, scheme_accent_dark(), 0);
+    lv_obj_set_style_bg_grad_color(chip, scheme_accent_deep(), 0);
     lv_obj_set_style_bg_grad_dir(chip, LV_GRAD_DIR_HOR, 0);
     lv_obj_set_style_radius(chip, 8, 0);
     lv_obj_set_style_border_width(chip, 0, 0);
@@ -3304,7 +3506,9 @@ void setup() {
   preferences.end();
   preferences.begin("ui", false);
   g_ui_darkness = preferences.getInt("ui_darkness", 0);
+  g_ui_scheme = preferences.getInt("ui_scheme", 0);
   preferences.end();
+  if (g_ui_scheme < 0 || g_ui_scheme >= COLOR_SCHEME_COUNT) g_ui_scheme = 0;
   preferences.begin("wifi", false);
   ssid = preferences.getString("ssid", "");
   password = preferences.getString("password", "");
