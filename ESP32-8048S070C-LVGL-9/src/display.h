@@ -108,15 +108,18 @@ void setup_display()
   // Initialize display
   gfx.begin();
   Serial.println("Display initialized");
+  heapCheck("C after gfx.begin");
   Serial.printf("Free heap after display: %d bytes\n", heap_caps_get_free_size(MALLOC_CAP_8BIT));
   Serial.printf("Free PSRAM after display: %d bytes\n", heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
   gfx.fillScreen(0xFFFF); // White background
   Serial.println("Screen filled white");
+  heapCheck("C2 after fillScreen");
 #ifdef TFT_BL
   pinMode(TFT_BL, OUTPUT);
   digitalWrite(TFT_BL, HIGH);
   Serial.println("Backlight set HIGH");
 #endif
+  heapCheck("D before ts.begin");
   ts.begin();
   ts.setRotation(1);
   Serial.println("Touchscreen initialized");
