@@ -7,6 +7,7 @@
 #include <Update.h>
 #include <WiFiClientSecure.h>
 #include <esp_system.h>  // For ESP.restart()
+#include <LittleFS.h>     // background-image cache (the unused spiffs partition)
 extern const lv_font_t technology_98;
 // Build version
 const String build_version = "2.1";
@@ -3643,27 +3644,92 @@ void initTime() {
 }
 // Modified setup() function: Add the initTime() call after successful WiFi connection
 // ---------------------------------------------------------------------------
-// Everything fetched once the UI is already on screen. Bank holidays are
-// deliberately LAST: they are the slowest and least important, so a slow or
-// failing gov.uk request can never hold up the rest of the data. Kept in one
-// function so the setup wizards (WiFi / API code / location) behave the same
-// as a normal boot.
+// Everything fetched once the UI is already on screen.
+//
+// These are eight SEPARATE blocking HTTPS requests, each paying for its own TLS
+// handshake, so running them back to back froze the whole UI for the entire
+// sequence. They are now a queue: loop() runs exactly ONE step per iteration and
+// LVGL draws in between, so the calendar is usable immediately and each panel
+// fills in as its data lands. Total time is about the same, but the device never
+// looks wedged and touches are handled throughout.
+//
+// Bank holidays stay LAST: they are the slowest and least important, so a slow or
+// failing gov.uk request can never hold up anything else.
 // ---------------------------------------------------------------------------
+enum BootFetchStep {
+  BOOT_STEP_PARCELBOX = 0,
+  BOOT_STEP_WEATHER_LOCATION,
+  BOOT_STEP_EVENTS,
+  BOOT_STEP_WEATHER,
+  BOOT_STEP_FIRMWARE,
+  BOOT_STEP_BACKGROUND_NAME,
+  BOOT_STEP_BACKGROUND_IMAGE,
+  BOOT_STEP_HOLIDAYS, // always last
+  BOOT_STEP_COUNT
+};
+static int bootFetchStep = BOOT_STEP_COUNT; // >= BOOT_STEP_COUNT means idle
+static unsigned long lastBootFetchStep = 0;
+// Long enough for at least one LVGL refresh (LV_DEF_REFR_PERIOD, 30ms) to land
+// between two blocking requests.
+#define BOOT_FETCH_GAP_MS 50
+
+static void runBootFetchStep(int step) {
+  switch (step) {
+    case BOOT_STEP_PARCELBOX:
+      fetchParcelBoxCredentials();
+      break;
+    case BOOT_STEP_WEATHER_LOCATION:
+      fetchWeatherLocation();
+      break;
+    case BOOT_STEP_EVENTS:
+      fetchEvents();
+      updateEventDisplay(calendar);
+      break;
+    case BOOT_STEP_WEATHER:
+      fetchWeather();
+      updateWeatherDisplay();
+      break;
+    case BOOT_STEP_FIRMWARE:
+      checkFirmwareUpdate();
+      updateFirmwareButton();
+      break;
+    case BOOT_STEP_BACKGROUND_NAME:
+      fetchBackgroundFilename();
+      break;
+    case BOOT_STEP_BACKGROUND_IMAGE:
+      fetchAndSetBackgroundImage();
+      break;
+    case BOOT_STEP_HOLIDAYS:
+      fetchBankHolidays();
+      updateHolidayLabel();
+      lastHolidayUpdate = millis();
+      break;
+    default:
+      break;
+  }
+}
+// Called from loop(): advances the queue by at most one step per invocation.
+static void serviceBootFetchQueue() {
+  if (bootFetchStep >= BOOT_STEP_COUNT) return;
+  if (is_ota_updating) return;
+  if (millis() - lastBootFetchStep < BOOT_FETCH_GAP_MS) return;
+  // Never start a request that blocks for a second or more while a finger is
+  // down: the tap would be swallowed and the screen would look dead. Wait for
+  // release, then re-check after another gap.
+  lv_indev_t *indev = lv_indev_get_next(NULL);
+  if (indev && lv_indev_get_state(indev) == LV_INDEV_STATE_PRESSED) {
+    lastBootFetchStep = millis();
+    return;
+  }
+  runBootFetchStep(bootFetchStep);
+  bootFetchStep++;
+  lastBootFetchStep = millis();
+}
+// Kept as one call so the setup wizards (WiFi / API code / location) behave the
+// same as a normal boot - they just (re)start the queue now instead of blocking.
 void fetchAfterUiReady() {
-  fetchParcelBoxCredentials();
-  fetchWeatherLocation();
-  fetchEvents();
-  updateEventDisplay(calendar);
-  fetchWeather();
-  updateWeatherDisplay();
-  checkFirmwareUpdate();
-  updateFirmwareButton();
-  fetchBackgroundFilename();
-  fetchAndSetBackgroundImage();
-  // -- last, always --
-  fetchBankHolidays();
-  updateHolidayLabel();
-  lastHolidayUpdate = millis();
+  bootFetchStep = BOOT_STEP_PARCELBOX;
+  lastBootFetchStep = 0;
 }
 
 void setup() {
@@ -3779,6 +3845,10 @@ void loop() {
     //   if (debug == 1) Serial.println("[APP] OTA completed; resuming screen refresh.");
     // }
   }
+  // Post-UI fetch queue: one blocking request per iteration, with LVGL drawing
+  // in between, instead of the whole sequence in one go.
+  serviceBootFetchQueue();
+
   unsigned long currentTime = millis();
   if (currentTime - lastRefreshTime >= refreshInterval && calendar && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
     fetchEvents();
@@ -4529,11 +4599,110 @@ void fetchBackgroundFilename() {
   http.end();
 }
 // New function to fetch and set background image if filename exists
+// ---- Background image: flash cache -----------------------------------------
+// The server serves a 1,152,000-byte RGB888 blob (800*480*3) over HTTPS, and it
+// only ever changes when backgroundFilename does. The last one is therefore kept
+// in the LittleFS partition - that is the "spiffs" partition from default_8MB.csv
+// at 0x670000, 1.5MB, which nothing else in this project uses. Later boots (and
+// the hourly refresh) read it from flash instead of re-downloading it, skipping a
+// TLS handshake AND a 1.1MB transfer every time.
+#define BG_CACHE_PATH "/bg.rgb"
+#define BG_EXPECTED_SIZE (800 * 480 * 3)
+static bool bgFsReady = false;
+// lv_img_set_src() keeps the pointer it is handed, so this descriptor must
+// outlive the call. It used to be a local, which left LVGL reading a stale stack
+// frame as soon as the function returned.
+static lv_image_dsc_t bg_dsc;
+// The buffer LVGL is currently drawing from, so it can be released when a new
+// background replaces it (the old code leaked one 1.1MB buffer per change).
+static uint8_t *bg_buffer = nullptr;
+
+static bool bgCacheMount() {
+  if (bgFsReady) return true;
+  bgFsReady = LittleFS.begin(true); // format the partition on first ever use
+  if (!bgFsReady && debug == 1) {
+    Serial.println("[APP] LittleFS mount failed - background image will not be cached");
+  }
+  return bgFsReady;
+}
+static void bgApply(uint8_t *buf, size_t len) {
+  if (bg_img) {
+    lv_obj_del(bg_img);
+    bg_img = nullptr;
+  }
+  // Safe to release the old buffer only now: the object that referenced it is
+  // gone and LVGL is not mid-render here (this runs from loop()).
+  if (bg_buffer && bg_buffer != buf) free(bg_buffer);
+  bg_buffer = buf;
+  memset(&bg_dsc, 0, sizeof(bg_dsc));
+  bg_dsc.header.cf = LV_COLOR_FORMAT_RGB888;
+  bg_dsc.header.w = 800;
+  bg_dsc.header.h = 480;
+  bg_dsc.data_size = len;
+  bg_dsc.data = buf;
+  bg_img = lv_img_create(lv_scr_act());
+  lv_img_set_src(bg_img, &bg_dsc);
+  lv_obj_set_size(bg_img, LV_PCT(100), LV_PCT(100));
+  lv_obj_align(bg_img, LV_ALIGN_CENTER, 0, 0);
+  lv_obj_move_background(bg_img);
+  lv_obj_invalidate(lv_scr_act());
+}
+// Load the cached copy, but only when it is for exactly the file we want now.
+static bool bgLoadFromCache() {
+  if (!bgCacheMount()) return false;
+  preferences.begin("ui", false);
+  String cachedName = preferences.getString("bg_name", "");
+  preferences.end();
+  if (cachedName.isEmpty() || cachedName != backgroundFilename) return false;
+  File f = LittleFS.open(BG_CACHE_PATH, "r");
+  if (!f) return false;
+  if ((int)f.size() != BG_EXPECTED_SIZE) {
+    f.close();
+    if (debug == 1) Serial.println("[APP] Cached background is the wrong size, re-downloading");
+    return false;
+  }
+  uint8_t *buf = (uint8_t *)ps_malloc(BG_EXPECTED_SIZE);
+  if (!buf) {
+    f.close();
+    return false;
+  }
+  size_t got = f.read(buf, BG_EXPECTED_SIZE);
+  f.close();
+  if (got != (size_t)BG_EXPECTED_SIZE) {
+    free(buf);
+    if (debug == 1) Serial.println("[APP] Cached background read short, re-downloading");
+    return false;
+  }
+  if (debug == 1) Serial.println("[APP] Background restored from flash cache (no download)");
+  bgApply(buf, BG_EXPECTED_SIZE);
+  return true;
+}
+static void bgSaveToCache(const uint8_t *buf, size_t len) {
+  if (!bgCacheMount()) return;
+  File f = LittleFS.open(BG_CACHE_PATH, "w");
+  if (!f) {
+    if (debug == 1) Serial.println("[APP] Could not open the background cache for writing");
+    return;
+  }
+  size_t wrote = f.write(buf, len);
+  f.close();
+  if (wrote != len) {
+    if (debug == 1) Serial.println("[APP] Background cache write incomplete, will re-download next boot");
+    return;
+  }
+  preferences.begin("ui", false);
+  preferences.putString("bg_name", backgroundFilename);
+  preferences.end();
+  if (debug == 1) Serial.println("[APP] Background cached to flash");
+}
 void fetchAndSetBackgroundImage() {
   if (backgroundFilename.isEmpty()) {
     if (debug == 1) Serial.println("[APP] No background filename, skipping image fetch");
     return;
   }
+  // Fast path: same file as last time and it is already on flash.
+  if (bgLoadFromCache()) return;
+
   if (debug == 1) Serial.println("[APP] Fetching background image: " + backgroundFilename);
   HTTPClient http;
   String url = "https://crontech.uk/uploads/" + backgroundFilename;
@@ -4545,9 +4714,8 @@ void fetchAndSetBackgroundImage() {
     return;
   }
   int contentLength = http.getSize();
-  const int expectedSize = 800 * 480 * 3;  // 1,152,000 bytes for RGB888
-  if (contentLength != expectedSize) {
-    if (debug == 1) Serial.println("[APP] Invalid background size: " + String(contentLength) + " bytes (expected " + String(expectedSize) + ")");
+  if (contentLength != BG_EXPECTED_SIZE) {
+    if (debug == 1) Serial.println("[APP] Invalid background size: " + String(contentLength) + " bytes (expected " + String(BG_EXPECTED_SIZE) + ")");
     http.end();
     return;
   }
@@ -4566,8 +4734,12 @@ void fetchAndSetBackgroundImage() {
     if (available) {
       size_t read = stream->readBytes(imageBuffer + totalRead, min(available, (size_t)(contentLength - totalRead)));
       totalRead += read;
+    } else {
+      // Nothing buffered: yield so the WiFi stack, the idle task and LVGL can
+      // run. The old code delayed 1ms on EVERY pass, which threw away time while
+      // data was flowing; a bare spin would instead starve the WiFi task.
+      delay(1);
     }
-    delay(1);
   }
   if (totalRead != contentLength) {
     if (debug == 1) Serial.println("[APP] Incomplete background image download: " + String(totalRead) + "/" + String(contentLength) + " bytes");
@@ -4576,29 +4748,9 @@ void fetchAndSetBackgroundImage() {
     return;
   }
   if (debug == 1) Serial.println("[APP] Download complete: " + String(totalRead) + " bytes");
-  // Delete previous background if exists
-  if (bg_img) {
-    lv_obj_del(bg_img);
-    bg_img = nullptr;
-    if (debug == 1) Serial.println("[APP] Previous background deleted");
-  }
-  // Setup LVGL image descriptor
-  lv_image_dsc_t img_dsc;
-  memset(&img_dsc, 0, sizeof(img_dsc));
-  img_dsc.header.cf = LV_COLOR_FORMAT_RGB888;
-  img_dsc.header.w = 800;
-  img_dsc.header.h = 480;
-  // Removed: always_zero and reserved (handled by memset in v9 bitfields)
-  img_dsc.data_size = contentLength;
-  img_dsc.data = imageBuffer;
-  // Create and set image
-  bg_img = lv_img_create(lv_scr_act());
-  lv_img_set_src(bg_img, &img_dsc);
-  lv_obj_set_size(bg_img, LV_PCT(100), LV_PCT(100));
-  lv_obj_align(bg_img, LV_ALIGN_CENTER, 0, 0);
-  lv_obj_move_background(bg_img);
-  lv_obj_invalidate(lv_scr_act());  // Force redraw
+  // Cache before applying, so a rendering problem cannot lose the download.
+  bgSaveToCache(imageBuffer, contentLength);
+  bgApply(imageBuffer, contentLength);
   if (debug == 1) Serial.println("[APP] Background image set successfully via LVGL");
   http.end();
-  // Note: imageBuffer remains allocated as LVGL owns it; free on next update or reboot
 }
