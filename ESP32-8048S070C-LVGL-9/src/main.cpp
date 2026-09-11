@@ -1608,7 +1608,21 @@ void close_settings_cb(lv_event_t * e) {
 void factory_reset_cb(lv_event_t *e);
 void show_settings_popup() {
     if (debug == 1) Serial.println("[APP] Showing settings popup...");
+    // Building this window costs ~20KB of the LVGL heap. If that is not
+    // available, lv_obj_create() starts returning NULL part-way through and the
+    // next style call dereferences it, resetting the device. Fail cleanly
+    // instead.
+    lv_mem_monitor_t mem;
+    lv_mem_monitor(&mem);
+    if (mem.free_size < 28000) {
+      if (debug == 1) Serial.printf("[APP] Settings: not enough LVGL memory (%u free)\n", (unsigned)mem.free_size);
+      return;
+    }
     settings_popup = lv_obj_create(lv_scr_act());
+    if (!settings_popup) {
+      if (debug == 1) Serial.println("[APP] Settings: failed to create popup");
+      return;
+    }
     lv_obj_set_size(settings_popup, SETTINGS_POPUP_W, SETTINGS_POPUP_H);
     lv_obj_align(settings_popup, LV_ALIGN_CENTER, 0, 0);
     lv_obj_set_style_bg_color(settings_popup, lv_color_hex(0x000000), 0);
