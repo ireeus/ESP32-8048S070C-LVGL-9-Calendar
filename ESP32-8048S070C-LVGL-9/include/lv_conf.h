@@ -80,13 +80,12 @@
 
     /** Set an address for the memory pool instead of allocating it as a normal array. Can be in external SRAM too. */
     #define LV_MEM_ADR 0     /**< 0: unused*/
-    /* Kept as the stock static pool in internal RAM. A heap_caps/PSRAM backed
-     * pool was tried and reverted: it is the only global memory change that
-     * could plausibly interact with the rest of the firmware. */
-    #if LV_MEM_ADR == 0
-        #undef LV_MEM_POOL_INCLUDE
-        #undef LV_MEM_POOL_ALLOC
-    #endif
+    /* Take the pool from PSRAM (falling back to internal RAM). A static pool in
+     * .bss costs 128KB of *internal* RAM, which starved the RGB panel DMA /
+     * WiFi / TLS side of the firmware: with it, internal free after LVGL fell
+     * from ~237KB to ~98KB and the device began faulting during startup. */
+    #define LV_MEM_POOL_INCLUDE <esp_heap_caps.h>
+    #define LV_MEM_POOL_ALLOC(size) heap_caps_malloc_prefer((size), 2, MALLOC_CAP_SPIRAM, MALLOC_CAP_DEFAULT)
 #endif  /*LV_USE_STDLIB_MALLOC == LV_STDLIB_BUILTIN*/
 
 /*====================
