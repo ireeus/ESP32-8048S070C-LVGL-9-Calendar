@@ -84,6 +84,12 @@ void updateFirmwareButton();
 unsigned long hashString(const String& str);
 void update_today_highlight(lv_obj_t *cal);
 void darkness_slider_cb(lv_event_t *e); // New callback for darkness slider
+// Colour-scheme helpers. Defined next to apply_calendar_theme() further down, but
+// declared here because darkness_slider_cb() (which sits above them) calls
+// apply_theme_accent() to keep the theme's light/dark flag in step.
+static void apply_theme_accent();
+static void apply_color_scheme();
+static void create_color_changer();
 void rearrange_calendar_parts(lv_obj_t *cal);
 void fetchNotifications(); // New function for fetching notifications and displaying image
 void save_settings_cb(lv_event_t *e); // Renamed and modified from location_submit_cb
