@@ -50,6 +50,9 @@ void updateDateTimeLabel(); // New function to update date-time label
 void show_event_details(int index, bool isReminder);
 void show_event_details_cb(lv_event_t *e);
 void close_event_details_cb(lv_event_t *e);
+// Tap-a-day preview: lists the events on that day before offering "add new".
+void show_day_events_popup(lv_calendar_date_t *date, const int *indices, int count);
+void close_day_events_popup();
 void cancel_reminder_cb(lv_event_t *e);
 void prev_month_cb(lv_event_t *e);
 void next_month_cb(lv_event_t *e);
@@ -126,6 +129,8 @@ static lv_obj_t *version_label = nullptr;
 static lv_obj_t *update_popup = nullptr;
 static lv_obj_t *update_status_label = nullptr;
 static lv_obj_t *event_details_popup = nullptr;
+static lv_obj_t *day_events_popup = nullptr; // Day preview (events on a tapped day)
+static lv_calendar_date_t day_preview_date = {0, 0, 0}; // Date shown by the day preview
 static lv_obj_t *firmware_update_btn = nullptr;
 static lv_obj_t *button_bar = nullptr;
 static lv_obj_t *notification_img = nullptr; // New: Object for the notification image
@@ -949,7 +954,12 @@ void updateEventDisplay(lv_obj_t *calendar) {
 
   // Set highlighted dates on calendar (unchanged)
   if (debug == 1) Serial.println("[APP] Setting highlighted dates...");
-  lv_calendar_date_t highlighted_dates[1000];
+  // IMPORTANT: lv_calendar_set_highlighted_dates() stores this pointer, it does
+  // NOT copy the array. A stack array here dangles as soon as we return, and
+  // LVGL later walks it (on month change / today update) and writes button
+  // states from whatever garbage now occupies that stack. static keeps it valid
+  // for the lifetime of the program; it also moves ~12KB off the loop stack.
+  static lv_calendar_date_t highlighted_dates[1000];
   int highlight_count = 0;
   for (int i = 0; i < numEventDates && highlight_count < 1000; i++) {
     highlighted_dates[highlight_count].year = eventDates[i].year;
@@ -1835,6 +1845,15 @@ void new_event_btn_cb(lv_event_t * e) {
   show_new_event_popup();
 }
 void show_new_event_popup(lv_calendar_date_t *selected_date) {
+  // Only one add-event window at a time. new_event_submit_cb / new_event_cancel_cb
+  // act on the single `new_event_popup` global, so opening a second window would
+  // orphan the first one and leave its buttons pointing at a stale (or NULL)
+  // pointer - pressing those then dereferences it and resets the device.
+  if (new_event_popup) {
+    if (debug == 1) Serial.println("[APP] New event popup already open, ignoring");
+    return;
+  }
+  close_day_events_popup();
   new_event_popup = lv_obj_create(lv_scr_act());
   lv_obj_set_size(new_event_popup, 600, 400);
   lv_obj_align(new_event_popup, LV_ALIGN_CENTER, 0, 0);
@@ -2072,6 +2091,13 @@ void show_new_event_popup(lv_calendar_date_t *selected_date) {
 void new_event_submit_cb(lv_event_t * e) {
   if (debug == 1) Serial.println("[APP] New event submit button clicked");
   NewEventUI *ui = (NewEventUI*)lv_event_get_user_data(e);
+  if (!new_event_popup) {
+    // Window is already gone (stale button press): drop the UI state instead of
+    // dereferencing a deleted/NULL object.
+    if (debug == 1) Serial.println("[APP] Submit ignored: popup already closed");
+    if (ui) delete ui;
+    return;
+  }
   if (!ui) {
     if (debug == 1) Serial.println("[APP] Error: UI structure is null");
     lv_obj_t *error_label = lv_label_create(new_event_popup);
@@ -2214,9 +2240,11 @@ void new_event_submit_cb(lv_event_t * e) {
   }
   http.end();
   delete ui;
-  lv_obj_add_flag(new_event_popup, LV_OBJ_FLAG_HIDDEN);
-  lv_obj_del(new_event_popup);
-  new_event_popup = nullptr;
+  if (new_event_popup) {
+    lv_obj_add_flag(new_event_popup, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_del(new_event_popup);
+    new_event_popup = nullptr;
+  }
 }
 void new_event_cancel_cb(lv_event_t * e) {
   if (debug == 1) Serial.println("[APP] New event cancel button clicked");
@@ -2224,9 +2252,11 @@ void new_event_cancel_cb(lv_event_t * e) {
   if (ui) {
     delete ui;
   }
-  lv_obj_add_flag(new_event_popup, LV_OBJ_FLAG_HIDDEN);
-  lv_obj_del(new_event_popup);
-  new_event_popup = nullptr;
+  if (new_event_popup) {
+    lv_obj_add_flag(new_event_popup, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_del(new_event_popup);
+    new_event_popup = nullptr;
+  }
 }
 void updateDateTimeLabel() {
   if (!date_time_label) {
@@ -2840,6 +2870,156 @@ void button_event_cb(lv_event_t * e) {
   updateWeatherDisplay();
   updateMonthLabel((lv_obj_t*)lv_event_get_user_data(e));
 }
+// ---- Day preview ----------------------------------------------------------
+// Shown when a calendar day that already has events is tapped: a compact list of
+// that day's events (each one opens the full details popup) plus an
+// "Add New Event" button.
+void close_day_events_popup() {
+  if (day_events_popup) {
+    lv_obj_del(day_events_popup);
+    day_events_popup = nullptr;
+  }
+}
+// Indices of events overlapping the given day. Uses the parsed time_t range so a
+// multi-day event shows up on every day it spans.
+static int collect_events_for_date(const lv_calendar_date_t *date, int *out, int max_out) {
+  if (!date || !out || max_out <= 0) return 0;
+  struct tm day_tm = {0};
+  day_tm.tm_year = date->year - 1900;
+  day_tm.tm_mon  = date->month - 1;
+  day_tm.tm_mday = date->day;
+  day_tm.tm_isdst = -1;
+  time_t day_start = mktime(&day_tm);
+  if (day_start == (time_t)-1) return 0;
+  time_t day_end = day_start + 86400;
+  int n = 0;
+  for (int i = 0; i < numEvents && n < max_out; i++) {
+    time_t s = events[i].start_time;
+    time_t e = events[i].end_time;
+    if (e < s) e = s; // guard against an unparsed or reversed range
+    if (s < day_end && e >= day_start) out[n++] = i;
+  }
+  return n;
+}
+static void day_event_item_cb(lv_event_t *e) {
+  lv_obj_t *chip = (lv_obj_t *)lv_event_get_current_target(e);
+  int index = (int)(intptr_t)lv_obj_get_user_data(chip);
+  if (index >= 0 && index < numEvents) {
+    show_event_details(index, false);
+  }
+}
+static void day_events_add_cb(lv_event_t *e) {
+  lv_calendar_date_t d = day_preview_date;
+  close_day_events_popup();
+  show_new_event_popup(&d);
+}
+static void day_events_close_cb(lv_event_t *e) {
+  close_day_events_popup();
+}
+void show_day_events_popup(lv_calendar_date_t *date, const int *indices, int count) {
+  if (!date) return;
+  if (!indices || count <= 0) { // Nothing to preview: go straight to add-new
+    show_new_event_popup(date);
+    return;
+  }
+  close_day_events_popup();
+  day_preview_date = *date;
+
+  day_events_popup = lv_obj_create(lv_scr_act());
+  lv_obj_set_size(day_events_popup, 700, 420);
+  lv_obj_align(day_events_popup, LV_ALIGN_CENTER, 0, 0);
+  lv_obj_set_style_bg_color(day_events_popup, lv_color_hex(0x000000), 0);
+  lv_obj_set_style_border_color(day_events_popup, lv_color_hex(0xFFFFFF), 0);
+  lv_obj_set_style_border_width(day_events_popup, 2, 0);
+  lv_obj_set_style_radius(day_events_popup, 10, 0);
+  lv_obj_set_style_pad_all(day_events_popup, 10, 0);
+  lv_obj_set_style_pad_row(day_events_popup, 8, 0);
+  lv_obj_set_scroll_dir(day_events_popup, LV_DIR_VER);
+  lv_obj_set_scrollbar_mode(day_events_popup, LV_SCROLLBAR_MODE_AUTO);
+  lv_obj_set_flex_flow(day_events_popup, LV_FLEX_FLOW_COLUMN);
+
+  struct tm header_tm = {0};
+  header_tm.tm_year = date->year - 1900;
+  header_tm.tm_mon = date->month - 1;
+  header_tm.tm_mday = date->day;
+  char header_buf[64];
+  strftime(header_buf, sizeof(header_buf), "%A %d %B %Y", &header_tm);
+  lv_obj_t *title = lv_label_create(day_events_popup);
+  lv_label_set_text(title, header_buf);
+  lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+  lv_obj_set_style_text_color(title, lv_color_hex(0xFFFFFF), 0);
+  lv_obj_t *subtitle = lv_label_create(day_events_popup);
+  lv_label_set_text(subtitle, (String(count) + (count == 1 ? " event" : " events")).c_str());
+  lv_obj_set_style_text_font(subtitle, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(subtitle, lv_color_hex(0x9FB3C8), 0);
+
+  for (int k = 0; k < count; k++) {
+    int i = indices[k];
+    if (i < 0 || i >= numEvents) continue;
+    lv_obj_t *chip = lv_obj_create(day_events_popup);
+    lv_obj_set_width(chip, LV_PCT(100));
+    lv_obj_set_height(chip, LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_color(chip, lv_color_hex(0x22303F), 0);
+    lv_obj_set_style_bg_grad_color(chip, lv_color_hex(0x1A2430), 0);
+    lv_obj_set_style_bg_grad_dir(chip, LV_GRAD_DIR_HOR, 0);
+    lv_obj_set_style_radius(chip, 8, 0);
+    lv_obj_set_style_border_width(chip, 0, 0);
+    lv_obj_set_style_pad_all(chip, 8, 0);
+    lv_obj_set_style_pad_row(chip, 2, 0);
+    lv_obj_set_flex_flow(chip, LV_FLEX_FLOW_COLUMN);
+    lv_obj_clear_flag(chip, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(chip, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_set_user_data(chip, (void*)(intptr_t)i);
+    lv_obj_add_event_cb(chip, day_event_item_cb, LV_EVENT_PRESSED, NULL);
+
+    lv_obj_t *summary = lv_label_create(chip);
+    lv_label_set_text(summary, events[i].summary.isEmpty() ? "(no title)" : events[i].summary.c_str());
+    lv_obj_set_style_text_font(summary, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(summary, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_width(summary, LV_PCT(100));
+    lv_label_set_long_mode(summary, LV_LABEL_LONG_WRAP);
+
+    String when = events[i].isAllDay
+                    ? String("All day")
+                    : events[i].start.substring(11, 16) + " - " + events[i].end.substring(11, 16);
+    lv_obj_t *when_lbl = lv_label_create(chip);
+    lv_label_set_text(when_lbl, when.c_str());
+    lv_obj_set_style_text_font(when_lbl, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(when_lbl, lv_color_hex(0xFFD166), 0);
+  }
+
+  lv_obj_t *btn_row = lv_obj_create(day_events_popup);
+  lv_obj_set_width(btn_row, LV_PCT(100));
+  lv_obj_set_height(btn_row, LV_SIZE_CONTENT);
+  lv_obj_set_style_bg_opa(btn_row, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(btn_row, 0, 0);
+  lv_obj_set_style_pad_all(btn_row, 0, 0);
+  lv_obj_set_style_pad_column(btn_row, 10, 0);
+  lv_obj_set_flex_flow(btn_row, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(btn_row, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  lv_obj_clear_flag(btn_row, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scrollbar_mode(btn_row, LV_SCROLLBAR_MODE_OFF);
+
+  lv_obj_t *add_btn = lv_button_create(btn_row);
+  lv_obj_set_size(add_btn, 180, 42);
+  lv_obj_set_style_bg_color(add_btn, lv_color_hex(0x00A86B), 0);
+  lv_obj_set_style_radius(add_btn, 10, 0);
+  lv_obj_add_event_cb(add_btn, day_events_add_cb, LV_EVENT_PRESSED, NULL);
+  lv_obj_t *add_lbl = lv_label_create(add_btn);
+  lv_label_set_text(add_lbl, LV_SYMBOL_PLUS " Add New Event");
+  lv_obj_center(add_lbl);
+  lv_obj_set_style_text_font(add_lbl, &lv_font_montserrat_14, 0);
+
+  lv_obj_t *close_btn = lv_button_create(btn_row);
+  lv_obj_set_size(close_btn, 120, 42);
+  lv_obj_set_style_bg_color(close_btn, lv_color_hex(0xFF0000), 0);
+  lv_obj_set_style_radius(close_btn, 10, 0);
+  lv_obj_add_event_cb(close_btn, day_events_close_cb, LV_EVENT_PRESSED, NULL);
+  lv_obj_t *close_lbl = lv_label_create(close_btn);
+  lv_label_set_text(close_lbl, "Close");
+  lv_obj_center(close_lbl);
+  lv_obj_set_style_text_font(close_lbl, &lv_font_montserrat_14, 0);
+}
 void calendar_event_cb(lv_event_t * e) {
   unsigned long currentTime = millis();
   if (currentTime - lastEventTime < debounceDelay) {
@@ -2847,6 +3027,14 @@ void calendar_event_cb(lv_event_t * e) {
     return;
   }
   lastEventTime = currentTime;
+  // The popups are meant to be modal but do not cover the whole calendar, so a
+  // tap can still land on the grid. Ignore it while a window is open; otherwise
+  // a second popup is created and the first one is orphaned (its buttons then
+  // act on a stale/NULL global and dereference it).
+  if (new_event_popup || event_details_popup || day_events_popup || settings_popup || update_popup) {
+    if (debug == 1) Serial.println("[APP] Calendar tap ignored: a popup is already open");
+    return;
+  }
   if (debug == 1) Serial.println("[APP] Calendar date selected");
   if (!e) {
     if (debug == 1) Serial.println("[APP] Error: Event object is null");
@@ -2871,7 +3059,16 @@ void calendar_event_cb(lv_event_t * e) {
     return;
   }
   updateMonthLabel(calendar);
-  show_new_event_popup(&date);
+  // A day that already has events shows a preview first; an empty day goes
+  // straight to the add-event form.
+  int day_indices[64];
+  int day_count = collect_events_for_date(&date, day_indices, 64);
+  if (debug == 1) Serial.println("[APP] Day has " + String(day_count) + " event(s)");
+  if (day_count > 0) {
+    show_day_events_popup(&date, day_indices, day_count);
+  } else {
+    show_new_event_popup(&date);
+  }
 }
 void update_today_highlight(lv_obj_t *cal) {
   lv_obj_t *btnm = lv_calendar_get_btnmatrix(cal);
