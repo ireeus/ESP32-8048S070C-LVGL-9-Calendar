@@ -2241,7 +2241,11 @@ static lv_obj_t *new_event_field(lv_obj_t *parent, const char *text, const char 
   lv_obj_set_size(ta, w, h);
   lv_obj_align(ta, LV_ALIGN_TOP_LEFT, x, y);
   lv_obj_set_style_text_font(ta, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(ta, lv_color_hex(0x333333), 0);
+  // Deliberately NO text colour here: the LVGL theme picks one that contrasts
+  // with the textarea background it also draws, which is exactly what
+  // make_field() does in Settings. Pinning this to a dark grey made the
+  // pre-filled values unreadable in dark mode, where the theme draws a dark
+  // textarea (apply_theme_accent() passes dark = g_ui_darkness > 50).
   lv_obj_set_style_pad_all(ta, 4, 0);
   lv_obj_set_user_data(ta, (void *)(intptr_t)(numeric ? 1 : 0));
   lv_obj_add_event_cb(ta, keyboard_event_cb, LV_EVENT_FOCUSED, ta);
@@ -2342,7 +2346,7 @@ void show_new_event_popup(lv_calendar_date_t *selected_date) {
   lv_obj_set_size(ui->desc_ta, 320, 52);
   lv_obj_align(ui->desc_ta, LV_ALIGN_TOP_LEFT, 0, 80);
   lv_obj_set_style_text_font(ui->desc_ta, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(ui->desc_ta, lv_color_hex(0x333333), 0);
+  // Theme-provided text colour; see new_event_field() above.
   lv_obj_set_style_pad_all(ui->desc_ta, 4, 0);
   lv_obj_set_user_data(ui->desc_ta, (void*)0);
   lv_obj_add_event_cb(ui->desc_ta, keyboard_event_cb, LV_EVENT_FOCUSED, ui->desc_ta);
