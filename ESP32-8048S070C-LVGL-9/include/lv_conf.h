@@ -80,11 +80,13 @@
 
     /** Set an address for the memory pool instead of allocating it as a normal array. Can be in external SRAM too. */
     #define LV_MEM_ADR 0     /**< 0: unused*/
-    /* Take the pool from PSRAM when present, falling back to internal RAM. This
-     * avoids both a large static array in .bss and stealing the internal RAM
-     * that WiFi/mbedTLS need. */
-    #define LV_MEM_POOL_INCLUDE <esp_heap_caps.h>
-    #define LV_MEM_POOL_ALLOC(size) heap_caps_malloc_prefer((size), 2, MALLOC_CAP_SPIRAM, MALLOC_CAP_DEFAULT)
+    /* Kept as the stock static pool in internal RAM. A heap_caps/PSRAM backed
+     * pool was tried and reverted: it is the only global memory change that
+     * could plausibly interact with the rest of the firmware. */
+    #if LV_MEM_ADR == 0
+        #undef LV_MEM_POOL_INCLUDE
+        #undef LV_MEM_POOL_ALLOC
+    #endif
 #endif  /*LV_USE_STDLIB_MALLOC == LV_STDLIB_BUILTIN*/
 
 /*====================
