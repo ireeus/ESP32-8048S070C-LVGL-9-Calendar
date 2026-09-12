@@ -120,21 +120,29 @@ void notification_hide();
 // both sit above it) use them.
 static void notification_popup_close();
 static bool show_notification_popup(const char *title, const char *message);
+// The large fallback clock shown when there are no events. blink_time_update_cb
+// used to locate it by CHILD INDEX of eventContainer (0 = hours, 1 = colon,
+// 2 = minutes). That assumption died the moment anything else was added to the
+// panel: with the title bar in place child 0 became the bar, so the callback
+// called lv_label_set_text() on a plain lv_obj - writing an lv_label_t's fields
+// into a smaller allocation and corrupting the LVGL heap. It runs one second
+// after the clock appears, which on a fresh boot is before the events have been
+// fetched, so the corruption repeated every second and the board rebooted in a
+// loop. Holding the pointers directly removes the guesswork for good.
+static lv_obj_t *big_clock_hours = nullptr;
+static lv_obj_t *big_clock_colon = nullptr;
+static lv_obj_t *big_clock_minutes = nullptr;
 
 
 
 
 void blink_time_update_cb(lv_timer_t *timer) {
-  lv_obj_t *colon = (lv_obj_t *)lv_timer_get_user_data(timer);
-  if (!colon) return;
-
-  lv_obj_t *parent = lv_obj_get_parent(colon);
-  if (!parent) return;
-
-  // Access siblings by creation order (0: hours, 1: colon, 2: minutes)
-  lv_obj_t *hours = lv_obj_get_child(parent, 0);
-  lv_obj_t *minutes = lv_obj_get_child(parent, 2);
-  if (!hours || !minutes) return;
+  (void)timer;
+  // Direct pointers, never child indices - see the note on big_clock_* above.
+  lv_obj_t *hours = big_clock_hours;
+  lv_obj_t *colon = big_clock_colon;
+  lv_obj_t *minutes = big_clock_minutes;
+  if (!hours || !colon || !minutes) return;
 
   // Toggle colon visibility (1s on, 1s off)
   static bool visible = true;
@@ -1181,6 +1189,11 @@ void updateEventDisplay(lv_obj_t *calendar) {
     if (debug == 1) Serial.println("[APP] Created eventContainer");
   } else {
     lv_obj_clean(eventContainer);
+    // The clock went with the children - drop the pointers so the blink timer can
+    // never touch a freed object.
+    big_clock_hours = nullptr;
+    big_clock_colon = nullptr;
+    big_clock_minutes = nullptr;
     lv_obj_invalidate(eventContainer);
   }
 
@@ -1534,6 +1547,9 @@ if (total_displayed == 0) {
   lv_obj_set_style_text_color(large_time_minutes, scheme_accent(), 0);
   lv_obj_set_style_text_align(large_time_minutes, LV_TEXT_ALIGN_CENTER, 0);
   lv_label_set_long_mode(large_time_minutes, LV_LABEL_LONG_CLIP);
+  big_clock_hours = large_time_hours;
+  big_clock_colon = large_time_colon;
+  big_clock_minutes = large_time_minutes;
 
 // Dynamically calculate alignments based on text widths
 lv_point_t hours_size, colon_size, minutes_size;
@@ -1566,7 +1582,6 @@ lv_obj_update_layout(eventContainer);
 
   // Create/start blink and time-update timer (pass colon as user data)
   blink_timer = lv_timer_create(blink_time_update_cb, 1000, NULL);
-  lv_timer_set_user_data(blink_timer, large_time_colon);
 
   if (debug == 1) {
     Serial.printf("[APP] No events: Dynamic offsets - hours_x=%d, colon_x=%d, mins_x=%d (total_width=%d)\n",
