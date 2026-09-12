@@ -173,7 +173,12 @@ static String wifi_pending_password = "";
 static lv_obj_t *api_code_screen = nullptr;
 static lv_obj_t *location_screen = nullptr;
 static lv_obj_t *settings_popup = nullptr;
-static lv_obj_t *settings_ram_label = nullptr; // live RAM readout inside the settings window
+// Live memory readout inside the settings window: two meters side by side, so
+// each pool needs its own bar and its own value label.
+static lv_obj_t *settings_ram_bar = nullptr;
+static lv_obj_t *settings_ram_val = nullptr;
+static lv_obj_t *settings_psram_bar = nullptr;
+static lv_obj_t *settings_psram_val = nullptr;
 static lv_obj_t *new_event_popup = nullptr;
 static lv_obj_t *new_event_error_label = nullptr; // single reusable inline error
 static lv_obj_t *keyboard = nullptr;
@@ -2216,13 +2221,23 @@ void factory_reset_cb(lv_event_t *e);
 // mistake that left ota_ok_btn dangling).
 static void settings_popup_deleted_cb(lv_event_t *e) {
   (void)e;
-  settings_ram_label = nullptr;
+  settings_ram_bar = nullptr;
+  settings_ram_val = nullptr;
+  settings_psram_bar = nullptr;
+  settings_psram_val = nullptr;
 }
 // Internal RAM is the scarce resource on this board - 320KB shared with the WiFi
 // and TLS stacks - while the LVGL draw buffers and the panel framebuffer live in
 // PSRAM, so both are worth seeing. heap_caps is already used for the boot logging.
-static void update_settings_ram_label() {
-  if (!settings_ram_label) return;
+// Green while a pool has headroom, amber as it tightens, red when it is close to
+// exhausted - the point of a meter is to be readable without doing arithmetic.
+static lv_color_t mem_meter_colour(int pct) {
+  if (pct >= 85) return lv_color_hex(0xFF5252);
+  if (pct >= 70) return lv_color_hex(0xFFC107);
+  return lv_color_hex(0x4CAF50);
+}
+static void update_settings_memory_meters() {
+  if (!settings_ram_bar) return;
   // MALLOC_CAP_8BIT alone also matches the PSRAM regions, which would report the
   // full 8MB as "RAM" - MALLOC_CAP_INTERNAL is what restricts this to the 320KB
   // of on-chip data RAM that is actually the scarce resource.
@@ -2232,18 +2247,26 @@ static void update_settings_ram_label() {
   size_t ps_free   = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
   size_t ram_used  = ram_total > ram_free ? ram_total - ram_free : 0;
   size_t ps_used   = ps_total > ps_free  ? ps_total  - ps_free  : 0;
-  unsigned ram_pct = ram_total ? (unsigned)((ram_used * 100) / ram_total) : 0;
-  char buf[192];
+  int ram_pct = ram_total ? (int)((ram_used * 100) / ram_total) : 0;
+  int ps_pct  = ps_total  ? (int)((ps_used  * 100) / ps_total)  : 0;
+  char buf[64];
+
+  lv_bar_set_value(settings_ram_bar, ram_pct, LV_ANIM_OFF);
+  lv_obj_set_style_bg_color(settings_ram_bar, mem_meter_colour(ram_pct), LV_PART_INDICATOR);
+  snprintf(buf, sizeof(buf), "%u / %u KB   %d%%",
+           (unsigned)(ram_used / 1024), (unsigned)(ram_total / 1024), ram_pct);
+  lv_label_set_text(settings_ram_val, buf);
+
+  lv_bar_set_value(settings_psram_bar, ps_pct, LV_ANIM_OFF);
+  lv_obj_set_style_bg_color(settings_psram_bar, mem_meter_colour(ps_pct), LV_PART_INDICATOR);
   if (ps_total) {
-    snprintf(buf, sizeof(buf),
-             "RAM:   %u / %u KB used (%u%%)\nPSRAM: %u / %u KB used",
-             (unsigned)(ram_used / 1024), (unsigned)(ram_total / 1024), ram_pct,
-             (unsigned)(ps_used / 1024), (unsigned)(ps_total / 1024));
+    // MB here: 8192 KB is a lot of digits for a narrow column.
+    snprintf(buf, sizeof(buf), "%.1f / %.1f MB   %d%%",
+             ps_used / 1048576.0, ps_total / 1048576.0, ps_pct);
   } else {
-    snprintf(buf, sizeof(buf), "RAM:   %u / %u KB used (%u%%)",
-             (unsigned)(ram_used / 1024), (unsigned)(ram_total / 1024), ram_pct);
+    snprintf(buf, sizeof(buf), "not present");
   }
-  lv_label_set_text(settings_ram_label, buf);
+  lv_label_set_text(settings_psram_val, buf);
 }
 void show_settings_popup() {
     // Memory guard kept from the later crash fix: this window costs ~20KB of
@@ -2424,10 +2447,56 @@ void show_settings_popup() {
     lv_obj_set_style_text_font(version_settings_label, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(version_settings_label, lv_color_hex(0xDDDDDD), 0);
 
-    settings_ram_label = lv_label_create(right_col);
-    lv_obj_set_style_text_font(settings_ram_label, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(settings_ram_label, lv_color_hex(0xAAAAAA), 0);
-    update_settings_ram_label(); // fill it immediately, before the first tick
+    // ---- memory meters, side by side --------------------------------------
+    lv_obj_t *mem_row = lv_obj_create(right_col);
+    lv_obj_set_width(mem_row, LV_PCT(100));
+    lv_obj_set_height(mem_row, LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(mem_row, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(mem_row, 0, 0);
+    lv_obj_set_style_pad_all(mem_row, 0, 0);
+    lv_obj_set_style_pad_column(mem_row, 16, 0);
+    lv_obj_set_flex_flow(mem_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(mem_row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_START,
+                          LV_FLEX_ALIGN_START);
+    lv_obj_clear_flag(mem_row, LV_OBJ_FLAG_SCROLLABLE);
+
+    // One meter: pool name, the bar itself, then the numbers underneath.
+    auto make_mem_meter = [&](const char *name, lv_obj_t **bar_out, lv_obj_t **val_out) {
+      lv_obj_t *col = lv_obj_create(mem_row);
+      lv_obj_set_width(col, 0);
+      lv_obj_set_height(col, LV_SIZE_CONTENT);
+      lv_obj_set_flex_grow(col, 1); // the two meters share the width evenly
+      lv_obj_set_style_bg_opa(col, LV_OPA_TRANSP, 0);
+      lv_obj_set_style_border_width(col, 0, 0);
+      lv_obj_set_style_pad_all(col, 0, 0);
+      lv_obj_set_style_pad_row(col, 4, 0);
+      lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
+      lv_obj_clear_flag(col, LV_OBJ_FLAG_SCROLLABLE);
+
+      lv_obj_t *title = lv_label_create(col);
+      lv_label_set_text(title, name);
+      lv_obj_set_style_text_font(title, &lv_font_montserrat_14, 0);
+      lv_obj_set_style_text_color(title, lv_color_hex(0xDDDDDD), 0);
+
+      lv_obj_t *bar = lv_bar_create(col);
+      lv_obj_set_width(bar, LV_PCT(100));
+      lv_obj_set_height(bar, 14);
+      lv_bar_set_range(bar, 0, 100);
+      lv_bar_set_value(bar, 0, LV_ANIM_OFF);
+      lv_obj_set_style_bg_color(bar, lv_color_hex(0x333333), LV_PART_MAIN);
+      lv_obj_set_style_radius(bar, 4, LV_PART_MAIN);
+      lv_obj_set_style_radius(bar, 4, LV_PART_INDICATOR);
+
+      lv_obj_t *val = lv_label_create(col);
+      lv_obj_set_style_text_font(val, &lv_font_montserrat_14, 0);
+      lv_obj_set_style_text_color(val, lv_color_hex(0xAAAAAA), 0);
+
+      *bar_out = bar;
+      *val_out = val;
+    };
+    make_mem_meter("RAM", &settings_ram_bar, &settings_ram_val);
+    make_mem_meter("PSRAM", &settings_psram_bar, &settings_psram_val);
+    update_settings_memory_meters(); // fill both before the first tick
 
     // ---- footer buttons ---------------------------------------------------
     lv_obj_t *settings_footer = make_panel(settings_popup);
@@ -4627,8 +4696,8 @@ void loop() {
     lastTimeLabelUpdate = currentTime;
   }
   // Only does anything while the settings window is open.
-  if (settings_ram_label && currentTime - lastRamLabelUpdate >= ramLabelUpdateInterval) {
-    update_settings_ram_label();
+  if (settings_ram_bar && currentTime - lastRamLabelUpdate >= ramLabelUpdateInterval) {
+    update_settings_memory_meters();
     lastRamLabelUpdate = currentTime;
   }
   if (currentTime - lastDateTimeUpdate >= dateTimeUpdateInterval && !is_ota_updating) {
