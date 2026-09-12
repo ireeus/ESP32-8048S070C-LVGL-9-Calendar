@@ -194,7 +194,7 @@ static lv_obj_t *settings_ram_val = nullptr;
 static lv_obj_t *settings_psram_bar = nullptr;
 static lv_obj_t *settings_psram_val = nullptr;
 static lv_obj_t *new_event_popup = nullptr;
-static lv_obj_t *new_event_error_label = nullptr; // single reusable inline error
+static lv_obj_t *message_popup = nullptr; // one-button notice box (form validation)
 static lv_obj_t *keyboard = nullptr;
 static lv_obj_t *date_time_label = nullptr; // Renamed from month_label
 static lv_obj_t *month_label = nullptr;
@@ -1067,6 +1067,29 @@ void updateWeatherDisplay() {
   lv_obj_set_style_border_width(buttons_cont, 0, 0);
   lv_obj_set_style_pad_all(buttons_cont, 0, 0);
   lv_obj_set_scrollbar_mode(buttons_cont, LV_SCROLLBAR_MODE_OFF);
+  // Each chip is a BOLD, near-black title above a slightly lighter value. They
+  // used to be one label with an embedded newline ("Hum\n88%"), which forced both
+  // lines to share a single font and colour - so the title could not be
+  // emphasised at all.
+  auto make_chip_value = [&](lv_obj_t *chip, const char *title, const String &value) {
+    // The theme gives a plain lv_obj a 16px card padding, which left only 18px of
+    // content height in a 50px chip - less than the two lines need.
+    lv_obj_set_style_pad_all(chip, 0, 0);
+    lv_obj_set_flex_flow(chip, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(chip, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_row(chip, 2, 0);
+    lv_obj_clear_flag(chip, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(chip, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_t *t = lv_label_create(chip);
+    lv_label_set_text(t, title);
+    lv_obj_set_style_text_font(t, &lv_font_montserrat_14_bold, 0);
+    lv_obj_set_style_text_color(t, lv_color_hex(0x000000), 0); // darkest
+    lv_obj_t *v = lv_label_create(chip);
+    lv_label_set_text(v, value.c_str());
+    lv_obj_set_style_text_font(v, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(v, lv_color_hex(0x37474F), 0); // lighter than the title
+  };
   // Humidity (UPDATED: Dark text color)
   lv_obj_t *hum_cont = lv_obj_create(buttons_cont);
   lv_obj_set_size(hum_cont, 108, 50); // was 55 - the odd one out in the row
@@ -1077,12 +1100,8 @@ void updateWeatherDisplay() {
   lv_obj_set_style_bg_grad_color(hum_cont, scheme_accent_tint(3), 0);
   lv_obj_set_style_bg_grad_dir(hum_cont, LV_GRAD_DIR_HOR, 0);
   lv_obj_set_style_radius(hum_cont, UI_RADIUS, 0);
-  lv_obj_t *hum_val = lv_label_create(hum_cont);
-  lv_label_set_text(hum_val, ("Hum\n" + String((int)current_weather.relative_humidity_2m) + "%").c_str());
-  lv_obj_set_style_text_font(hum_val, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(hum_val, lv_color_hex(0x000000), 0);  // UPDATED: Dark color
-  lv_obj_set_scrollbar_mode(hum_val, LV_SCROLLBAR_MODE_OFF);
-  lv_obj_center(hum_val);
+  make_chip_value(hum_cont, "Hum",
+                  String((int)current_weather.relative_humidity_2m) + "%");
   // Wind (UPDATED: Dark text color)
   lv_obj_t *wind_cont = lv_obj_create(buttons_cont);
   lv_obj_set_size(wind_cont, 108, 50);
@@ -1090,12 +1109,8 @@ void updateWeatherDisplay() {
   lv_obj_set_style_bg_grad_color(wind_cont, scheme_accent_tint(2), 0);
   lv_obj_set_style_bg_grad_dir(wind_cont, LV_GRAD_DIR_HOR, 0);
   lv_obj_set_style_radius(wind_cont, UI_RADIUS, 0);
-  lv_obj_t *wind_val = lv_label_create(wind_cont);
-  lv_label_set_text(wind_val, ("Wind\n" + String((int)current_weather.wind_speed_10m) + " km/h").c_str());
-  lv_obj_set_style_text_font(wind_val, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(wind_val, lv_color_hex(0x000000), 0);  // UPDATED: Dark color
-  lv_obj_set_scrollbar_mode(wind_val, LV_SCROLLBAR_MODE_OFF);
-  lv_obj_center(wind_val);
+  make_chip_value(wind_cont, "Wind",
+                  String((int)current_weather.wind_speed_10m) + " km/h");
 // Pressure (REPLACED: Atmospheric pressure in hPa instead of precipitation)
 lv_obj_t *pressure_cont = lv_obj_create(buttons_cont);
 lv_obj_set_size(pressure_cont, 108, 50);
@@ -1103,12 +1118,8 @@ lv_obj_set_style_bg_color(pressure_cont, scheme_accent_tint(2), 0);
 lv_obj_set_style_bg_grad_color(pressure_cont, scheme_accent_tint(1), 0);
 lv_obj_set_style_bg_grad_dir(pressure_cont, LV_GRAD_DIR_HOR, 0);
 lv_obj_set_style_radius(pressure_cont, UI_RADIUS, 0);
-lv_obj_t *pressure_val = lv_label_create(pressure_cont);
-lv_label_set_text(pressure_val, ("Pressure\n" + String((int)current_weather.surface_pressure) + " hPa").c_str());
-lv_obj_set_style_text_font(pressure_val, &lv_font_montserrat_14, 0);
-lv_obj_set_style_text_color(pressure_val, lv_color_hex(0x000000), 0);  // Dark color
-lv_obj_set_scrollbar_mode(pressure_val, LV_SCROLLBAR_MODE_OFF);
-lv_obj_center(pressure_val);
+make_chip_value(pressure_cont, "Pressure",
+                String((int)current_weather.surface_pressure) + " hPa");
   // Forecast container (UPDATED: 7-day daily forecast with max/min temperatures)
   lv_obj_t *forecast_cont = lv_obj_create(weatherContainer);
   lv_obj_set_size(forecast_cont, 350, 80);
@@ -2803,19 +2814,59 @@ static lv_obj_t *new_event_field(lv_obj_t *parent, const char *text, const char 
   lv_obj_add_event_cb(ta, keyboard_event_cb, LV_EVENT_DEFOCUSED, ta);
   return ta;
 }
-// Show/replace the one inline error message on the form. Reusing a single label
-// stops the old code from stacking a fresh red label on every failed submit.
-static void new_event_error(const char *msg) {
-  if (!new_event_popup) return;
-  if (new_event_error_label) {
-    lv_obj_del(new_event_error_label);
-    new_event_error_label = nullptr;
+static void message_popup_close_cb(lv_event_t *e) {
+  (void)e;
+  if (message_popup) {
+    lv_obj_del(message_popup);
+    message_popup = nullptr;
   }
-  new_event_error_label = lv_label_create(new_event_popup);
-  lv_label_set_text(new_event_error_label, msg);
-  lv_obj_set_style_text_color(new_event_error_label, lv_color_hex(0xFF0000), 0);
-  lv_obj_set_style_text_font(new_event_error_label, &lv_font_montserrat_14, 0);
-  lv_obj_align(new_event_error_label, LV_ALIGN_BOTTOM_MID, 0, -46);
+}
+// Report a problem with the add-event form. This used to be a small red label
+// pinned inside the window at BOTTOM_MID -46, which put it directly behind the
+// on-screen keyboard and made it easy to miss altogether. It is a modal box now,
+// so it has to be acknowledged before the form can be used again.
+static void new_event_error(const char *msg, const char *title = "Add event") {
+  if (message_popup) return; // one at a time
+  message_popup = lv_obj_create(lv_scr_act());
+  lv_obj_set_width(message_popup, 560);
+  lv_obj_set_height(message_popup, LV_SIZE_CONTENT);
+  // Top-aligned rather than centred: the keyboard occupies the bottom half of the
+  // screen, so a centred box would sit behind it.
+  lv_obj_align(message_popup, LV_ALIGN_TOP_MID, 0, 70);
+  lv_obj_set_style_bg_color(message_popup, lv_color_hex(0x1A1A1A), 0);
+  lv_obj_set_style_border_color(message_popup, lv_color_hex(0xFFB300), 0); // amber, not red
+  lv_obj_set_style_border_width(message_popup, 3, 0);
+  lv_obj_set_style_radius(message_popup, UI_RADIUS, 0);
+  lv_obj_set_style_pad_all(message_popup, 14, 0);
+  lv_obj_set_style_pad_row(message_popup, 10, 0);
+  lv_obj_set_flex_flow(message_popup, LV_FLEX_FLOW_COLUMN);
+  lv_obj_set_flex_align(message_popup, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+                        LV_FLEX_ALIGN_CENTER);
+  lv_obj_clear_flag(message_popup, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scrollbar_mode(message_popup, LV_SCROLLBAR_MODE_OFF);
+
+  lv_obj_t *title_lbl = lv_label_create(message_popup);
+  lv_label_set_text(title_lbl, (String(LV_SYMBOL_WARNING "  ") + title).c_str());
+  lv_obj_set_style_text_font(title_lbl, &lv_font_montserrat_24, 0);
+  lv_obj_set_style_text_color(title_lbl, lv_color_hex(0xFFB300), 0);
+
+  lv_obj_t *msg_lbl = lv_label_create(message_popup);
+  lv_label_set_text(msg_lbl, msg);
+  lv_obj_set_style_text_font(msg_lbl, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(msg_lbl, lv_color_hex(0xFFFFFF), 0);
+  lv_obj_set_width(msg_lbl, LV_PCT(100));
+  lv_obj_set_style_text_align(msg_lbl, LV_TEXT_ALIGN_CENTER, 0);
+  lv_label_set_long_mode(msg_lbl, LV_LABEL_LONG_WRAP);
+
+  lv_obj_t *ok_btn = lv_button_create(message_popup);
+  lv_obj_set_size(ok_btn, 180, 46);
+  lv_obj_set_style_bg_color(ok_btn, scheme_accent(), 0);
+  lv_obj_set_style_radius(ok_btn, UI_RADIUS, 0);
+  lv_obj_add_event_cb(ok_btn, message_popup_close_cb, LV_EVENT_PRESSED, NULL);
+  lv_obj_t *ok_lbl = lv_label_create(ok_btn);
+  lv_label_set_text(ok_lbl, "OK");
+  lv_obj_center(ok_lbl);
+  lv_obj_set_style_text_font(ok_lbl, &lv_font_montserrat_14, 0);
 }
 // Single teardown path for the add-event window so the keyboard never stays on
 // screen over the calendar after Submit/Cancel.
@@ -2824,7 +2875,11 @@ static void close_new_event_popup() {
     lv_keyboard_set_textarea(keyboard, nullptr);
     lv_obj_add_flag(keyboard, LV_OBJ_FLAG_HIDDEN);
   }
-  new_event_error_label = nullptr; // it dies with the window
+  // The notice box belongs to this form, so it goes with it.
+  if (message_popup) {
+    lv_obj_del(message_popup);
+    message_popup = nullptr;
+  }
   if (new_event_popup) {
     lv_obj_add_flag(new_event_popup, LV_OBJ_FLAG_HIDDEN);
     lv_obj_del(new_event_popup);
@@ -2883,7 +2938,11 @@ void show_new_event_popup(lv_calendar_date_t *selected_date) {
   lv_obj_set_style_radius(new_event_popup, UI_RADIUS, 0);
   lv_obj_set_style_pad_all(new_event_popup, 10, 0);
   lv_obj_set_scrollbar_mode(new_event_popup, LV_SCROLLBAR_MODE_AUTO);
-  new_event_error_label = nullptr;
+  // A notice left over from a previous attempt must not survive into a new form.
+  if (message_popup) {
+    lv_obj_del(message_popup);
+    message_popup = nullptr;
+  }
   NewEventUI *ui = new NewEventUI();
   new_event_caption(new_event_popup, "Title", 0, 0);
   ui->title_ta = new_event_field(new_event_popup, "", "Event title", 128, false,
@@ -3044,6 +3103,28 @@ void new_event_submit_cb(lv_event_t * e) {
   String end_min = String(lv_textarea_get_text(ui->end_min_ta));
   if (end_min.length() == 1) end_min = "0" + end_min;
   String remind_before = String(lv_textarea_get_text(ui->remind_before_ta));
+  // Check the fields HERE. The form used to submit whatever had been typed and
+  // let the server reject it, which came back as "Submission failed: ..." in that
+  // hard-to-read red label. Naming the offending field is far more use.
+  struct RequiredField { const char *name; const String *value; };
+  const RequiredField required[] = {
+    {"Title", &title},
+    {"Description", &description},
+    {"Start year", &start_year}, {"Start month", &start_month},
+    {"Start day", &start_day}, {"Start hour", &start_hour},
+    {"Start minute", &start_min},
+    {"End year", &end_year}, {"End month", &end_month},
+    {"End day", &end_day}, {"End hour", &end_hour},
+    {"End minute", &end_min},
+    {"Remind before", &remind_before},
+  };
+  for (const RequiredField &f : required) {
+    if (f.value->isEmpty()) {
+      String m = String(f.name) + " is empty. Please enter some text.";
+      new_event_error(m.c_str(), "Missing information");
+      return;
+    }
+  }
   String start = start_year + "-" + start_month + "-" + start_day + " " + start_hour + ":" + start_min + ":00";
   String end = end_year + "-" + end_month + "-" + end_day + " " + end_hour + ":" + end_min + ":00";
   struct tm start_tm = {0};
