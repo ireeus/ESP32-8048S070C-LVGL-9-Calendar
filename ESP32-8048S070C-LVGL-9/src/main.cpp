@@ -376,6 +376,12 @@ const unsigned long debounceDelay = 200;
 static unsigned long lastBackgroundUpdate = 0;
 const unsigned long backgroundUpdateInterval = 3600000UL; // 1 hour
 static unsigned long lastWeatherLocationCheck = 0;
+// Remote theme (colours controlled from crontech.uk). Re-applied only when the
+// server's value actually changes, so a colour picked on the device is not
+// stomped by every poll.
+static unsigned long lastThemeCheck = 0;
+const unsigned long themeUpdateInterval = 300000UL; // 5 minutes
+static String themeSignature = "";                  // last server value we applied
 const unsigned long weatherLocationInterval = 1800000UL; // 30 minutes
 ////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -3252,8 +3258,33 @@ void next_month_cb(lv_event_t *e) {
   updateHolidayLabel();
   update_today_highlight(calendar);
 }
+// True only when `candidate` is a strictly newer dot-separated numeric version.
+// Without this the device compared for INEQUALITY, so a server advertising 2.1.5
+// would be "newer" than a device actually running 2.2 and offer a downgrade.
+static bool versionIsNewer(const String &candidate, const String &current) {
+  if (candidate.isEmpty()) return false;
+  int ci = 0, cu = 0;
+  const int cl = (int)candidate.length(), ul = (int)current.length();
+  while (ci < cl || cu < ul) {
+    long a = 0, b = 0;
+    while (ci < cl && candidate[ci] != '.') {
+      char c = candidate[ci++];
+      if (c < '0' || c > '9') return false; // not a plain numeric version
+      a = a * 10 + (c - '0');
+    }
+    while (cu < ul && current[cu] != '.') {
+      char c = current[cu++];
+      if (c < '0' || c > '9') return false;
+      b = b * 10 + (c - '0');
+    }
+    if (a != b) return a > b;
+    if (ci < cl) ci++; // step over the '.'
+    if (cu < ul) cu++;
+  }
+  return false; // equal
+}
 void updateFirmwareButton() {
-  if (latestFirmwareVersion != "" && latestFirmwareVersion != currentFirmwareVersion) {
+  if (versionIsNewer(latestFirmwareVersion, currentFirmwareVersion)) {
     if (!firmware_update_btn) {
       firmware_update_btn = lv_button_create(button_bar);
       lv_obj_add_event_cb(firmware_update_btn, update_btn_cb, LV_EVENT_PRESSED, NULL);
@@ -3310,9 +3341,11 @@ void apply_calendar_theme(lv_obj_t *cal) {
   lv_obj_set_style_border_opa(cal, LV_OPA_COVER, LV_PART_ITEMS | LV_STATE_CHECKED);
   lv_obj_set_style_border_color(cal, scheme_accent(), LV_PART_ITEMS | LV_STATE_CHECKED);
 }
-void darkness_slider_cb(lv_event_t *e) {
-  lv_obj_t *slider = (lv_obj_t*)lv_event_get_target(e);
-  g_ui_darkness = lv_slider_get_value(slider);
+// Split out of the slider callback so the remote theme can drive the same path.
+void apply_ui_darkness(int value) {
+  if (value < 0) value = 0;
+  if (value > 100) value = 100;
+  g_ui_darkness = value;
   // Calculate grayscale
   uint8_t gray = 255 - (g_ui_darkness * 255 / 100);
   lv_color_t bg_color = lv_color_make(gray, gray, gray);
@@ -3325,7 +3358,7 @@ void darkness_slider_cb(lv_event_t *e) {
   if (date_time_label) lv_obj_set_style_text_color(date_time_label, text_color, 0);
   if (holiday_label) lv_obj_set_style_text_color(holiday_label, text_color, 0);
   if (build_version_label) lv_obj_set_style_text_color(build_version_label, text_color, 0);
-  apply_theme_accent(); // keep the theme's dark flag in step with the slider
+  apply_theme_accent(); // keep the theme's dark flag in step
   apply_calendar_theme(calendar);
   // Redraw weather and events to apply changes
   updateWeatherDisplay();
@@ -3333,6 +3366,70 @@ void darkness_slider_cb(lv_event_t *e) {
   // Save to preferences
   preferences.begin("ui", false);
   preferences.putInt("ui_darkness", g_ui_darkness);
+  preferences.end();
+}
+void darkness_slider_cb(lv_event_t *e) {
+  lv_obj_t *slider = (lv_obj_t*)lv_event_get_target(e);
+  apply_ui_darkness(lv_slider_get_value(slider));
+}
+// ---- Remote theme ----------------------------------------------------------
+// The website publishes update/theme.json:
+//     { "revision": 1, "scheme": "Teal", "darkness": 0 }
+// The server sets the DEFAULT. The value is re-applied only when it actually
+// changes, so a scheme picked on the device's own selector in between is kept.
+void fetchThemeConfig() {
+  if (WiFi.status() != WL_CONNECTED) return;
+  String url = "https://crontech.uk/update/theme.json";
+  HTTPClient http;
+  http.begin(url);
+  int httpCode = http.GET();
+  if (httpCode != HTTP_CODE_OK) {
+    if (debug == 1) Serial.println("[THEME] fetch failed: HTTP " + String(httpCode));
+    http.end();
+    return;
+  }
+  String payload = http.getString();
+  http.end();
+  JsonDocument doc;
+  if (deserializeJson(doc, payload)) {
+    if (debug == 1) Serial.println("[THEME] JSON parse failed");
+    return;
+  }
+  int rev = doc["revision"] | -1;
+  int darkness = doc["darkness"] | -1;
+  String scheme = doc["scheme"].as<String>();
+  scheme.trim();
+
+  String sig = String(rev) + "|" + scheme + "|" + String(darkness);
+  if (sig == themeSignature) return; // server value unchanged: leave local choice alone
+
+  if (scheme.length()) {
+    int idx = -1;
+    for (int i = 0; i < COLOR_SCHEME_COUNT; i++) {
+      if (scheme.equalsIgnoreCase(color_schemes[i].name)) { idx = i; break; }
+    }
+    if (idx < 0) {
+      int asNumber = scheme.toInt(); // also accept a 1-based index
+      if (asNumber >= 1 && asNumber <= COLOR_SCHEME_COUNT) idx = asNumber - 1;
+    }
+    if (idx < 0) {
+      if (debug == 1) Serial.println("[THEME] unknown scheme: " + scheme);
+    } else if (idx != g_ui_scheme) {
+      g_ui_scheme = idx;
+      preferences.begin("ui", false);
+      preferences.putInt("ui_scheme", g_ui_scheme);
+      preferences.end();
+      apply_color_scheme();
+      if (debug == 1) Serial.println("[THEME] scheme set from server: " + scheme);
+    }
+  }
+  if (darkness >= 0 && darkness <= 100 && darkness != g_ui_darkness) {
+    apply_ui_darkness(darkness);
+    if (debug == 1) Serial.println("[THEME] brightness set from server: " + String(darkness));
+  }
+  themeSignature = sig;
+  preferences.begin("ui", false);
+  preferences.putString("theme_sig", themeSignature);
   preferences.end();
 }
 // Re-initialise the LVGL theme with the active scheme's accent. Cheap and safe
@@ -3984,7 +4081,8 @@ void initTime() {
 // failing gov.uk request can never hold up anything else.
 // ---------------------------------------------------------------------------
 enum BootFetchStep {
-  BOOT_STEP_PARCELBOX = 0,
+  BOOT_STEP_THEME = 0, // colours first, so everything else draws once already styled
+  BOOT_STEP_PARCELBOX,
   BOOT_STEP_WEATHER_LOCATION,
   BOOT_STEP_EVENTS,
   BOOT_STEP_WEATHER,
@@ -4002,6 +4100,9 @@ static unsigned long lastBootFetchStep = 0;
 
 static void runBootFetchStep(int step) {
   switch (step) {
+    case BOOT_STEP_THEME:
+      fetchThemeConfig();
+      break;
     case BOOT_STEP_PARCELBOX:
       fetchParcelBoxCredentials();
       break;
@@ -4055,7 +4156,7 @@ static void serviceBootFetchQueue() {
 // Kept as one call so the setup wizards (WiFi / API code / location) behave the
 // same as a normal boot - they just (re)start the queue now instead of blocking.
 void fetchAfterUiReady() {
-  bootFetchStep = BOOT_STEP_PARCELBOX;
+  bootFetchStep = BOOT_STEP_THEME;
   lastBootFetchStep = 0;
 }
 
@@ -4066,11 +4167,20 @@ void setup() {
                 heap_caps_get_free_size(MALLOC_CAP_8BIT),
                 heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
   preferences.begin("firmware", false);
-  currentFirmwareVersion = preferences.getString("version", "1.0.0");
+  // The running version is the one compiled into THIS binary, not a preference
+  // that only a previous OTA ever wrote. Reading the preference meant a device
+  // flashed over USB believed it was "1.0.0" for ever, and because the update
+  // check had no ordering comparison it would happily install an OLDER release
+  // over a newer one. NVS is kept in step for diagnostics only.
+  currentFirmwareVersion = build_version;
+  if (preferences.getString("version", "") != currentFirmwareVersion) {
+    preferences.putString("version", currentFirmwareVersion);
+  }
   preferences.end();
   preferences.begin("ui", false);
   g_ui_darkness = preferences.getInt("ui_darkness", 0);
   g_ui_scheme = preferences.getInt("ui_scheme", 0);
+  themeSignature = preferences.getString("theme_sig", "");
   preferences.end();
   if (g_ui_scheme < 0 || g_ui_scheme >= COLOR_SCHEME_COUNT) g_ui_scheme = 0;
   preferences.begin("wifi", false);
@@ -4179,6 +4289,10 @@ void loop() {
     updateEventDisplay(calendar);
     updateMonthLabel(calendar);
     lastRefreshTime = currentTime;
+  }
+  if (currentTime - lastThemeCheck >= themeUpdateInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
+    fetchThemeConfig();
+    lastThemeCheck = currentTime;
   }
   if (currentTime - lastFirmwareCheck >= firmwareCheckInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
     checkFirmwareUpdate();
