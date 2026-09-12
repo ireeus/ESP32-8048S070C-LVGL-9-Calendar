@@ -3555,7 +3555,13 @@ void fetchUpdatePolicy() {
 // changes, so a scheme picked on the device's own selector in between is kept.
 void fetchThemeConfig() {
   if (WiFi.status() != WL_CONNECTED) return;
-  String url = "https://crontech.uk/update/theme.json";
+  if (apiCode.isEmpty()) {
+    if (debug == 1) Serial.println("[THEME] no API code yet, nothing to fetch");
+    return; // the device does not know which account it belongs to yet
+  }
+  // The theme of the account this device belongs to, so a change made in
+  // settings.php -> Themes reaches the hardware as well as the web calendar.
+  String url = "https://crontech.uk/device-theme.php?code=" + URLEncode(apiCode);
   HTTPClient http;
   http.begin(url);
   int httpCode = http.GET();
@@ -3571,13 +3577,15 @@ void fetchThemeConfig() {
     if (debug == 1) Serial.println("[THEME] JSON parse failed");
     return;
   }
-  int rev = doc["revision"] | -1;
   int darkness = doc["darkness"] | -1;
   String scheme = doc["scheme"].as<String>();
   scheme.trim();
 
-  String sig = String(rev) + "|" + scheme + "|" + String(darkness);
-  if (sig == themeSignature) return; // server value unchanged: leave local choice alone
+  // The endpoint is per-user, so the signature is just what the owner chose. The
+  // 'updated' timestamp it returns is deliberately NOT part of this: re-saving
+  // the same values on the site must not overwrite a colour picked on the device.
+  String sig = scheme + "|" + String(darkness);
+  if (sig == themeSignature) return; // unchanged: leave the local choice alone
 
   if (scheme.length()) {
     int idx = -1;
