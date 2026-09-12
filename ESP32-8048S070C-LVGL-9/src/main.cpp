@@ -3031,11 +3031,31 @@ static lv_obj_t *ota_bar = nullptr;
 static lv_obj_t *ota_action_btn = nullptr;
 static lv_obj_t *ota_close_btn = nullptr;
 static lv_obj_t *ota_ok_btn = nullptr;  // shown once the update is installed
+static lv_obj_t *ota_ver_lbl = nullptr;  // the "Installed: x.y.z" line
+static lv_obj_t *ota_note_lbl = nullptr; // the "screen will switch off" warning
 
 static void ota_set_status(const char *msg, bool is_error) {
   if (!ota_status_lbl) return;
   lv_label_set_text(ota_status_lbl, msg);
   lv_obj_set_style_text_color(ota_status_lbl, lv_color_hex(is_error ? 0xFF5252 : 0xFFFFFF), 0);
+}
+// Collapse the dialog down to the outcome. The dark-screen warning and the
+// progress bar both describe the transfer, which is over, and the "Installed"
+// line still names the version we started from - leaving either on screen would
+// read as though nothing had happened.
+static void ota_show_completed() {
+  if (ota_ver_lbl) {
+    lv_label_set_text_fmt(ota_ver_lbl, "Installed: %s",
+                          latestFirmwareVersion.isEmpty() ? currentFirmwareVersion.c_str()
+                                                          : latestFirmwareVersion.c_str());
+  }
+  if (ota_note_lbl) lv_obj_add_flag(ota_note_lbl, LV_OBJ_FLAG_HIDDEN);
+  if (ota_bar) lv_obj_add_flag(ota_bar, LV_OBJ_FLAG_HIDDEN);
+  // Shrink to fit: with the warning and the bar gone the fixed 350px height left
+  // the remaining three lines floating in an empty box.
+  if (update_popup) lv_obj_set_height(update_popup, LV_SIZE_CONTENT);
+  ota_set_status("Update completed.\nWe need to restart the Crontab", false);
+  if (ota_status_lbl) lv_obj_set_style_text_color(ota_status_lbl, lv_color_hex(0x8BC34A), 0);
 }
 // TFT_BL is set up as an output by setup_display().
 static void ota_backlight(bool on) {
@@ -3063,6 +3083,17 @@ static void ota_blackout_on() {
 }
 // Bring the UI back. The entire screen has to be invalidated, because the
 // framebuffer LVGL thinks it owns was overwritten underneath it.
+// Reset with the picture already down. Order matters: the RGB panel has no reset
+// line this firmware can drive, so if it is still holding a frame when
+// ESP.restart() drops the pixel clock it keeps displaying that last frame and
+// decays into a mess of remnant pixels. Cutting the backlight and flattening the
+// framebuffer to one colour first leaves nothing for the panel to decay from.
+static void ota_blackout_and_restart(unsigned long hold_ms) {
+  delay(hold_ms);
+  ota_blackout_on();
+  delay(400); // let the panel settle fully dark before the signal goes away
+  ESP.restart();
+}
 static void ota_ui_show() {
   ota_backlight(true);
   otaBlackout = false;
@@ -3158,18 +3189,15 @@ static void serviceOta() {
     if (ota_bar) lv_bar_set_value(ota_bar, pct, LV_ANIM_OFF);
     if (elapsed < OTA_VERIFY_MS) return;
     otaVerifying = false;
+    ota_show_completed();
     if (otaAutoTriggered) {
       // Nobody is there to press OK, so this one finishes by itself.
-      ota_set_status("Update completed. Restarting...", false);
-      if (ota_status_lbl) lv_obj_set_style_text_color(ota_status_lbl, lv_color_hex(0x8BC34A), 0);
+      ota_set_status("Update completed.\nRestarting...", false);
       lv_refr_now(NULL);
-      delay(1500);
-      ESP.restart();
+      ota_blackout_and_restart(1200);
       return;
     }
     otaAwaitingRestart = true;
-    ota_set_status("Update completed. We need to restart the Crontab", false);
-    if (ota_status_lbl) lv_obj_set_style_text_color(ota_status_lbl, lv_color_hex(0x8BC34A), 0);
     if (ota_ok_btn) lv_obj_clear_flag(ota_ok_btn, LV_OBJ_FLAG_HIDDEN);
     lv_refr_now(NULL); // paint the finished state straight away
     // Deliberately does NOT reboot here. is_ota_updating stays true so loop()
@@ -3221,10 +3249,10 @@ static void ota_restart_cb(lv_event_t *e) {
   (void)e;
   if (!otaAwaitingRestart) return; // stale press from a previous attempt
   otaAwaitingRestart = false;
-  ota_set_status("Restarting...", false);
-  lv_refr_now(NULL);
-  delay(800);
-  ESP.restart();
+  // Deliberately no "Restarting..." flash and no lv_refr_now() here. The dialog
+  // already asked the question and OK was the answer, so there is nothing left to
+  // say - and every extra repaint is another chance to catch the panel mid-update.
+  ota_blackout_and_restart(0);
 }
 static void ota_action_cb(lv_event_t *e) {
   (void)e;
@@ -3241,6 +3269,9 @@ static void ota_close_cb(lv_event_t *e) {
   ota_bar = nullptr;
   ota_action_btn = nullptr;
   ota_close_btn = nullptr;
+  ota_ok_btn = nullptr; // was missed: left ota_close_transfer() holding freed memory
+  ota_ver_lbl = nullptr;
+  ota_note_lbl = nullptr;
 }
 void update_btn_cb(lv_event_t *e) {
   (void)e;
@@ -3269,25 +3300,25 @@ void update_btn_cb(lv_event_t *e) {
   lv_obj_set_style_text_font(ota_title, &lv_font_montserrat_24, 0);
   lv_obj_set_style_text_color(ota_title, scheme_accent(), 0);
 
-  lv_obj_t *ota_ver = lv_label_create(update_popup);
-  lv_label_set_text_fmt(ota_ver, "Installed: %s      New: %s",
+  ota_ver_lbl = lv_label_create(update_popup);
+  lv_label_set_text_fmt(ota_ver_lbl, "Installed: %s      New: %s",
                         currentFirmwareVersion.c_str(),
                         latestFirmwareVersion.isEmpty() ? "unknown"
                                                         : latestFirmwareVersion.c_str());
-  lv_obj_set_style_text_font(ota_ver, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(ota_ver, lv_color_hex(0xAAAAAA), 0);
+  lv_obj_set_style_text_font(ota_ver_lbl, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(ota_ver_lbl, lv_color_hex(0xAAAAAA), 0);
 
   // The screen genuinely goes dark for the whole download, which looks exactly
   // like the device has died. Say so up front.
-  lv_obj_t *ota_note = lv_label_create(update_popup);
-  lv_label_set_text(ota_note,
+  ota_note_lbl = lv_label_create(update_popup);
+  lv_label_set_text(ota_note_lbl,
       "The screen will switch off for about a minute while the update downloads, "
       "then come back to verify it. Do not turn the device off.");
-  lv_obj_set_style_text_font(ota_note, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(ota_note, lv_color_hex(0xFFD166), 0);
-  lv_obj_set_width(ota_note, LV_PCT(100));
-  lv_obj_set_style_text_align(ota_note, LV_TEXT_ALIGN_CENTER, 0);
-  lv_label_set_long_mode(ota_note, LV_LABEL_LONG_WRAP);
+  lv_obj_set_style_text_font(ota_note_lbl, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(ota_note_lbl, lv_color_hex(0xFFD166), 0);
+  lv_obj_set_width(ota_note_lbl, LV_PCT(100));
+  lv_obj_set_style_text_align(ota_note_lbl, LV_TEXT_ALIGN_CENTER, 0);
+  lv_label_set_long_mode(ota_note_lbl, LV_LABEL_LONG_WRAP);
 
   ota_bar = lv_bar_create(update_popup);
   lv_obj_set_size(ota_bar, 540, 18);
