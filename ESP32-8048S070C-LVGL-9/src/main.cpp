@@ -74,7 +74,6 @@ void show_new_event_popup(lv_calendar_date_t *selected_date = nullptr);
 void new_event_submit_cb(lv_event_t *e);
 void new_event_cancel_cb(lv_event_t *e);
 void checkFirmwareUpdate();
-void updateFirmware();
 void update_btn_cb(lv_event_t *e);
 void printMemoryUsage();
 void updateDateTimeLabel(); // New function to update date-time label
@@ -2976,125 +2975,231 @@ void checkFirmwareUpdate() {
   printMemoryUsage();
   http.end();
 }
-void updateFirmware() {
-  if (debug == 1) Serial.println("[OTA] Starting firmware update...");
-  printMemoryUsage();
-  // Proceed with actual firmware update
-  if (debug == 1) Serial.println("[OTA] Starting actual firmware download...");
-  client.setInsecure(); // For testing; use CA certificate in production
-  HTTPClient http;
-  http.begin(client, firmwareUrl);
-  int httpCode = http.GET();
-  if (httpCode != HTTP_CODE_OK) {
-    if (debug == 1) Serial.println("[OTA] Failed to download firmware: HTTP " + String(httpCode));
-    http.end();
-    is_ota_updating = false; // Reset flag on failure
-    return;
+// Modified update_btn_cb function
+// ---- OTA firmware update ---------------------------------------------------
+// The download is pumped from loop() in bounded slices, so the screen keeps
+// refreshing and the progress bar actually moves.
+//
+// The previous implementation did the whole transfer inside the "Update Now"
+// button callback and called loop_display() - that is lv_task_handler() - from in
+// there to repaint. LVGL is not re-entrant, so the display was being refreshed
+// from inside its own event dispatch (that is what made it jump), and for the
+// rest of the download, which is by far the longest part, nothing repainted it at
+// all (that is what made it freeze).
+static HTTPClient otaHttp;
+static WiFiClient *otaStream = nullptr;
+static bool otaHttpActive = false;
+static bool otaDownloading = false;
+static size_t otaWritten = 0;
+static size_t otaTotal = 0;
+static unsigned long otaLastUiTick = 0;
+static lv_obj_t *ota_status_lbl = nullptr;
+static lv_obj_t *ota_bar = nullptr;
+static lv_obj_t *ota_action_btn = nullptr;
+static lv_obj_t *ota_close_btn = nullptr;
+
+static void ota_set_status(const char *msg, bool is_error) {
+  if (!ota_status_lbl) return;
+  lv_label_set_text(ota_status_lbl, msg);
+  lv_obj_set_style_text_color(ota_status_lbl, lv_color_hex(is_error ? 0xFF5252 : 0xFFFFFF), 0);
+}
+static void ota_close_transfer() {
+  if (otaHttpActive) {
+    otaHttp.end();
+    otaHttpActive = false;
   }
-  int contentLength = http.getSize();
-  if (debug == 1) Serial.println("[OTA] Firmware size: " + String(contentLength) + " bytes");
-  if (contentLength <= 0) {
-    if (debug == 1) Serial.println("[OTA] Invalid content length");
-    http.end();
-    is_ota_updating = false; // Reset flag on failure
-    return;
+  otaStream = nullptr;
+  otaDownloading = false;
+  is_ota_updating = false;
+}
+// Back to a state the user can retry from, with the reason on screen.
+static void ota_fail(const char *msg) {
+  ota_close_transfer();
+  ota_set_status(msg, true);
+  if (ota_bar) lv_bar_set_value(ota_bar, 0, LV_ANIM_OFF);
+  if (ota_action_btn) {
+    lv_obj_t *l = lv_obj_get_child(ota_action_btn, 0);
+    if (l) lv_label_set_text(l, "Retry");
+    lv_obj_clear_flag(ota_action_btn, LV_OBJ_FLAG_HIDDEN);
   }
-  if (!Update.begin(contentLength)) {
-    if (debug == 1) Serial.println("[OTA] Not enough space for update");
-    http.end();
-    is_ota_updating = false; // Reset flag on failure
-    return;
+  if (ota_close_btn) lv_obj_clear_flag(ota_close_btn, LV_OBJ_FLAG_HIDDEN);
+}
+static void ota_show_progress(bool force) {
+  if (!force && millis() - otaLastUiTick < 200) return; // 5 Hz is plenty
+  otaLastUiTick = millis();
+  int pct = (otaTotal > 0) ? (int)((otaWritten * 100) / otaTotal) : 0;
+  if (ota_bar) lv_bar_set_value(ota_bar, pct, LV_ANIM_OFF);
+  if (ota_status_lbl) {
+    // Fixed buffer: no Arduino String churn in a per-slice hot path.
+    char buf[72];
+    snprintf(buf, sizeof(buf), "Downloading... %d%%   (%u / %u KB)",
+             pct, (unsigned)(otaWritten / 1024), (unsigned)(otaTotal / 1024));
+    lv_label_set_text(ota_status_lbl, buf);
   }
-  WiFiClient *stream = http.getStreamPtr();
-  size_t written = 0;
+}
+static void ota_start() {
+  if (otaDownloading) return;
+  if (WiFi.status() != WL_CONNECTED) { ota_fail("WiFi is not connected"); return; }
+  if (firmwareUrl.isEmpty()) { ota_fail("No update URL was advertised"); return; }
+
+  ota_set_status("Contacting the update server...", false);
+  if (ota_action_btn) lv_obj_add_flag(ota_action_btn, LV_OBJ_FLAG_HIDDEN);
+  if (ota_close_btn) lv_obj_add_flag(ota_close_btn, LV_OBJ_FLAG_HIDDEN);
+  is_ota_updating = true;
+  lv_refr_now(NULL); // paint the status before the blocking connect
+
+  client.setInsecure(); // For testing; use a CA certificate in production
+  otaHttp.begin(client, firmwareUrl);
+  otaHttpActive = true;
+  int httpCode = otaHttp.GET();
+  if (httpCode != HTTP_CODE_OK) { ota_fail("Could not download the firmware (server error)"); return; }
+  int len = otaHttp.getSize();
+  if (len <= 0) { ota_fail("The server did not report a size"); return; }
+  otaTotal = (size_t)len;
+  otaWritten = 0;
+  if (!Update.begin(otaTotal)) { ota_fail("Not enough flash space for the update"); return; }
+  otaStream = otaHttp.getStreamPtr();
+  if (!otaStream) { ota_fail("Could not open the download stream"); return; }
+  if (ota_bar) {
+    lv_bar_set_range(ota_bar, 0, 100);
+    lv_bar_set_value(ota_bar, 0, LV_ANIM_OFF);
+  }
+  otaDownloading = true;
+  ota_show_progress(true);
+}
+// One bounded slice per loop() iteration.
+static void serviceOta() {
+  if (!otaDownloading || !otaStream) return;
   uint8_t buff[512];
-  while (http.connected() && written < contentLength) {
-    size_t size = stream->available();
-    if (size) {
-      int c = stream->readBytes(buff, min(sizeof(buff), size));
-      if (Update.write(buff, c) != c) {
-        if (debug == 1) Serial.println("[OTA] Error writing to flash");
-        http.end();
-        is_ota_updating = false; // Reset flag on failure
-        return;
-      }
-      written += c;
-      delay(1);
+  int budget = 8; // up to 4KB per pass, then hand the CPU back to LVGL
+  while (budget-- > 0 && otaWritten < otaTotal) {
+    size_t avail = otaStream->available();
+    if (!avail) { delay(1); break; } // nothing buffered: let WiFi and LVGL run
+    int c = otaStream->readBytes(buff, min(sizeof(buff), avail));
+    if (c <= 0) break;
+    if (Update.write(buff, c) != (size_t)c) {
+      Update.abort();
+      ota_fail("Writing the firmware to flash failed");
+      return;
     }
+    otaWritten += c;
   }
-  if (written != contentLength) {
-    if (debug == 1) Serial.println("[OTA] Incomplete download");
-    http.end();
-    is_ota_updating = false; // Reset flag on failure
-    return;
-  }
-  if (!Update.end(true)) {
-    if (debug == 1) Serial.println("[OTA] Error finalizing update");
-    http.end();
-    is_ota_updating = false; // Reset flag on failure
-    return;
-  }
-  // Save new firmware version
+  ota_show_progress(false);
+  if (otaWritten < otaTotal) return;
+
+  // ---- download finished ----
+  otaHttp.end();
+  otaHttpActive = false;
+  otaDownloading = false;
+  otaStream = nullptr;
+  if (ota_bar) lv_bar_set_value(ota_bar, 100, LV_ANIM_OFF);
+  if (!Update.end(true)) { ota_fail("Could not finalise the update"); return; }
   preferences.begin("firmware", false);
   preferences.putString("version", latestFirmwareVersion);
   preferences.end();
-  if (debug == 1) Serial.println("[OTA] Firmware version saved: " + latestFirmwareVersion);
-  if (debug == 1) Serial.println("[OTA] Update successful, rebooting...");
-  delay(1000);
+  ota_set_status("Update complete. Restarting...", false);
+  is_ota_updating = false;
+  lv_refr_now(NULL); // make sure the user sees it before the reboot
+  delay(1500);
   ESP.restart();
-  http.end();
 }
-// Modified update_btn_cb function
-void update_btn_cb(lv_event_t *e) {
-  if (debug == 1) Serial.println("[OTA] Update button clicked");
-  if (firmware_update_btn) {
-    lv_obj_add_flag(firmware_update_btn, LV_OBJ_FLAG_HIDDEN); // Hide update button
-    if (debug == 1) Serial.println("[OTA] Update button hidden before popup");
+static void ota_action_cb(lv_event_t *e) {
+  (void)e;
+  ota_start(); // the same button serves as Update Now and Retry
+}
+static void ota_close_cb(lv_event_t *e) {
+  (void)e;
+  if (otaDownloading) return; // never close mid-flash
+  if (update_popup) {
+    lv_obj_del(update_popup);
+    update_popup = nullptr;
   }
-  // Create full-screen black popup with square corners
+  ota_status_lbl = nullptr;
+  ota_bar = nullptr;
+  ota_action_btn = nullptr;
+  ota_close_btn = nullptr;
+}
+void update_btn_cb(lv_event_t *e) {
+  (void)e;
+  if (debug == 1) Serial.println("[OTA] Update button clicked");
+  if (update_popup) return;
+  // NOTE: the old code hid firmware_update_btn here and only ever unhid it on
+  // success - and success reboots - so a failed update left the user with no
+  // button and no explanation. The popup covers it, so it is left alone.
   update_popup = lv_obj_create(lv_scr_act());
-  lv_obj_set_size(update_popup, 800, 480); // Full screen
+  lv_obj_set_size(update_popup, 620, 300);
   lv_obj_align(update_popup, LV_ALIGN_CENTER, 0, 0);
-  lv_obj_set_style_bg_color(update_popup, lv_color_hex(0x000000), 0); // Black background
-  lv_obj_set_style_border_width(update_popup, 0, 0); // No border
-  lv_obj_set_style_radius(update_popup, 0, 0); // Square corners (no rounded corners)
-  // Create "Update Now" button
-  lv_obj_t *update_now_btn = lv_button_create(update_popup);
-  lv_obj_align(update_now_btn, LV_ALIGN_CENTER, 0, 0);
-  lv_obj_set_size(update_now_btn, 140, 40);
-  lv_obj_set_style_bg_color(update_now_btn, lv_color_hex(0x00008B), 0); // Dark blue, darker than default button
-  lv_obj_add_event_cb(update_now_btn, [](lv_event_t *e) {
-    if (debug == 1) Serial.println("[OTA] Update Now button clicked");
-    // Change button to red and set text to "Updating ..."
-    lv_obj_t *btn = (lv_obj_t*)lv_event_get_target(e);
-    lv_obj_set_style_bg_color(btn, lv_color_hex(0xFF0000), 0);
-    lv_obj_t *label = lv_obj_get_child(btn, 0);
-    lv_label_set_text(label, "Updating ...");
-    // Set OTA flag to pause screen refreshes
-    is_ota_updating = true;
-    if (debug == 1) Serial.println("[OTA] OTA flag set; screen refresh paused.");
-    loop_display(); // Refresh display to show changes
-    // Countdown 5 seconds
-    for (int i = 5; i >= 1; i--) {
-      lv_label_set_text_fmt(label, "Updating ... %d", i);
-      loop_display(); // Refresh display
-      delay(1000);
-    }
-    // Hide and delete popup
-    if (update_popup) {
-      lv_obj_add_flag(update_popup, LV_OBJ_FLAG_HIDDEN); // Hide popup
-      lv_obj_del(update_popup); // Delete popup to free memory
-      update_popup = nullptr;
-      if (debug == 1) Serial.println("[OTA] Update popup removed");
-    }
-    updateFirmware(); // Proceed with firmware update
-  }, LV_EVENT_PRESSED, NULL);
-  lv_obj_t *update_now_label = lv_label_create(update_now_btn);
-  lv_label_set_text(update_now_label, "Update Now");
-  lv_obj_center(update_now_label);
-  lv_obj_set_style_text_font(update_now_label, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(update_now_label, lv_color_hex(0xFFFFFF), 0); // White text for contrast
-  if (debug == 1) Serial.println("[OTA] Update popup created with Update Now button");
+  lv_obj_set_style_bg_color(update_popup, lv_color_hex(0x1A1A1A), 0);
+  lv_obj_set_style_border_color(update_popup, scheme_accent(), 0);
+  lv_obj_set_style_border_width(update_popup, 3, 0);
+  lv_obj_set_style_radius(update_popup, 10, 0);
+  lv_obj_set_style_pad_all(update_popup, 16, 0);
+  lv_obj_set_style_pad_row(update_popup, 12, 0);
+  lv_obj_set_flex_flow(update_popup, LV_FLEX_FLOW_COLUMN);
+  lv_obj_set_flex_align(update_popup, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+                        LV_FLEX_ALIGN_CENTER);
+  lv_obj_clear_flag(update_popup, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scrollbar_mode(update_popup, LV_SCROLLBAR_MODE_OFF);
+
+  lv_obj_t *ota_title = lv_label_create(update_popup);
+  lv_label_set_text(ota_title, LV_SYMBOL_DOWNLOAD "  Firmware Update");
+  lv_obj_set_style_text_font(ota_title, &lv_font_montserrat_24, 0);
+  lv_obj_set_style_text_color(ota_title, scheme_accent(), 0);
+
+  lv_obj_t *ota_ver = lv_label_create(update_popup);
+  lv_label_set_text_fmt(ota_ver, "Installed: %s      New: %s",
+                        currentFirmwareVersion.c_str(),
+                        latestFirmwareVersion.isEmpty() ? "unknown"
+                                                        : latestFirmwareVersion.c_str());
+  lv_obj_set_style_text_font(ota_ver, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(ota_ver, lv_color_hex(0xAAAAAA), 0);
+
+  ota_bar = lv_bar_create(update_popup);
+  lv_obj_set_size(ota_bar, 540, 18);
+  lv_bar_set_range(ota_bar, 0, 100);
+  lv_bar_set_value(ota_bar, 0, LV_ANIM_OFF);
+  lv_obj_set_style_bg_color(ota_bar, lv_color_hex(0x333333), LV_PART_MAIN);
+  lv_obj_set_style_bg_color(ota_bar, scheme_accent(), LV_PART_INDICATOR);
+
+  ota_status_lbl = lv_label_create(update_popup);
+  lv_label_set_text(ota_status_lbl, "Ready to update. Keep the device powered on.");
+  lv_obj_set_style_text_font(ota_status_lbl, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(ota_status_lbl, lv_color_hex(0xFFFFFF), 0);
+  lv_obj_set_width(ota_status_lbl, LV_PCT(100));
+  lv_obj_set_style_text_align(ota_status_lbl, LV_TEXT_ALIGN_CENTER, 0);
+  lv_label_set_long_mode(ota_status_lbl, LV_LABEL_LONG_WRAP);
+
+  lv_obj_t *ota_row = lv_obj_create(update_popup);
+  lv_obj_set_size(ota_row, LV_PCT(100), LV_SIZE_CONTENT);
+  lv_obj_set_style_bg_opa(ota_row, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(ota_row, 0, 0);
+  lv_obj_set_style_pad_all(ota_row, 0, 0);
+  lv_obj_set_style_pad_column(ota_row, 16, 0);
+  lv_obj_set_flex_flow(ota_row, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(ota_row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+                        LV_FLEX_ALIGN_CENTER);
+  lv_obj_clear_flag(ota_row, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scrollbar_mode(ota_row, LV_SCROLLBAR_MODE_OFF);
+
+  ota_action_btn = lv_button_create(ota_row);
+  lv_obj_set_size(ota_action_btn, 180, 46);
+  lv_obj_set_style_bg_color(ota_action_btn, lv_color_hex(0x00A86B), 0);
+  lv_obj_set_style_radius(ota_action_btn, 10, 0);
+  lv_obj_add_event_cb(ota_action_btn, ota_action_cb, LV_EVENT_PRESSED, NULL);
+  lv_obj_t *ota_al = lv_label_create(ota_action_btn);
+  lv_label_set_text(ota_al, "Update Now");
+  lv_obj_center(ota_al);
+  lv_obj_set_style_text_font(ota_al, &lv_font_montserrat_14, 0);
+
+  ota_close_btn = lv_button_create(ota_row);
+  lv_obj_set_size(ota_close_btn, 140, 46);
+  lv_obj_set_style_bg_color(ota_close_btn, lv_color_hex(0x555555), 0);
+  lv_obj_set_style_radius(ota_close_btn, 10, 0);
+  lv_obj_add_event_cb(ota_close_btn, ota_close_cb, LV_EVENT_PRESSED, NULL);
+  lv_obj_t *ota_cl = lv_label_create(ota_close_btn);
+  lv_label_set_text(ota_cl, "Close");
+  lv_obj_center(ota_cl);
+  lv_obj_set_style_text_font(ota_cl, &lv_font_montserrat_14, 0);
 }
 static int showed_year;
 static int showed_month;
@@ -4031,42 +4136,37 @@ void setup() {
 ///////////////////////////////////////////////////////////////////////
 
 void loop() {
-  if (!is_ota_updating) {
-    // Normal LVGL update cycle
-    loop_display();
-    lv_tick_inc(5);
-    
-    // Scheduled restart logic: Trigger at midnight on Sundays or the 1st of each month
-    static int prev_sec = -1;  // Track previous second to avoid multi-trigger at exact midnight
-    time_t now_t;
-    time(&now_t);
-    struct tm *timeinfo = localtime(&now_t);
-    if (timeinfo->tm_hour == 0 && timeinfo->tm_min == 0 && timeinfo->tm_sec == 0 &&
-        (timeinfo->tm_wday == 0 || timeinfo->tm_mday == 1) &&
-        prev_sec != 0) {  // Ensure it's the transition to midnight
-      if (debug == 1) {
-        String msg = String("[APP] Scheduled restart triggered: ") + (timeinfo->tm_wday == 0 ? "Sunday midnight" : "1st of month midnight");
-        Serial.println(msg);
-      }
-      ESP.restart();
-    }
-    prev_sec = timeinfo->tm_sec;  // Update tracker
-    
-    delay(5);
-  } else {
-    // OTA mode: Skip LVGL, handle OTA periodically (though blocking in this case)
-    delay(100); // Longer delay to reduce CPU usage during OTA
-    // Since updateFirmware is blocking and ends with restart, no further handling needed here
-    // For non-blocking OTA, add: handle_ota_progress();
-    // Check if OTA completed (not applicable in blocking mode, but placeholder)
-    // if (ota_update_completed()) {
-    //   is_ota_updating = false;
-    //   // Re-enable display if quiesced
-    //   // display_power_up();
-    //   reset_update_ui(); // Reset UI if needed
-    //   if (debug == 1) Serial.println("[APP] OTA completed; resuming screen refresh.");
-    // }
+  // LVGL runs at all times now, including during a firmware update, so the update
+  // screen can show a live progress bar instead of a frozen frame.
+  // loop_display() is the ONLY caller of lv_task_handler(): the OTA code used to
+  // call it re-entrantly from inside a button callback, which is what made the
+  // display jump.
+  loop_display();
+  lv_tick_inc(5);
+
+  if (is_ota_updating) {
+    serviceOta(); // one bounded slice of the download, then hand back to LVGL
+    delay(1);
+    return;
   }
+
+  // Scheduled restart logic: Trigger at midnight on Sundays or the 1st of each month
+  static int prev_sec = -1;  // Track previous second to avoid multi-trigger at exact midnight
+  time_t now_t;
+  time(&now_t);
+  struct tm *timeinfo = localtime(&now_t);
+  if (timeinfo->tm_hour == 0 && timeinfo->tm_min == 0 && timeinfo->tm_sec == 0 &&
+      (timeinfo->tm_wday == 0 || timeinfo->tm_mday == 1) &&
+      prev_sec != 0) {  // Ensure it's the transition to midnight
+    if (debug == 1) {
+      String msg = String("[APP] Scheduled restart triggered: ") + (timeinfo->tm_wday == 0 ? "Sunday midnight" : "1st of month midnight");
+      Serial.println(msg);
+    }
+    ESP.restart();
+  }
+  prev_sec = timeinfo->tm_sec;  // Update tracker
+
+  delay(5);
   // Post-UI fetch queue: one blocking request per iteration, with LVGL drawing
   // in between, instead of the whole sequence in one go.
   serviceBootFetchQueue();
