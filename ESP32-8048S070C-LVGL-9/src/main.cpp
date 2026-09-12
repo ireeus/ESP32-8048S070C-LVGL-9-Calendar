@@ -19,7 +19,9 @@ extern const lv_font_t lv_font_montserrat_14_bold;
 const String build_version = "2.2.0";
 int debug =0; // Change to 1 to enable serial prints
 // Firmware check interval variable
-const unsigned long firmwareCheckInterval = 100000UL; // 5 minutes in milliseconds
+// Was 100000UL, which is 100 SECONDS, not the 5 minutes the comment claimed - so
+// this was polling three times more often than intended. 100000 -> 300000.
+const unsigned long firmwareCheckInterval = 300000UL; // 5 minutes in milliseconds
 // Settings popup geometry (the display is 800x480). The popup uses a
 // two-column layout so the whole page is visible at once, and it shrinks to
 // the space above the on-screen keyboard while a text field is focused.
@@ -402,7 +404,11 @@ const unsigned long weatherUpdateInterval = 900000; // Update every 15min
 static unsigned long lastFirmwareCheck = 0;
 // New: Timer for notification check
 static unsigned long lastNotificationCheck = 0;
-const unsigned long notificationInterval = 10000UL; // Check every 10 seconds
+// 10s -> 60s. A parcel arriving is not time-critical, and this one poll was the
+// single largest source of requests on the device: 8640 a day, each paying for
+// its own TLS handshake. At 60s it is 1440, at the cost of up to a minute's
+// extra latency.
+const unsigned long notificationInterval = 60000UL; // Check every 60 seconds
 // New: Timer for WiFi icon update
 static unsigned long lastWifiUpdate = 0;
 const unsigned long wifiUpdateInterval = 5000UL; // Update every 5 seconds
