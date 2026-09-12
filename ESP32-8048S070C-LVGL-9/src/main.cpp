@@ -197,6 +197,14 @@ static lv_obj_t *day_events_popup = nullptr; // Day preview (events on a tapped 
 static lv_calendar_date_t day_preview_date = {0, 0, 0}; // Date shown by the day preview
 static lv_obj_t *firmware_update_btn = nullptr;
 static lv_obj_t *button_bar = nullptr;
+static lv_obj_t *taskbar = nullptr; // front-page status strip
+// The taskbar owns its palette on purpose. The screen background and the
+// ordinary labels follow the theme and the darkness slider, and that is exactly
+// what made the hard-coded bank-holiday colours unreadable. Nothing here is
+// derived from the theme, so the strip stays legible under every scheme.
+#define TASKBAR_H 40
+static lv_color_t taskbar_bg()   { return lv_color_hex(0x14181D); }
+static lv_color_t taskbar_text() { return lv_color_hex(0xF2F4F7); }
 static lv_obj_t *prev_btn_obj = nullptr;   // recoloured on scheme change
 static lv_obj_t *next_btn_obj = nullptr;   // recoloured on scheme change
 static lv_obj_t *color_cont = nullptr;     // floating scheme-swatch strip
@@ -699,11 +707,14 @@ void fetchNotifications() {
       current_notification_title = title;
       current_notification_body = text;
       if (!notification_img) {
-        notification_img = lv_img_create(lv_scr_act());
+        // Lives in the taskbar with the other status items rather than loose on
+        // the screen. It is built lazily, long after the strip, so it has to be
+        // moved into place: index 1 puts it between the holiday text and WiFi.
+        notification_img = lv_img_create(taskbar ? taskbar : lv_scr_act());
         lv_obj_null_on_delete(&notification_img); // Auto-null if deleted elsewhere
         lv_img_set_src(notification_img, &box);
         lv_img_set_zoom(notification_img, 102);
-        lv_obj_align(notification_img, LV_ALIGN_TOP_RIGHT, -110, -13); // Top-right with padding
+        if (taskbar && lv_obj_get_child_cnt(taskbar) > 1) lv_obj_move_to_index(notification_img, 1);
         lv_obj_add_flag(notification_img, LV_OBJ_FLAG_CLICKABLE); // Make the image clickable
         lv_obj_add_event_cb(notification_img, notification_click_cb, LV_EVENT_CLICKED, NULL);
         lv_obj_clear_flag(notification_img, LV_OBJ_FLAG_HIDDEN);
@@ -3034,18 +3045,20 @@ void updateHolidayLabel() {
   // Enable markup recoloring on the label
   lv_label_set_recolor(holiday_label, true);
 
-  // Configure for full visibility: full width, left alignment, and wrapping
-  lv_obj_set_width(holiday_label, LV_PCT(100));
+  // Alignment and wrapping only. The width is deliberately NOT set here any more:
+  // the label is a flex_grow child of the taskbar, and forcing LV_PCT(100) would
+  // shove the clock and the icons straight off the end of the strip.
   lv_obj_set_style_text_align(holiday_label, LV_TEXT_ALIGN_LEFT, 0);
   lv_label_set_long_mode(holiday_label, LV_LABEL_LONG_WRAP);
 
   String full_text;
+  // Read against the taskbar's dark strip, so these are the light variants. The
+  // old #05750a / #050975 / #a8020a were chosen for a white background and turned
+  // invisible as soon as the darkness slider went past 50.
   if (!has_holiday) {
-    // Green markup for the entire no-holidays message
-    full_text = String("#05750a No bank holidays this month #");
+    full_text = String("#8FD98F No bank holidays this month #");
   } else {
-    // Orange markup for prefix, maroon for content
-    full_text = String("#050975 Bank Holidays: # #a8020a ") + content_str + " #";
+    full_text = String("#FFC46B Bank Holidays: # #F2F4F7 ") + content_str + " #";
   }
 
   // Set the marked-up text
@@ -3669,8 +3682,9 @@ void apply_ui_darkness(int value) {
   lv_obj_set_style_bg_opa(lv_scr_act(), LV_OPA_100, 0);
   // Apply to labels and calendar
   if (month_label) lv_obj_set_style_text_color(month_label, text_color, 0);
-  if (date_time_label) lv_obj_set_style_text_color(date_time_label, text_color, 0);
-  if (holiday_label) lv_obj_set_style_text_color(holiday_label, text_color, 0);
+  // date_time_label and holiday_label are deliberately absent: they live in the
+  // taskbar and keep its fixed light-on-dark colours, which is the whole point of
+  // the strip. Recolouring them here is what made them vanish on a dark theme.
   apply_theme_accent(); // keep the theme's dark flag in step
   apply_calendar_theme(calendar);
   // Redraw weather and events to apply changes
@@ -3997,7 +4011,9 @@ void setup_calendar() {
     return;
   }
   lv_obj_set_size(calendar, 350, 350);
-  lv_obj_align(calendar, LV_ALIGN_TOP_LEFT, 10, 60); // Restored original position
+  // 60 -> 78 to clear the 40px taskbar: the month label is anchored to the top
+  // of the calendar and would otherwise sit underneath the strip.
+  lv_obj_align(calendar, LV_ALIGN_TOP_LEFT, 10, 78);
   showed_year = timeinfo.tm_year + 1900;
   showed_month = timeinfo.tm_mon + 1;
   lv_calendar_set_showed_date(calendar, showed_year, showed_month);
@@ -4035,18 +4051,45 @@ void setup_calendar() {
   lv_obj_set_style_text_font(month_label, &lv_font_montserrat_24, 0);
   lv_obj_set_style_text_color(month_label, text_color, 0);
   lv_obj_align_to(month_label, calendar, LV_ALIGN_OUT_TOP_MID, -150, -5); // Restored original position
+  // ---- front-page taskbar -------------------------------------------------
+  // Holidays, the ParcelBox icon, WiFi and the clock used to float loose on the
+  // screen, each themed independently. They now share one strip with a fixed
+  // palette, so their legibility no longer depends on the selected theme.
+  if (debug == 1) Serial.println("[APP] Creating taskbar...");
+  taskbar = lv_obj_create(lv_scr_act());
+  lv_obj_set_size(taskbar, LV_PCT(100), TASKBAR_H);
+  lv_obj_align(taskbar, LV_ALIGN_TOP_MID, 0, 0);
+  lv_obj_set_style_bg_color(taskbar, taskbar_bg(), 0);
+  lv_obj_set_style_bg_opa(taskbar, LV_OPA_COVER, 0);
+  lv_obj_set_style_radius(taskbar, 0, 0); // a strip, not a rounded card
+  lv_obj_set_style_border_side(taskbar, LV_BORDER_SIDE_BOTTOM, 0);
+  lv_obj_set_style_border_width(taskbar, 2, 0);
+  lv_obj_set_style_border_color(taskbar, scheme_accent(), 0); // the one themed touch
+  lv_obj_set_style_pad_left(taskbar, 12, 0);
+  lv_obj_set_style_pad_right(taskbar, 12, 0);
+  lv_obj_set_style_pad_top(taskbar, 0, 0);
+  lv_obj_set_style_pad_bottom(taskbar, 0, 0);
+  lv_obj_set_style_pad_column(taskbar, 10, 0);
+  lv_obj_set_flex_flow(taskbar, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(taskbar, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
+                        LV_FLEX_ALIGN_CENTER);
+  lv_obj_clear_flag(taskbar, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scrollbar_mode(taskbar, LV_SCROLLBAR_MODE_OFF);
   if (debug == 1) Serial.println("[APP] Creating holiday label...");
-  holiday_label = lv_label_create(lv_scr_act());
+  holiday_label = lv_label_create(taskbar);
   lv_obj_set_style_text_font(holiday_label, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(holiday_label, text_color, 0);
-  lv_obj_align(holiday_label, LV_ALIGN_TOP_MID, 30, 5);
+  lv_obj_set_style_text_color(holiday_label, taskbar_text(), 0);
+  lv_obj_set_flex_grow(holiday_label, 1); // takes whatever the clock and icons do not
   lv_label_set_long_mode(holiday_label, LV_LABEL_LONG_WRAP);
-  lv_obj_set_width(holiday_label, 300);
+  lv_obj_set_style_text_align(holiday_label, LV_TEXT_ALIGN_LEFT, 0);
+  if (debug == 1) Serial.println("[APP] Creating WiFi icon...");
+  wifi_icon = lv_img_create(taskbar);
+  lv_img_set_src(wifi_icon, getWifiImage());
+  lv_img_set_zoom(wifi_icon, 109);
   if (debug == 1) Serial.println("[APP] Creating date-time label...");
-  date_time_label = lv_label_create(lv_scr_act());
+  date_time_label = lv_label_create(taskbar);
   lv_obj_set_style_text_font(date_time_label, &lv_font_montserrat_24, 0);
-  lv_obj_set_style_text_color(date_time_label, text_color, 0);
-  lv_obj_align(date_time_label, LV_ALIGN_TOP_RIGHT, -10, 10);
+  lv_obj_set_style_text_color(date_time_label, taskbar_text(), 0);
   updateDateTimeLabel();
   updateMonthLabel(calendar);
   updateHolidayLabel();
@@ -4110,11 +4153,6 @@ void setup_calendar() {
   lv_obj_set_style_text_font(next_label, &lv_font_montserrat_14, 0);
   lv_obj_set_style_text_color(next_label, lv_color_hex(0xFFFFFF), 0);
   updateFirmwareButton();
-  wifi_icon = lv_img_create(lv_scr_act());
-  lv_img_set_src(wifi_icon, getWifiImage());
-  lv_img_set_zoom(wifi_icon, 109);
-  lv_obj_align(wifi_icon, LV_ALIGN_TOP_RIGHT, -60, -13);
-  if (debug == 1) Serial.println("[APP] Created WiFi icon");
   if (debug == 1) Serial.println("[APP] Setup complete");
   printMemoryUsage();
   if (splash_img) {
