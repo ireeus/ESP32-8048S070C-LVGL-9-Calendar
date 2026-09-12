@@ -958,48 +958,67 @@ void updateWeatherDisplay() {
   lv_obj_set_style_bg_color(weatherContainer, weather_bg_color, 0);
   lv_color_t main_text_color = (g_ui_darkness > 50) ? lv_color_hex(0xFFFFFF) : lv_color_hex(0x636e72);
   lv_color_t temp_text_color = (g_ui_darkness > 50) ? lv_color_hex(0xFFFFFF) : lv_color_hex(0x2d3436);
-  // Weather image (CHANGED: Use next_weather.weather_code for next half-hour condition)
+  // ---- hero row: condition icon + temperature, as one centred pair ----------
+  // The icon had NO zoom, so it rendered at its native 68px while every other
+  // icon in this panel is scaled (the forecast icons are 128 -> 34px). It was
+  // also pinned 3px from the panel's top edge, which is what made the panel look
+  // top-heavy. 68 * 170/256 = 45px now, sitting beside the temperature instead of
+  // stacked above it with a gap.
   lv_obj_t *weather_img = lv_img_create(weatherContainer);
   lv_img_set_src(weather_img, getWeatherImage(next_weather.weather_code));
-  lv_obj_align(weather_img, LV_ALIGN_CENTER, 0, -80);
-  // Temperature label (UNCHANGED: Current temperature)
+  lv_img_set_zoom(weather_img, 170);
+  lv_obj_align(weather_img, LV_ALIGN_CENTER, -58, -50);
   lv_obj_t *temp_label = lv_label_create(weatherContainer);
   lv_label_set_text(temp_label, (String(current_weather.temperature_2m + temp_adjust, 1) + "°C").c_str());
   lv_obj_set_style_text_font(temp_label, &lv_font_montserrat_24, 0);
   lv_obj_set_style_text_color(temp_label, temp_text_color, 0);
-  lv_obj_align(temp_label, LV_ALIGN_CENTER, 0, -25);
-  // AQI label on the right side of the image and temperature (UNCHANGED)
-  lv_obj_t *aqi_label_local = lv_label_create(weatherContainer);
-  lv_label_set_text(aqi_label_local, ("AQI: " + getAqiDescription(current_aqi)).c_str());
-  lv_obj_set_style_text_font(aqi_label_local, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(aqi_label_local, getAqiColor(current_aqi), 0);
-  lv_obj_align(aqi_label_local, LV_ALIGN_CENTER, 120, -85); // Moved to right side, symmetric with description
-  // Description (CHANGED: Use next_weather.weather_code for next half-hour condition)
+  lv_obj_align(temp_label, LV_ALIGN_CENTER, 40, -44);
+  // ---- header row: location + condition left, AQI right ---------------------
+  // These were three loose labels pinned to the panel's corners with hand-tuned
+  // CENTER offsets, so the location sat orphaned in one corner, the condition on
+  // its own line below it, and the AQI in the opposite corner. One full-width row
+  // now carries all three, which keeps the left and right edges stable whatever
+  // the location or condition text happens to be.
   String desc = getWeatherDescription(next_weather.weather_code);
-  lv_obj_t *desc_label = lv_label_create(weatherContainer);
-  lv_label_set_text(desc_label, desc.c_str());
-  lv_obj_set_style_text_font(desc_label, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(desc_label, main_text_color, 0);
-  lv_obj_align(desc_label, LV_ALIGN_CENTER, -145, -60);
-  // Header container for location (UNCHANGED)
-  lv_obj_t *header_cont = lv_obj_create(weatherContainer);
-  lv_obj_set_size(header_cont, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-  lv_obj_set_flex_flow(header_cont, LV_FLEX_FLOW_ROW);
-  lv_obj_align(header_cont, LV_ALIGN_CENTER, -160, -85);
-  lv_obj_set_style_bg_opa(header_cont, LV_OPA_TRANSP, 0);
-  lv_obj_set_style_border_width(header_cont, 0, 0);
-  lv_obj_set_style_pad_all(header_cont, 0, 0);
-  lv_obj_set_style_pad_column(header_cont, 3, 0);
-  // Location
-  lv_obj_t *loc_label = lv_label_create(header_cont);
+  lv_obj_t *header_row = lv_obj_create(weatherContainer);
+  lv_obj_set_size(header_row, LV_PCT(100), LV_SIZE_CONTENT);
+  lv_obj_align(header_row, LV_ALIGN_TOP_MID, 0, 0);
+  lv_obj_set_flex_flow(header_row, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(header_row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER,
+                        LV_FLEX_ALIGN_CENTER);
+  lv_obj_set_style_bg_opa(header_row, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(header_row, 0, 0);
+  lv_obj_set_style_pad_all(header_row, 0, 0);
+  lv_obj_clear_flag(header_row, LV_OBJ_FLAG_SCROLLABLE);
+  // Location and condition share the left slot, side by side.
+  lv_obj_t *header_left = lv_obj_create(header_row);
+  lv_obj_set_size(header_left, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+  lv_obj_set_flex_flow(header_left, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(header_left, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
+                        LV_FLEX_ALIGN_CENTER);
+  lv_obj_set_style_bg_opa(header_left, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(header_left, 0, 0);
+  lv_obj_set_style_pad_all(header_left, 0, 0);
+  lv_obj_set_style_pad_column(header_left, 8, 0);
+  lv_obj_clear_flag(header_left, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_t *loc_label = lv_label_create(header_left);
   lv_label_set_text(loc_label, location.c_str());
   lv_obj_set_style_text_color(loc_label, main_text_color, 0);
   lv_obj_set_style_text_font(loc_label, &lv_font_montserrat_14, 0);
-  lv_obj_align(loc_label, LV_ALIGN_CENTER, 0, -10);
+  lv_obj_t *desc_label = lv_label_create(header_left);
+  lv_label_set_text(desc_label, desc.c_str());
+  lv_obj_set_style_text_font(desc_label, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(desc_label, main_text_color, 0);
+  lv_obj_t *aqi_label_local = lv_label_create(header_row);
+  lv_label_set_text(aqi_label_local, ("AQI: " + getAqiDescription(current_aqi)).c_str());
+  lv_obj_set_style_text_font(aqi_label_local, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(aqi_label_local, getAqiColor(current_aqi), 0);
   // Buttons container (UNCHANGED: Uses current_weather values)
   lv_obj_t *buttons_cont = lv_obj_create(weatherContainer);
-  lv_obj_set_size(buttons_cont, 380, 55);
-  lv_obj_align(buttons_cont, LV_ALIGN_CENTER, 0, 30);
+  // 50 tall, matching the chips, and lifted from +30 to +4: the forecast below
+  // was reaching 12px past the bottom of the panel.
+  lv_obj_set_size(buttons_cont, 380, 50);
+  lv_obj_align(buttons_cont, LV_ALIGN_CENTER, 0, 4);
   lv_obj_set_flex_flow(buttons_cont, LV_FLEX_FLOW_ROW);
   lv_obj_set_flex_align(buttons_cont, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
   lv_obj_set_style_bg_opa(buttons_cont, LV_OPA_TRANSP, 0);
@@ -1008,7 +1027,7 @@ void updateWeatherDisplay() {
   lv_obj_set_scrollbar_mode(buttons_cont, LV_SCROLLBAR_MODE_OFF);
   // Humidity (UPDATED: Dark text color)
   lv_obj_t *hum_cont = lv_obj_create(buttons_cont);
-  lv_obj_set_size(hum_cont, 108, 55);
+  lv_obj_set_size(hum_cont, 108, 50); // was 55 - the odd one out in the row
   // The three chips were a teal / pink / blue jumble. They are now three tints
   // of the active scheme's accent - still distinguishable, but they read as one
   // set instead of three unrelated hues.
@@ -1055,7 +1074,7 @@ lv_obj_center(pressure_val);
   // longer overlaps the last day: the strip's right edge was landing at ~756
   // while the button starts at 744. -20 clears it and still leaves the first
   // day ~15px clear of the container's left edge.
-  lv_obj_align(forecast_cont, LV_ALIGN_CENTER, -20, 90);
+  lv_obj_align(forecast_cont, LV_ALIGN_CENTER, -20, 72);
   lv_obj_set_flex_flow(forecast_cont, LV_FLEX_FLOW_ROW);
   lv_obj_set_flex_align(forecast_cont, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
   lv_obj_set_style_bg_opa(forecast_cont, LV_OPA_TRANSP, 0);
