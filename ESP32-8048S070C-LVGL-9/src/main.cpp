@@ -3021,11 +3021,16 @@ static unsigned long otaLastUiTick = 0;
 #define OTA_VERIFY_MS 3250UL // finishing bar sweep (2.5s + 30%)
 static bool otaBlackout = false;       // screen is flat; LVGL must not repaint
 static bool otaVerifying = false;      // running the finishing bar
+static bool otaAwaitingRestart = false; // finished; waiting for the user to press OK
+// An update started by the quiet-window policy has nobody standing in front of
+// the device, so that one still reboots itself. Only a user-pressed update waits.
+static bool otaAutoTriggered = false;
 static unsigned long otaVerifyStart = 0;
 static lv_obj_t *ota_status_lbl = nullptr;
 static lv_obj_t *ota_bar = nullptr;
 static lv_obj_t *ota_action_btn = nullptr;
 static lv_obj_t *ota_close_btn = nullptr;
+static lv_obj_t *ota_ok_btn = nullptr;  // shown once the update is installed
 
 static void ota_set_status(const char *msg, bool is_error) {
   if (!ota_status_lbl) return;
@@ -3071,6 +3076,9 @@ static void ota_close_transfer() {
   otaStream = nullptr;
   otaDownloading = false;
   otaVerifying = false;
+  otaAwaitingRestart = false;
+  otaAutoTriggered = false;
+  if (ota_ok_btn) lv_obj_add_flag(ota_ok_btn, LV_OBJ_FLAG_HIDDEN);
   is_ota_updating = false;
   ota_ui_show(); // a failure or a cancelled transfer must never leave the screen flat
 }
@@ -3099,8 +3107,11 @@ static void ota_show_progress(bool force) {
     lv_label_set_text(ota_status_lbl, buf);
   }
 }
-static void ota_start() {
+static void ota_start(bool automatic = false) {
   if (otaDownloading) return;
+  // Only recorded once the attempt is really going ahead, so a rejected call
+  // cannot stamp its origin onto a transfer that is already in flight.
+  otaAutoTriggered = automatic;
   if (WiFi.status() != WL_CONNECTED) { ota_fail("WiFi is not connected"); return; }
   if (firmwareUrl.isEmpty()) { ota_fail("No update URL was advertised"); return; }
 
@@ -3136,6 +3147,10 @@ static void serviceOta() {
   // By the time this runs the update has ALREADY been validated and committed by
   // Update.end(). The sweep is therefore reassurance that the install completed,
   // not a measurement of it - and it only ever runs on a confirmed-good update.
+  // Everything is done and the OK button is up. Nothing else happens until the
+  // user presses it - no automatic reboot.
+  if (otaAwaitingRestart) return;
+
   if (otaVerifying) {
     unsigned long elapsed = millis() - otaVerifyStart;
     int pct = (int)((elapsed * 100) / OTA_VERIFY_MS);
@@ -3143,15 +3158,22 @@ static void serviceOta() {
     if (ota_bar) lv_bar_set_value(ota_bar, pct, LV_ANIM_OFF);
     if (elapsed < OTA_VERIFY_MS) return;
     otaVerifying = false;
-    char done_msg[80];
-    snprintf(done_msg, sizeof(done_msg), "Firmware updated to %s  [OK]",
-             latestFirmwareVersion.c_str());
-    ota_set_status(done_msg, false);
+    if (otaAutoTriggered) {
+      // Nobody is there to press OK, so this one finishes by itself.
+      ota_set_status("Update completed. Restarting...", false);
+      if (ota_status_lbl) lv_obj_set_style_text_color(ota_status_lbl, lv_color_hex(0x8BC34A), 0);
+      lv_refr_now(NULL);
+      delay(1500);
+      ESP.restart();
+      return;
+    }
+    otaAwaitingRestart = true;
+    ota_set_status("Update completed. We need to restart the Crontab", false);
     if (ota_status_lbl) lv_obj_set_style_text_color(ota_status_lbl, lv_color_hex(0x8BC34A), 0);
-    is_ota_updating = false;
-    lv_refr_now(NULL); // make sure it is on screen before the reboot
-    delay(1500);
-    ESP.restart();
+    if (ota_ok_btn) lv_obj_clear_flag(ota_ok_btn, LV_OBJ_FLAG_HIDDEN);
+    lv_refr_now(NULL); // paint the finished state straight away
+    // Deliberately does NOT reboot here. is_ota_updating stays true so loop()
+    // keeps servicing the popup and the OK button remains live.
     return;
   }
 
@@ -3189,13 +3211,24 @@ static void serviceOta() {
   // Only now, with the update confirmed, does the picture come back.
   ota_ui_show();
   if (ota_bar) lv_bar_set_value(ota_bar, 0, LV_ANIM_OFF);
-  ota_set_status("Verifying update...", false);
+  ota_set_status("Verifying the installation...", false);
   otaVerifying = true;
   otaVerifyStart = millis();
 }
+// The update is installed and verified. The device deliberately does NOT reboot
+// on its own any more - the user decides when, by pressing OK.
+static void ota_restart_cb(lv_event_t *e) {
+  (void)e;
+  if (!otaAwaitingRestart) return; // stale press from a previous attempt
+  otaAwaitingRestart = false;
+  ota_set_status("Restarting...", false);
+  lv_refr_now(NULL);
+  delay(800);
+  ESP.restart();
+}
 static void ota_action_cb(lv_event_t *e) {
   (void)e;
-  ota_start(); // the same button serves as Update Now and Retry
+  ota_start(false); // user-initiated: finish by waiting for OK
 }
 static void ota_close_cb(lv_event_t *e) {
   (void)e;
@@ -3302,6 +3335,19 @@ void update_btn_cb(lv_event_t *e) {
   lv_label_set_text(ota_cl, "Close");
   lv_obj_center(ota_cl);
   lv_obj_set_style_text_font(ota_cl, &lv_font_montserrat_14, 0);
+
+  // Created hidden. It is revealed only when the update is installed, and it is
+  // the only thing that reboots the device.
+  ota_ok_btn = lv_button_create(ota_row);
+  lv_obj_set_size(ota_ok_btn, 140, 46);
+  lv_obj_set_style_bg_color(ota_ok_btn, lv_color_hex(0x00A86B), 0);
+  lv_obj_set_style_radius(ota_ok_btn, 10, 0);
+  lv_obj_add_event_cb(ota_ok_btn, ota_restart_cb, LV_EVENT_PRESSED, NULL);
+  lv_obj_t *ota_okl = lv_label_create(ota_ok_btn);
+  lv_label_set_text(ota_okl, "OK");
+  lv_obj_center(ota_okl);
+  lv_obj_set_style_text_font(ota_okl, &lv_font_montserrat_14, 0);
+  lv_obj_add_flag(ota_ok_btn, LV_OBJ_FLAG_HIDDEN);
 }
 static int showed_year;
 static int showed_month;
@@ -3409,7 +3455,7 @@ static void maybeAutoUpdate() {
     Serial.println("[OTA] Quiet window open - updating automatically to " + latestFirmwareVersion);
   }
   update_btn_cb(NULL); // build the progress dialog...
-  ota_start();         // ...and go
+  ota_start(true);         // unattended: finish by rebooting
 }
 void updateFirmwareButton() {
   if (versionIsNewer(latestFirmwareVersion, currentFirmwareVersion)) {
