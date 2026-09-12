@@ -58,6 +58,9 @@ void keyboard_event_cb(lv_event_t *e);
 void show_wifi_setup_screen();
 void initTime(); // defined near setup(); declared here for the WiFi wizard
 static void wifi_setup_teardown();
+static void api_code_teardown();
+static void location_teardown();
+static void wizard_back_cb(lv_event_t *e);
 static void serviceWifiSetup();
 void show_api_code_screen();
 void show_location_screen();
@@ -155,6 +158,10 @@ static lv_obj_t *wifi_setup_screen = nullptr;
 // WiFi setup screen widgets. Held here instead of dug out with
 // lv_obj_get_child(screen, N): the old code assumed the password box was child
 // index 1, so any layout change would silently hand it the wrong widget.
+static lv_obj_t *api_code_ta = nullptr;      // wizard step 2 field
+static lv_obj_t *api_code_status = nullptr;  // wizard step 2 status line
+static lv_obj_t *location_ta = nullptr;      // wizard step 3 field
+static lv_obj_t *location_status = nullptr;  // wizard step 3 status line
 static lv_obj_t *wifi_ssid_dd = nullptr;     // network dropdown
 static lv_obj_t *wifi_pass_ta = nullptr;     // password box
 static lv_obj_t *wifi_status_lbl = nullptr;  // the one reused status/error line
@@ -1375,6 +1382,161 @@ lv_obj_update_layout(eventContainer);
 
 }
 
+// ---------------------------------------------------------------------------
+// First-run wizard chrome.
+// All three steps (1 WiFi -> 2 API code -> 3 Location) are built from these, so
+// the flow looks like one wizard instead of three unrelated screens. The geometry
+// keeps every control above y=290, which is where the on-screen keyboard starts,
+// so a field or button is never trapped underneath it.
+// ---------------------------------------------------------------------------
+#define WIZARD_STEP_COUNT 3
+#define WIZARD_FIELD_H 40
+#define WIZARD_ROW_Y 92    // first caption
+#define WIZARD_ROW_GAP 56  // caption-to-caption
+#define WIZARD_BTN_Y 216
+
+static void wizard_set_status(lv_obj_t *lbl, const char *msg, bool is_error) {
+  if (!lbl) return;
+  lv_label_set_text(lbl, msg);
+  lv_obj_set_style_text_color(lbl, lv_color_hex(is_error ? 0xFF5252 : 0x8BC34A), 0);
+}
+// Shared shell: title, "Step N of 3", subtitle, and the shared keyboard.
+static lv_obj_t *wizard_screen(const char *title, int step, const char *subtitle) {
+  lv_obj_t *scr = lv_obj_create(lv_scr_act());
+  lv_obj_set_size(scr, 800, 480);
+  lv_obj_set_style_bg_color(scr, lv_color_hex(0x000000), 0);
+  lv_obj_set_style_border_width(scr, 0, 0);
+  lv_obj_set_style_radius(scr, 0, 0);
+  lv_obj_set_style_pad_all(scr, 0, 0);
+  lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scrollbar_mode(scr, LV_SCROLLBAR_MODE_OFF);
+
+  lv_obj_t *t = lv_label_create(scr);
+  lv_label_set_text(t, title);
+  lv_obj_set_style_text_font(t, &lv_font_montserrat_24, 0);
+  lv_obj_set_style_text_color(t, lv_color_hex(0xFFFFFF), 0);
+  lv_obj_align(t, LV_ALIGN_TOP_LEFT, 20, 10);
+
+  lv_obj_t *step_lbl = lv_label_create(scr);
+  lv_label_set_text_fmt(step_lbl, "Step %d of %d", step, WIZARD_STEP_COUNT);
+  lv_obj_set_style_text_font(step_lbl, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(step_lbl, lv_color_hex(0x9FB3C8), 0);
+  lv_obj_align(step_lbl, LV_ALIGN_TOP_RIGHT, -20, 16);
+
+  lv_obj_t *sub = lv_label_create(scr);
+  lv_label_set_text(sub, subtitle);
+  lv_obj_set_style_text_font(sub, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(sub, lv_color_hex(0xAAAAAA), 0);
+  lv_label_set_long_mode(sub, LV_LABEL_LONG_WRAP);
+  lv_obj_set_width(sub, 420);
+  lv_obj_align(sub, LV_ALIGN_TOP_LEFT, 20, 48);
+
+  if (!keyboard) {
+    keyboard = lv_keyboard_create(lv_scr_act());
+    lv_obj_add_flag(keyboard, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_style_text_font(keyboard, &lv_font_montserrat_14, 0);
+  }
+  return scr;
+}
+static void wizard_caption(lv_obj_t *scr, const char *text, int slot) {
+  lv_obj_t *c = lv_label_create(scr);
+  lv_label_set_text(c, text);
+  lv_obj_set_style_text_font(c, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(c, lv_color_hex(0xAAAAAA), 0);
+  lv_obj_align(c, LV_ALIGN_TOP_LEFT, 20, WIZARD_ROW_Y + slot * WIZARD_ROW_GAP);
+}
+static lv_obj_t *wizard_field(lv_obj_t *scr, int slot, lv_coord_t w, const char *placeholder,
+                              bool password) {
+  lv_obj_t *ta = lv_textarea_create(scr);
+  lv_textarea_set_one_line(ta, true);
+  lv_textarea_set_placeholder_text(ta, placeholder);
+  if (password) lv_textarea_set_password_mode(ta, true);
+  lv_obj_set_size(ta, w, WIZARD_FIELD_H);
+  lv_obj_align(ta, LV_ALIGN_TOP_LEFT, 20, WIZARD_ROW_Y + 18 + slot * WIZARD_ROW_GAP);
+  lv_obj_set_style_text_font(ta, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_pad_all(ta, 4, 0);
+  lv_obj_add_event_cb(ta, keyboard_event_cb, LV_EVENT_FOCUSED, ta);
+  lv_obj_add_event_cb(ta, keyboard_event_cb, LV_EVENT_DEFOCUSED, ta);
+  return ta;
+}
+static void wizard_button(lv_obj_t *scr, const char *text, lv_coord_t x, lv_coord_t y,
+                          lv_coord_t w, lv_color_t bg, lv_event_cb_t cb, void *ud) {
+  lv_obj_t *b = lv_button_create(scr);
+  lv_obj_set_size(b, w, 44);
+  lv_obj_align(b, LV_ALIGN_TOP_LEFT, x, y);
+  lv_obj_set_style_bg_color(b, bg, 0);
+  lv_obj_set_style_radius(b, 10, 0);
+  lv_obj_add_event_cb(b, cb, LV_EVENT_PRESSED, ud);
+  lv_obj_t *l = lv_label_create(b);
+  lv_label_set_text(l, text);
+  lv_obj_center(l);
+  lv_obj_set_style_text_font(l, &lv_font_montserrat_14, 0);
+}
+static lv_obj_t *wizard_dropdown(lv_obj_t *scr, int slot, lv_coord_t w) {
+  lv_obj_t *dd = lv_dropdown_create(scr);
+  lv_obj_set_size(dd, w, WIZARD_FIELD_H);
+  lv_obj_align(dd, LV_ALIGN_TOP_LEFT, 20, WIZARD_ROW_Y + 18 + slot * WIZARD_ROW_GAP);
+  lv_obj_set_style_text_font(dd, &lv_font_montserrat_14, 0);
+  return dd;
+}
+static lv_obj_t *wizard_status_label(lv_obj_t *scr) {
+  lv_obj_t *sl = lv_label_create(scr);
+  lv_label_set_text(sl, "");
+  lv_obj_set_style_text_font(sl, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(sl, lv_color_hex(0x8BC34A), 0);
+  lv_obj_set_width(sl, 420);
+  lv_label_set_long_mode(sl, LV_LABEL_LONG_WRAP);
+  lv_obj_align(sl, LV_ALIGN_TOP_LEFT, 20, 268);
+  return sl;
+}
+// Right-hand QR panel. Aligned from the TOP; the old screens used
+// LV_ALIGN_BOTTOM_MID with a POSITIVE y offset, which pushed the code below the
+// bottom edge of the screen.
+static void wizard_qr(lv_obj_t *scr, const char *caption) {
+  lv_obj_t *img = lv_img_create(scr);
+  lv_img_set_src(img, &qr);
+  lv_img_set_zoom(img, 120); // 298px source -> ~140px
+  lv_obj_align(img, LV_ALIGN_TOP_RIGHT, -115, 60);
+  // No img_recolor: the style needs img_recolor_opa to apply, and COVER would
+  // flatten the code to one colour and make it unscannable.
+  lv_obj_t *lbl = lv_label_create(scr);
+  lv_label_set_text(lbl, caption);
+  lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(lbl, lv_color_hex(0xFFFFFF), 0);
+  lv_label_set_long_mode(lbl, LV_LABEL_LONG_WRAP);
+  lv_obj_set_width(lbl, 300);
+  lv_obj_set_style_text_align(lbl, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_align_to(lbl, img, LV_ALIGN_OUT_BOTTOM_MID, 0, 14);
+}
+// Step 1 <-> 2 <-> 3 navigation.
+static void wizard_back_cb(lv_event_t *e) {
+  intptr_t from = (intptr_t)lv_event_get_user_data(e);
+  if (from == 2) {
+    api_code_teardown();
+    show_wifi_setup_screen();
+  } else if (from == 3) {
+    location_teardown();
+    show_api_code_screen();
+  }
+}
+// Drop a step's screen outright. The old code only hid the API code screen, so it
+// and its QR image stayed on lv_scr_act() for the rest of the session.
+static void api_code_teardown() {
+  api_code_ta = nullptr;
+  api_code_status = nullptr;
+  if (api_code_screen) {
+    lv_obj_del(api_code_screen);
+    api_code_screen = nullptr;
+  }
+}
+static void location_teardown() {
+  location_ta = nullptr;
+  location_status = nullptr;
+  if (location_screen) {
+    lv_obj_del(location_screen);
+    location_screen = nullptr;
+  }
+}
 // ---- WiFi setup: network list + connection state machine -------------------
 // Nothing here blocks any more. The old code ran a blocking WiFi.scanNetworks()
 // before it created a single widget (so the screen stayed black for 1-3s) and
@@ -1383,12 +1545,6 @@ lv_obj_update_layout(eventContainer);
 #define WIFI_SCAN_TIMEOUT_MS 20000UL
 #define WIFI_CONNECT_TIMEOUT_MS 20000UL
 
-static void wifi_set_status(const char *msg, bool is_error) {
-  if (!wifi_status_lbl) return;
-  lv_label_set_text(wifi_status_lbl, msg);
-  lv_obj_set_style_text_color(wifi_status_lbl,
-                              lv_color_hex(is_error ? 0xFF5252 : 0x8BC34A), 0);
-}
 static void wifi_fill_network_list() {
   if (!wifi_ssid_dd) return;
   int n = WiFi.scanComplete();
@@ -1401,7 +1557,7 @@ static void wifi_fill_network_list() {
   wifi_scan_pending = false;
   if (n == 0) {
     lv_dropdown_set_options(wifi_ssid_dd, "No networks found");
-    wifi_set_status("No networks found - check the router is in range", true);
+    wizard_set_status(wifi_status_lbl, "No networks found - check the router is in range", true);
     return;
   }
   String list;
@@ -1412,12 +1568,12 @@ static void wifi_fill_network_list() {
   }
   lv_dropdown_set_options(wifi_ssid_dd, list.c_str());
   lv_dropdown_set_selected(wifi_ssid_dd, 0);
-  wifi_set_status("", false);
+  wizard_set_status(wifi_status_lbl, "", false);
 }
 static void wifi_scan_start() {
   if (wifi_scan_pending) return;
   if (wifi_ssid_dd) lv_dropdown_set_options(wifi_ssid_dd, "Scanning...");
-  wifi_set_status("Scanning for networks...", false);
+  wizard_set_status(wifi_status_lbl, "Scanning for networks...", false);
   WiFi.scanDelete();      // release the previous result first
   wifi_scan_started = millis();
   wifi_scan_pending = true;
@@ -1463,7 +1619,7 @@ static void wifi_connect_start() {
   String want = String(selected);
   // With an empty list the dropdown is showing one of these placeholders.
   if (want.isEmpty() || want == "Scanning..." || want == "No networks found") {
-    wifi_set_status("Pick a network from the list first", true);
+    wizard_set_status(wifi_status_lbl, "Pick a network from the list first", true);
     return;
   }
   wifi_pending_ssid = want;
@@ -1471,7 +1627,7 @@ static void wifi_connect_start() {
   wifi_connect_started = millis();
   wifi_connect_pending = true;
   String msg = "Connecting to " + want + "...";
-  wifi_set_status(msg.c_str(), false);
+  wizard_set_status(wifi_status_lbl, msg.c_str(), false);
   WiFi.disconnect(); // clear any half-open attempt so begin() starts clean
   WiFi.begin(wifi_pending_ssid.c_str(), wifi_pending_password.c_str());
 }
@@ -1494,7 +1650,7 @@ static void serviceWifiSetup() {
   if (millis() - wifi_connect_started >= WIFI_CONNECT_TIMEOUT_MS) {
     wifi_connect_pending = false;
     WiFi.disconnect();
-    wifi_set_status("Connection failed - check the password and try again", true);
+    wizard_set_status(wifi_status_lbl, "Connection failed - check the password and try again", true);
   }
 }
 void wifi_connect_cb(lv_event_t * e) {
@@ -1506,14 +1662,23 @@ static void wifi_rescan_cb(lv_event_t * e) {
   wifi_scan_start();
 }
 void api_code_submit_cb(lv_event_t * e) {
+  (void)e;
   if (debug == 1) Serial.println("[APP] API code submit button clicked");
-  lv_obj_t *api_ta = (lv_obj_t*)lv_event_get_user_data(e);
-  apiCode = String(lv_textarea_get_text(api_ta));
+  if (!api_code_ta) return;
+  String code = String(lv_textarea_get_text(api_code_ta));
+  code.trim();
+  if (code.isEmpty()) {
+    // The old handler saved whatever was in the box, including nothing, and moved
+    // on - leaving every API call to fail later with no explanation.
+    wizard_set_status(api_code_status, "Enter the API code before continuing", true);
+    return;
+  }
+  apiCode = code;
   preferences.begin("api", false);
   preferences.putString("apiCode", apiCode);
   preferences.end();
   if (debug == 1) Serial.println("[APP] API code saved");
-  lv_obj_add_flag(api_code_screen, LV_OBJ_FLAG_HIDDEN);
+  api_code_teardown(); // delete it, do not just hide it
   preferences.begin("location", false);
   location = preferences.getString("location", "");
   preferences.end();
@@ -1525,44 +1690,66 @@ void api_code_submit_cb(lv_event_t * e) {
   }
 }
 void location_submit_cb(lv_event_t * e) {
+  (void)e;
   if (debug == 1) Serial.println("[APP] Location submit button clicked");
-  lv_obj_t *location_ta = (lv_obj_t*)lv_event_get_user_data(e);
-  String new_location = String(lv_textarea_get_text(location_ta));
+  if (!location_ta) return;
+  String want = String(lv_textarea_get_text(location_ta));
+  want.trim();
+  if (want.isEmpty()) {
+    wizard_set_status(location_status, "Enter a city before continuing", true);
+    return;
+  }
+  wizard_set_status(location_status, "Looking that place up...", false);
+  // Paint the status before the blocking request, otherwise it is set and never
+  // seen.
+  lv_refr_now(NULL);
+
   HTTPClient http;
-  String url = "https://crontech.uk/api.php?weatherLocation=" + URLEncode(apiCode) + "&city_name=" + URLEncode(new_location);
+  String url = "https://crontech.uk/api.php?weatherLocation=" + URLEncode(apiCode) + "&city_name=" + URLEncode(want);
   http.begin(url);
   int httpCode = http.GET();
+  bool ok = false;
   if (httpCode == HTTP_CODE_OK) {
     String payload = http.getString();
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, payload);
     if (!error) {
-      location = doc["city_name"].as<String>();
-      lat = String(doc["latitude"].as<float>(), 6);
-      lon = String(doc["longitude"].as<float>(), 6);
-      preferences.begin("location", false);
-      preferences.putString("location", location);
-      preferences.putString("lat", lat);
-      preferences.putString("lon", lon);
-      preferences.end();
-      if (debug == 1) Serial.println("[APP] Weather location saved: " + location + ", lat: " + lat + ", lon: " + lon);
-    } else {
-      if (debug == 1) Serial.println("[APP] JSON parsing failed: " + String(error.c_str()));
+      String got = doc["city_name"].as<String>();
+      if (!got.isEmpty()) {
+        location = got;
+        lat = String(doc["latitude"].as<float>(), 6);
+        lon = String(doc["longitude"].as<float>(), 6);
+        preferences.begin("location", false);
+        preferences.putString("location", location);
+        preferences.putString("lat", lat);
+        preferences.putString("lon", lon);
+        preferences.end();
+        if (debug == 1) Serial.println("[APP] Weather location saved: " + location + ", lat: " + lat + ", lon: " + lon);
+        ok = true;
+      }
+    } else if (debug == 1) {
+      Serial.println("[APP] JSON parsing failed: " + String(error.c_str()));
     }
-  } else {
-    if (debug == 1) Serial.println("[APP] Weather location update failed: " + String(httpCode));
+  } else if (debug == 1) {
+    Serial.println("[APP] Weather location update failed: " + String(httpCode));
   }
   http.end();
+
+  if (!ok) {
+    // Stay on this step so it can be retried. The old code hid and deleted the
+    // screen and carried on regardless, so a failed lookup left the device with
+    // no location and the user with no idea why.
+    wizard_set_status(location_status,
+                      "Could not find that place. Check the spelling, and that the API code is right.",
+                      true);
+    return;
+  }
   if (settings_popup) {
     lv_obj_add_flag(settings_popup, LV_OBJ_FLAG_HIDDEN);
     lv_obj_del(settings_popup);
     settings_popup = nullptr;
   }
-  if (location_screen) {
-    lv_obj_add_flag(location_screen, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_del(location_screen);
-    location_screen = nullptr;
-  }
+  location_teardown();
   setup_calendar();
   fetchAfterUiReady();
 }
@@ -1920,199 +2107,80 @@ void keyboard_event_cb(lv_event_t * e) {
 void show_wifi_setup_screen() {
   if (wifi_setup_screen) return; // already up; never build a second one
   if (debug == 1) Serial.println("[APP] Showing WiFi setup screen...");
+  wifi_setup_screen = wizard_screen("WiFi Setup", 1,
+      "Pick your network and enter its password. Tap Rescan if yours is not listed.");
 
-  wifi_setup_screen = lv_obj_create(lv_scr_act());
-  lv_obj_set_size(wifi_setup_screen, 800, 480);
-  lv_obj_set_style_bg_color(wifi_setup_screen, lv_color_hex(0x000000), 0);
-  lv_obj_set_style_border_width(wifi_setup_screen, 0, 0);
-  lv_obj_set_style_radius(wifi_setup_screen, 0, 0);
-  lv_obj_set_style_pad_all(wifi_setup_screen, 0, 0);
-  lv_obj_clear_flag(wifi_setup_screen, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_set_scrollbar_mode(wifi_setup_screen, LV_SCROLLBAR_MODE_OFF);
-
-  lv_obj_t *wifi_title = lv_label_create(wifi_setup_screen);
-  lv_label_set_text(wifi_title, "WiFi Setup");
-  lv_obj_set_style_text_font(wifi_title, &lv_font_montserrat_24, 0);
-  lv_obj_set_style_text_color(wifi_title, lv_color_hex(0xFFFFFF), 0);
-  lv_obj_align(wifi_title, LV_ALIGN_TOP_LEFT, 20, 10);
-
-  // ---- left half: the form -------------------------------------------------
-  lv_obj_t *net_cap = lv_label_create(wifi_setup_screen);
-  lv_label_set_text(net_cap, "Network");
-  lv_obj_set_style_text_font(net_cap, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(net_cap, lv_color_hex(0xAAAAAA), 0);
-  lv_obj_align(net_cap, LV_ALIGN_TOP_LEFT, 20, 58);
-
-  wifi_ssid_dd = lv_dropdown_create(wifi_setup_screen);
+  wizard_caption(wifi_setup_screen, "Network", 0);
+  wifi_ssid_dd = wizard_dropdown(wifi_setup_screen, 0, 300);
   lv_dropdown_set_options(wifi_ssid_dd, "Scanning...");
-  lv_obj_set_width(wifi_ssid_dd, 300);
-  lv_obj_align(wifi_ssid_dd, LV_ALIGN_TOP_LEFT, 20, 80);
-  lv_obj_set_style_text_font(wifi_ssid_dd, &lv_font_montserrat_14, 0);
+  wizard_button(wifi_setup_screen, "Rescan", 330, WIZARD_ROW_Y + 16, 110,
+                scheme_accent(), wifi_rescan_cb, NULL);
 
-  lv_obj_t *scan_btn = lv_button_create(wifi_setup_screen);
-  lv_obj_set_size(scan_btn, 110, 44);
-  lv_obj_align(scan_btn, LV_ALIGN_TOP_LEFT, 330, 79);
-  lv_obj_set_style_bg_color(scan_btn, scheme_accent(), 0);
-  lv_obj_set_style_bg_color(scan_btn, scheme_accent_dark(), LV_STATE_PRESSED);
-  lv_obj_set_style_radius(scan_btn, 10, 0);
-  lv_obj_add_event_cb(scan_btn, wifi_rescan_cb, LV_EVENT_PRESSED, NULL);
-  lv_obj_t *scan_lbl = lv_label_create(scan_btn);
-  lv_label_set_text(scan_lbl, "Rescan");
-  lv_obj_center(scan_lbl);
-  lv_obj_set_style_text_font(scan_lbl, &lv_font_montserrat_14, 0);
+  wizard_caption(wifi_setup_screen, "Password", 1);
+  wifi_pass_ta = wizard_field(wifi_setup_screen, 1, 420, "Enter password", true);
 
-  lv_obj_t *pw_cap = lv_label_create(wifi_setup_screen);
-  lv_label_set_text(pw_cap, "Password");
-  lv_obj_set_style_text_font(pw_cap, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(pw_cap, lv_color_hex(0xAAAAAA), 0);
-  lv_obj_align(pw_cap, LV_ALIGN_TOP_LEFT, 20, 136);
-
-  wifi_pass_ta = lv_textarea_create(wifi_setup_screen);
-  lv_textarea_set_password_mode(wifi_pass_ta, true);
-  lv_textarea_set_one_line(wifi_pass_ta, true);
-  lv_textarea_set_placeholder_text(wifi_pass_ta, "Enter password");
-  lv_obj_set_width(wifi_pass_ta, 420);
-  lv_obj_align(wifi_pass_ta, LV_ALIGN_TOP_LEFT, 20, 158);
-  lv_obj_set_style_text_font(wifi_pass_ta, &lv_font_montserrat_14, 0);
-  lv_obj_add_event_cb(wifi_pass_ta, keyboard_event_cb, LV_EVENT_FOCUSED, wifi_pass_ta);
-  lv_obj_add_event_cb(wifi_pass_ta, keyboard_event_cb, LV_EVENT_DEFOCUSED, wifi_pass_ta);
-
-  lv_obj_t *connect_btn = lv_button_create(wifi_setup_screen);
-  lv_obj_set_size(connect_btn, 160, 46);
-  lv_obj_align(connect_btn, LV_ALIGN_TOP_LEFT, 20, 216);
-  lv_obj_set_style_bg_color(connect_btn, lv_color_hex(0x00A86B), 0);
-  lv_obj_set_style_radius(connect_btn, 10, 0);
-  lv_obj_add_event_cb(connect_btn, wifi_connect_cb, LV_EVENT_PRESSED, NULL);
-  lv_obj_t *connect_label = lv_label_create(connect_btn);
-  lv_label_set_text(connect_label, "Connect");
-  lv_obj_center(connect_label);
-  lv_obj_set_style_text_font(connect_label, &lv_font_montserrat_14, 0);
-
+  wizard_button(wifi_setup_screen, "Connect", 20, WIZARD_BTN_Y, 160,
+                lv_color_hex(0x00A86B), wifi_connect_cb, NULL);
   // Only offered when there is something to log out of.
   if (!ssid.isEmpty()) {
-    lv_obj_t *wifi_logout_btn = lv_button_create(wifi_setup_screen);
-    lv_obj_set_size(wifi_logout_btn, 160, 46);
-    lv_obj_align(wifi_logout_btn, LV_ALIGN_TOP_LEFT, 190, 216);
-    lv_obj_set_style_bg_color(wifi_logout_btn, lv_color_hex(0x333333), 0);
-    lv_obj_set_style_radius(wifi_logout_btn, 10, 0);
-    lv_obj_add_event_cb(wifi_logout_btn, wifi_logout_cb, LV_EVENT_PRESSED, NULL);
-    lv_obj_t *wifi_logout_label = lv_label_create(wifi_logout_btn);
-    lv_label_set_text(wifi_logout_label, "WiFi Logout");
-    lv_obj_center(wifi_logout_label);
-    lv_obj_set_style_text_font(wifi_logout_label, &lv_font_montserrat_14, 0);
+    wizard_button(wifi_setup_screen, "WiFi Logout", 190, WIZARD_BTN_Y, 160,
+                  lv_color_hex(0x333333), wifi_logout_cb, NULL);
   }
 
-  // One reused status line. The old code created a NEW "Connection failed" label
-  // on every attempt, so repeated failures stacked on top of each other - and it
-  // was placed at y=200, directly over the Connect button.
-  wifi_status_lbl = lv_label_create(wifi_setup_screen);
-  lv_label_set_text(wifi_status_lbl, "");
-  lv_obj_set_style_text_font(wifi_status_lbl, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(wifi_status_lbl, lv_color_hex(0x8BC34A), 0);
-  lv_obj_set_width(wifi_status_lbl, 420);
-  lv_label_set_long_mode(wifi_status_lbl, LV_LABEL_LONG_WRAP);
-  lv_obj_align(wifi_status_lbl, LV_ALIGN_TOP_LEFT, 20, 274);
-
-  // ---- right half: QR + instructions ---------------------------------------
-  // The QR used to be aligned BOTTOM_MID with a +90 offset, which pushed it 90px
-  // BELOW the bottom edge of the screen with only a sliver visible.
-  lv_obj_t *qr_img = lv_img_create(wifi_setup_screen);
-  lv_img_set_src(qr_img, &qr);
-  lv_img_set_zoom(qr_img, 120); // 298px source -> ~140px
-  lv_obj_align(qr_img, LV_ALIGN_TOP_RIGHT, -115, 70);
-  // No img_recolor: the style only applies with img_recolor_opa set, and COVER
-  // would flatten the whole code to one colour and make it unscannable.
-
-  lv_obj_t *instruction_label = lv_label_create(wifi_setup_screen);
-  lv_label_set_text(instruction_label,
-                    "Register on crontech.uk to use CronTab.\nScan the QR code for quick setup.");
-  lv_obj_set_style_text_color(instruction_label, lv_color_hex(0xFFFFFF), 0);
-  lv_obj_set_style_text_font(instruction_label, &lv_font_montserrat_14, 0);
-  lv_label_set_long_mode(instruction_label, LV_LABEL_LONG_WRAP);
-  lv_obj_set_width(instruction_label, 300);
-  lv_obj_set_style_text_align(instruction_label, LV_TEXT_ALIGN_CENTER, 0);
-  lv_obj_align_to(instruction_label, qr_img, LV_ALIGN_OUT_BOTTOM_MID, 0, 14);
-
-  if (!keyboard) {
-    keyboard = lv_keyboard_create(lv_scr_act());
-    lv_obj_add_flag(keyboard, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_set_style_text_font(keyboard, &lv_font_montserrat_14, 0);
-  }
+  wifi_status_lbl = wizard_status_label(wifi_setup_screen);
+  wizard_qr(wifi_setup_screen,
+            "Register on crontech.uk to use CronTab.\nScan for quick setup.");
 
   wifi_scan_start(); // the list fills in when the async scan completes
 }
 
 
 void show_api_code_screen() {
+  if (api_code_screen) return; // already up
   if (debug == 1) Serial.println("[APP] Showing API code screen...");
-  api_code_screen = lv_obj_create(lv_scr_act());
-  lv_obj_set_size(api_code_screen, 800, 480);
-  lv_obj_set_style_bg_color(api_code_screen, lv_color_hex(0x000000), 0);
-  lv_obj_t *api_ta = lv_textarea_create(api_code_screen);
-  lv_textarea_set_one_line(api_ta, true);
-  lv_textarea_set_placeholder_text(api_ta, "Enter API code");
-  lv_obj_set_width(api_ta, 300);
-  lv_obj_align(api_ta, LV_ALIGN_TOP_MID, 0, 100);
-  lv_obj_set_style_text_font(api_ta, &lv_font_montserrat_14, 0);
-  lv_obj_add_event_cb(api_ta, keyboard_event_cb, LV_EVENT_FOCUSED, api_ta);
-  lv_obj_add_event_cb(api_ta, keyboard_event_cb, LV_EVENT_DEFOCUSED, api_ta);
-  lv_obj_t *submit_btn = lv_button_create(api_code_screen);
-  lv_obj_align(submit_btn, LV_ALIGN_TOP_MID, 0, 170);
-  lv_obj_set_size(submit_btn, 120, 40);
-  lv_obj_add_event_cb(submit_btn, api_code_submit_cb, LV_EVENT_PRESSED, api_ta);
-  lv_obj_t *submit_label = lv_label_create(submit_btn);
-  lv_label_set_text(submit_label, "Submit");
-  lv_obj_center(submit_label);
-  lv_obj_set_style_text_font(submit_label, &lv_font_montserrat_14, 0);
-  if (!keyboard) {
-    keyboard = lv_keyboard_create(lv_scr_act());
-    lv_obj_add_flag(keyboard, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_set_style_text_font(keyboard, &lv_font_montserrat_14, 0);
-  }
- // UPDATED: Add QR code image under the UI, positioned at y-offset -10
-  lv_obj_t *qr_img = lv_img_create(api_code_screen);  // Create on the screen container
-  lv_img_set_src(qr_img, &qr);
-  lv_img_set_zoom(qr_img, 150);  // Scale for visibility (adjust as needed)
-  lv_obj_align(qr_img, LV_ALIGN_BOTTOM_MID, 0, 50);  // Position under buttons/text areas
-  lv_obj_set_style_img_recolor(qr_img, lv_color_hex(0xFFFFFF), 0);  // Ensure white for dark background
+  api_code_screen = wizard_screen("API Code", 2,
+      "Enter the API code from your crontech.uk account, or scan the code on the right.");
 
-  // NEW: Add instructional text label above the QR for context and guidance
-  lv_obj_t *instruction_label = lv_label_create(api_code_screen);
-  lv_label_set_text(instruction_label, "Scan QR for quick API code.");
-  lv_obj_set_style_text_color(instruction_label, lv_color_hex(0xFFFFFF), 0);
-  lv_obj_set_style_text_font(instruction_label, &lv_font_montserrat_14, 0);
-  lv_label_set_long_mode(instruction_label, LV_LABEL_LONG_WRAP);  // Enable text wrapping for longer sentences
-  lv_obj_set_width(instruction_label, 600);  // Set a reasonable width for wrapping on 800px screen
-  lv_obj_align_to(instruction_label, qr_img, LV_ALIGN_OUT_TOP_MID, 0, -100);  // Position 20px above QR
+  wizard_caption(api_code_screen, "API code", 0);
+  api_code_ta = wizard_field(api_code_screen, 0, 300, "Enter API code", false);
+  if (!apiCode.isEmpty()) lv_textarea_set_text(api_code_ta, apiCode.c_str());
+  api_code_status = wizard_status_label(api_code_screen);
 
-  if (debug == 1) Serial.println("[APP] API code screen shown with QR code and instructional text");
+  wizard_button(api_code_screen, "Continue", 20, WIZARD_BTN_Y, 160,
+                lv_color_hex(0x00A86B), api_code_submit_cb, NULL);
+  wizard_button(api_code_screen, "Back", 190, WIZARD_BTN_Y, 160,
+                lv_color_hex(0x555555), wizard_back_cb, (void *)(intptr_t)2);
+
+  wizard_qr(api_code_screen, "Scan the QR for a quick API code");
 }
 void show_location_screen() {
+  if (location_screen) return; // already up
   if (debug == 1) Serial.println("[APP] Showing location screen...");
-  location_screen = lv_obj_create(lv_scr_act());
-  lv_obj_set_size(location_screen, 800, 480);
-  lv_obj_set_style_bg_color(location_screen, lv_color_hex(0x000000), 0);
-  lv_obj_t *location_ta = lv_textarea_create(location_screen);
-  lv_textarea_set_one_line(location_ta, true);
-  lv_textarea_set_placeholder_text(location_ta, "Enter location (Country,City)");
-  lv_obj_set_width(location_ta, 300);
-  lv_obj_align(location_ta, LV_ALIGN_TOP_MID, 0, 100);
-  lv_obj_set_style_text_font(location_ta, &lv_font_montserrat_14, 0);
-  lv_obj_add_event_cb(location_ta, keyboard_event_cb, LV_EVENT_FOCUSED, location_ta);
-  lv_obj_add_event_cb(location_ta, keyboard_event_cb, LV_EVENT_DEFOCUSED, location_ta);
-  lv_obj_t *submit_btn = lv_button_create(location_screen);
-  lv_obj_align(submit_btn, LV_ALIGN_TOP_MID, 0, 170);
-  lv_obj_set_size(submit_btn, 120, 40);
-  lv_obj_add_event_cb(submit_btn, location_submit_cb, LV_EVENT_PRESSED, location_ta);
-  lv_obj_t *submit_label = lv_label_create(submit_btn);
-  lv_label_set_text(submit_label, "Submit");
-  lv_obj_center(submit_label);
-  lv_obj_set_style_text_font(submit_label, &lv_font_montserrat_14, 0);
-  if (!keyboard) {
-    keyboard = lv_keyboard_create(lv_scr_act());
-    lv_obj_add_flag(keyboard, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_set_style_text_font(keyboard, &lv_font_montserrat_14, 0);
-  }
+  location_screen = wizard_screen("Weather Location", 3,
+      "Which city should the weather come from? It is looked up online, so check the spelling.");
+
+  wizard_caption(location_screen, "City", 0);
+  location_ta = wizard_field(location_screen, 0, 420, "e.g. London, UK", false);
+  if (!location.isEmpty()) lv_textarea_set_text(location_ta, location.c_str());
+  location_status = wizard_status_label(location_screen);
+
+  wizard_button(location_screen, "Save", 20, WIZARD_BTN_Y, 160,
+                lv_color_hex(0x00A86B), location_submit_cb, NULL);
+  wizard_button(location_screen, "Back", 190, WIZARD_BTN_Y, 160,
+                lv_color_hex(0x555555), wizard_back_cb, (void *)(intptr_t)3);
+
+  // Help panel rather than a QR on the last step.
+  lv_obj_t *help = lv_label_create(location_screen);
+  lv_label_set_text(help,
+                    "Write it the way it is normally written:\n\n"
+                    "London\n\n"
+                    "Manchester, UK\n\n"
+                    "Paris, FR");
+  lv_obj_set_style_text_font(help, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(help, lv_color_hex(0xFFFFFF), 0);
+  lv_label_set_long_mode(help, LV_LABEL_LONG_WRAP);
+  lv_obj_set_width(help, 300);
+  lv_obj_align(help, LV_ALIGN_TOP_RIGHT, -40, 60);
 }
 void close_settings_cb(lv_event_t * e) {
   close_confirm_popup(); // never leave a warning dialog orphaned
