@@ -4527,11 +4527,17 @@ void show_day_events_popup(lv_calendar_date_t *date, const int *indices, int cou
   lv_obj_set_style_border_color(day_events_popup, lv_color_hex(0xFFFFFF), 0);
   lv_obj_set_style_border_width(day_events_popup, 2, 0);
   lv_obj_set_style_radius(day_events_popup, UI_RADIUS, 0);
-  lv_obj_set_style_pad_all(day_events_popup, 10, 0);
-  lv_obj_set_style_pad_row(day_events_popup, 8, 0);
-  lv_obj_set_scroll_dir(day_events_popup, LV_DIR_VER);
-  lv_obj_set_scrollbar_mode(day_events_popup, LV_SCROLLBAR_MODE_AUTO);
+  // No padding on the window itself: the title bar runs edge to edge, and the
+  // list and the footer each carry their own.
+  lv_obj_set_style_pad_all(day_events_popup, 0, 0);
+  // The WINDOW no longer scrolls. It used to be one big scrolling column, which
+  // meant the date and BOTH buttons scrolled off with the event list - with a
+  // handful of events the footer was simply unreachable.
+  lv_obj_clear_flag(day_events_popup, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scrollbar_mode(day_events_popup, LV_SCROLLBAR_MODE_OFF);
   lv_obj_set_flex_flow(day_events_popup, LV_FLEX_FLOW_COLUMN);
+  lv_obj_set_flex_align(day_events_popup, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START,
+                        LV_FLEX_ALIGN_START);
 
   struct tm header_tm = {0};
   header_tm.tm_year = date->year - 1900;
@@ -4539,19 +4545,55 @@ void show_day_events_popup(lv_calendar_date_t *date, const int *indices, int cou
   header_tm.tm_mday = date->day;
   char header_buf[64];
   strftime(header_buf, sizeof(header_buf), "%A %d %B %Y", &header_tm);
-  lv_obj_t *title = lv_label_create(day_events_popup);
+  // ---- fixed title bar: date left, event count right ------------------------
+  // Same treatment as the events and weather widgets, so the heading stays put
+  // while the list scrolls beneath it.
+  lv_obj_t *day_title_bar = lv_obj_create(day_events_popup);
+  lv_obj_set_width(day_title_bar, LV_PCT(100));
+  lv_obj_set_height(day_title_bar, 26);
+  lv_obj_set_style_bg_color(day_title_bar, scheme_accent_deep(), 0);
+  lv_obj_set_style_bg_opa(day_title_bar, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_width(day_title_bar, 0, 0);
+  lv_obj_set_style_radius(day_title_bar, UI_RADIUS, 0);
+  lv_obj_set_style_pad_left(day_title_bar, 12, 0);
+  lv_obj_set_style_pad_right(day_title_bar, 12, 0);
+  lv_obj_set_style_pad_top(day_title_bar, 0, 0);
+  lv_obj_set_style_pad_bottom(day_title_bar, 0, 0);
+  lv_obj_set_flex_flow(day_title_bar, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(day_title_bar, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER,
+                        LV_FLEX_ALIGN_CENTER);
+  lv_obj_clear_flag(day_title_bar, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scrollbar_mode(day_title_bar, LV_SCROLLBAR_MODE_OFF);
+  lv_obj_t *title = lv_label_create(day_title_bar);
   lv_label_set_text(title, header_buf);
-  lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
-  lv_obj_set_style_text_color(title, lv_color_hex(0xFFFFFF), 0);
-  lv_obj_t *subtitle = lv_label_create(day_events_popup);
+  lv_obj_set_style_text_font(title, &lv_font_montserrat_14_bold, 0);
+  lv_obj_set_style_text_color(title, lv_color_white(), 0);
+  lv_obj_t *subtitle = lv_label_create(day_title_bar);
   lv_label_set_text(subtitle, (String(count) + (count == 1 ? " event" : " events")).c_str());
   lv_obj_set_style_text_font(subtitle, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(subtitle, lv_color_hex(0x9FB3C8), 0);
+  lv_obj_set_style_text_color(subtitle, lv_color_white(), 0);
+
+  // ---- scrolling list: grows to fill the space between bar and footer -------
+  lv_obj_t *day_list = lv_obj_create(day_events_popup);
+  lv_obj_set_width(day_list, LV_PCT(100));
+  lv_obj_set_height(day_list, 0);
+  lv_obj_set_flex_grow(day_list, 1);
+  lv_obj_set_style_bg_opa(day_list, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(day_list, 0, 0);
+  lv_obj_set_style_radius(day_list, 0, 0);
+  lv_obj_set_style_pad_all(day_list, 10, 0);
+  lv_obj_set_style_pad_row(day_list, 8, 0);
+  lv_obj_set_flex_flow(day_list, LV_FLEX_FLOW_COLUMN);
+  lv_obj_set_scroll_dir(day_list, LV_DIR_VER);
+  lv_obj_set_scrollbar_mode(day_list, LV_SCROLLBAR_MODE_AUTO);
+  // NOTE: the list is deliberately left SCROLLABLE - it is the one thing here that
+  // is meant to scroll. Clearing the flag (as the chip bodies above do) would
+  // silently make it a fixed-height box that just clips.
 
   for (int k = 0; k < count; k++) {
     int i = indices[k];
     if (i < 0 || i >= numEvents) continue;
-    lv_obj_t *chip = lv_obj_create(day_events_popup);
+    lv_obj_t *chip = lv_obj_create(day_list);
     lv_obj_set_width(chip, LV_PCT(100));
     lv_obj_set_height(chip, LV_SIZE_CONTENT);
     lv_obj_set_style_bg_color(chip, scheme_accent_dark(), 0);
@@ -4565,7 +4607,9 @@ void show_day_events_popup(lv_calendar_date_t *date, const int *indices, int cou
     lv_obj_clear_flag(chip, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scrollbar_mode(chip, LV_SCROLLBAR_MODE_OFF);
     lv_obj_set_user_data(chip, (void*)(intptr_t)i);
-    lv_obj_add_event_cb(chip, day_event_item_cb, LV_EVENT_PRESSED, NULL);
+    // CLICKED, not PRESSED: PRESSED fires the moment a finger lands, which
+    // would open the event before the list ever got a chance to scroll.
+    lv_obj_add_event_cb(chip, day_event_item_cb, LV_EVENT_CLICKED, NULL);
 
     lv_obj_t *summary = lv_label_create(chip);
     lv_label_set_text(summary, events[i].summary.isEmpty() ? "(no title)" : events[i].summary.c_str());
@@ -4583,12 +4627,13 @@ void show_day_events_popup(lv_calendar_date_t *date, const int *indices, int cou
     lv_obj_set_style_text_color(when_lbl, lv_color_hex(0xFFD166), 0);
   }
 
+  // Fixed footer: always visible, whatever the list is doing.
   lv_obj_t *btn_row = lv_obj_create(day_events_popup);
   lv_obj_set_width(btn_row, LV_PCT(100));
   lv_obj_set_height(btn_row, LV_SIZE_CONTENT);
   lv_obj_set_style_bg_opa(btn_row, LV_OPA_TRANSP, 0);
   lv_obj_set_style_border_width(btn_row, 0, 0);
-  lv_obj_set_style_pad_all(btn_row, 0, 0);
+  lv_obj_set_style_pad_all(btn_row, 10, 0);
   lv_obj_set_style_pad_column(btn_row, 10, 0);
   lv_obj_set_flex_flow(btn_row, LV_FLEX_FLOW_ROW);
   lv_obj_set_flex_align(btn_row, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
