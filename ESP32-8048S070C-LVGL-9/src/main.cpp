@@ -260,7 +260,6 @@ static lv_color_t scheme_card_text()     { return (g_ui_darkness > 50) ? lv_colo
 // darker end of that gradient.
 static lv_color_t scheme_text_on_light()  { return lv_color_hex(0x101820); }
 static int temp_adjust = 0;// Global temperature adjustment
-static lv_obj_t *build_version_label = nullptr;// Global variable for build version label
 static unsigned long lastHolidayUpdate = 0;
 const unsigned long holidayUpdateInterval = 2592000000UL; // 30 days in milliseconds
 
@@ -1018,7 +1017,11 @@ lv_obj_center(pressure_val);
   // Forecast container (UPDATED: 7-day daily forecast with max/min temperatures)
   lv_obj_t *forecast_cont = lv_obj_create(weatherContainer);
   lv_obj_set_size(forecast_cont, 350, 80);
-  lv_obj_align(forecast_cont, LV_ALIGN_CENTER, 0, 90);
+  // Nudged left so the floating colour-scheme button (44px, bottom-right) no
+  // longer overlaps the last day: the strip's right edge was landing at ~756
+  // while the button starts at 744. -20 clears it and still leaves the first
+  // day ~15px clear of the container's left edge.
+  lv_obj_align(forecast_cont, LV_ALIGN_CENTER, -20, 90);
   lv_obj_set_flex_flow(forecast_cont, LV_FLEX_FLOW_ROW);
   lv_obj_set_flex_align(forecast_cont, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
   lv_obj_set_style_bg_opa(forecast_cont, LV_OPA_TRANSP, 0);
@@ -2866,17 +2869,10 @@ void updateMonthLabel(lv_obj_t *calendar) {
     if (month_label) {
       lv_label_set_text(month_label, "Unknown Month");
     }
-    if (build_version_label) {
-      lv_label_set_text(build_version_label, ("V." + String(build_version)).c_str());
-    }
     return;
   }
   if (!month_label) {
     if (debug == 1) Serial.println("[APP] Error: month_label is null in updateMonthLabel");
-    return;
-  }
-  if (!build_version_label) {
-    if (debug == 1) Serial.println("[APP] Error: build_version_label is null in updateMonthLabel");
     return;
   }
   const lv_calendar_date_t *showed = lv_calendar_get_showed_date(calendar);
@@ -2892,9 +2888,7 @@ void updateMonthLabel(lv_obj_t *calendar) {
   char buf[32];
   strftime(buf, sizeof(buf), "%B %Y", &tm);
   lv_label_set_text(month_label, buf);
-  lv_label_set_text(build_version_label, ("V." + String(build_version)).c_str());
   if (debug == 1) Serial.println("[APP] Updated month label to: " + String(buf));
-  if (debug == 1) Serial.println("[APP] Updated build version label to: Build: " + String(build_version));
   lv_obj_invalidate(lv_scr_act());
 }
 // New function to update holiday label
@@ -3562,7 +3556,6 @@ void apply_ui_darkness(int value) {
   if (month_label) lv_obj_set_style_text_color(month_label, text_color, 0);
   if (date_time_label) lv_obj_set_style_text_color(date_time_label, text_color, 0);
   if (holiday_label) lv_obj_set_style_text_color(holiday_label, text_color, 0);
-  if (build_version_label) lv_obj_set_style_text_color(build_version_label, text_color, 0);
   apply_theme_accent(); // keep the theme's dark flag in step
   apply_calendar_theme(calendar);
   // Redraw weather and events to apply changes
@@ -3920,13 +3913,8 @@ void setup_calendar() {
   const char * day_names[7] = {"Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"};
   lv_calendar_set_day_names(calendar, day_names);
   rearrange_calendar_parts(calendar);
-  if (debug == 1) Serial.println("[APP] Creating build version label...");
-  build_version_label = lv_label_create(lv_scr_act());
-  //Build version
-  lv_label_set_text(build_version_label, ("V." + String(build_version)).c_str());
-  lv_obj_set_style_text_font(build_version_label, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(build_version_label, text_color, 0);
-  lv_obj_align(build_version_label, LV_ALIGN_BOTTOM_LEFT, 10, -10); // Moved to bottom left
+  // The firmware version is deliberately not shown here any more - the settings
+  // popup carries the single copy, so the front page is left clean.
   if (debug == 1) Serial.println("[APP] Creating month label...");
   month_label = lv_label_create(lv_scr_act());
   lv_obj_set_style_text_font(month_label, &lv_font_montserrat_24, 0);
