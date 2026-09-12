@@ -26,7 +26,19 @@ Arduino_ESP32RGBPanel rgbpanel(
     0 /* vsync_polarity */, 22 /* vsync_front_porch */, 13 /* vsync_pulse_width */, 10 /* vsync_back_porch */,
     true /* pclk_active_neg */
 );
-Arduino_RGB_Display gfx(800, 480, &rgbpanel, 0, false); // Disable auto_alloc to manage buffer manually
+// The 5th argument is auto_flush, NOT an allocation switch - the RGB panel driver
+// always allocates the framebuffer itself (see Arduino_ESP32RGBPanel::getFrameBuffer).
+//
+// It must be TRUE. The framebuffer lives in PSRAM, and the panel's DMA scans
+// physical PSRAM directly while the CPU writes through its cache. With auto_flush
+// left false, draw16bitRGBBitmap() skips its Cache_WriteBack_Addr() call and
+// nothing else ever flushed either (Arduino_RGB_Display::flush() exists for
+// exactly that case, and this project never called it), so freshly drawn pixels
+// sat in the cache and the panel kept displaying whatever stale bytes were still
+// in PSRAM. That is what produced the frozen pixels and torn lines after a
+// redraw: the cache lines only reached PSRAM later, when unrelated writes evicted
+// them. Every upstream example passes true here.
+Arduino_RGB_Display gfx(800, 480, &rgbpanel, 0, true);
 uint32_t screenWidth;
 uint32_t screenHeight;
 uint32_t bufSize;
@@ -55,7 +67,10 @@ void my_touchpad_read(lv_indev_t *indev, lv_indev_data_t *data)
         data->state = LV_INDEV_STATE_PRESSED;
         data->point.x = ts.points[i].x;
         data->point.y = ts.points[i].y;
-        Serial.printf("Touch: x=%d, y=%d\n", data->point.x, data->point.y);
+        // No Serial output here. This runs on every indev poll while a finger is
+        // down (tens of times a second), and the printf was not gated by the debug
+        // flag, so it added serial latency to every touch and made the UI feel
+        // like it had stopped responding.
       }
     }
   }
