@@ -173,6 +173,7 @@ static String wifi_pending_password = "";
 static lv_obj_t *api_code_screen = nullptr;
 static lv_obj_t *location_screen = nullptr;
 static lv_obj_t *settings_popup = nullptr;
+static lv_obj_t *settings_ram_label = nullptr; // live RAM readout inside the settings window
 static lv_obj_t *new_event_popup = nullptr;
 static lv_obj_t *new_event_error_label = nullptr; // single reusable inline error
 static lv_obj_t *keyboard = nullptr;
@@ -2209,6 +2210,41 @@ void close_settings_cb(lv_event_t * e) {
   }
 }
 void factory_reset_cb(lv_event_t *e);
+// The settings window is destroyed outright rather than hidden, and it is torn
+// down from five different places. Hooking LV_EVENT_DELETE once is safer than
+// remembering to clear this pointer at every one of them (that is exactly the
+// mistake that left ota_ok_btn dangling).
+static void settings_popup_deleted_cb(lv_event_t *e) {
+  (void)e;
+  settings_ram_label = nullptr;
+}
+// Internal RAM is the scarce resource on this board - 320KB shared with the WiFi
+// and TLS stacks - while the LVGL draw buffers and the panel framebuffer live in
+// PSRAM, so both are worth seeing. heap_caps is already used for the boot logging.
+static void update_settings_ram_label() {
+  if (!settings_ram_label) return;
+  // MALLOC_CAP_8BIT alone also matches the PSRAM regions, which would report the
+  // full 8MB as "RAM" - MALLOC_CAP_INTERNAL is what restricts this to the 320KB
+  // of on-chip data RAM that is actually the scarce resource.
+  size_t ram_total = heap_caps_get_total_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  size_t ram_free  = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  size_t ps_total  = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
+  size_t ps_free   = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+  size_t ram_used  = ram_total > ram_free ? ram_total - ram_free : 0;
+  size_t ps_used   = ps_total > ps_free  ? ps_total  - ps_free  : 0;
+  unsigned ram_pct = ram_total ? (unsigned)((ram_used * 100) / ram_total) : 0;
+  char buf[192];
+  if (ps_total) {
+    snprintf(buf, sizeof(buf),
+             "RAM:   %u / %u KB used (%u%%)\nPSRAM: %u / %u KB used",
+             (unsigned)(ram_used / 1024), (unsigned)(ram_total / 1024), ram_pct,
+             (unsigned)(ps_used / 1024), (unsigned)(ps_total / 1024));
+  } else {
+    snprintf(buf, sizeof(buf), "RAM:   %u / %u KB used (%u%%)",
+             (unsigned)(ram_used / 1024), (unsigned)(ram_total / 1024), ram_pct);
+  }
+  lv_label_set_text(settings_ram_label, buf);
+}
 void show_settings_popup() {
     // Memory guard kept from the later crash fix: this window costs ~20KB of
     // the LVGL heap, and if that is unavailable lv_obj_create() returns NULL
@@ -2222,6 +2258,7 @@ void show_settings_popup() {
     if (debug == 1) Serial.println("[APP] Showing settings popup...");
     settings_popup = lv_obj_create(lv_scr_act());
     if (!settings_popup) return;
+    lv_obj_add_event_cb(settings_popup, settings_popup_deleted_cb, LV_EVENT_DELETE, NULL);
     lv_obj_set_size(settings_popup, SETTINGS_POPUP_W, SETTINGS_POPUP_H);
     lv_obj_align(settings_popup, LV_ALIGN_CENTER, 0, 0);
     lv_obj_set_style_bg_color(settings_popup, lv_color_hex(0x000000), 0);
@@ -2386,6 +2423,11 @@ void show_settings_popup() {
     lv_label_set_text(version_settings_label, ("Firmware: " + currentFirmwareVersion).c_str());
     lv_obj_set_style_text_font(version_settings_label, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(version_settings_label, lv_color_hex(0xDDDDDD), 0);
+
+    settings_ram_label = lv_label_create(right_col);
+    lv_obj_set_style_text_font(settings_ram_label, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(settings_ram_label, lv_color_hex(0xAAAAAA), 0);
+    update_settings_ram_label(); // fill it immediately, before the first tick
 
     // ---- footer buttons ---------------------------------------------------
     lv_obj_t *settings_footer = make_panel(settings_popup);
@@ -2862,6 +2904,10 @@ void updateDateTimeLabel() {
 // New constants and variables for separate 1-second date-time refresh
 const unsigned long timeLabelUpdateInterval = 1000; // Update every 1 second
 static unsigned long lastTimeLabelUpdate = 0;
+// Slow enough to be free, fast enough that opening a dialog or fetching an image
+// visibly moves the numbers while the settings window is up.
+static unsigned long lastRamLabelUpdate = 0;
+const unsigned long ramLabelUpdateInterval = 2000;
 // Updated updateMonthLabel function
 void updateMonthLabel(lv_obj_t *calendar) {
   if (!calendar) {
@@ -4579,6 +4625,11 @@ void loop() {
   if (currentTime - lastTimeLabelUpdate >= timeLabelUpdateInterval && !is_ota_updating) {
     updateDateTimeLabel();
     lastTimeLabelUpdate = currentTime;
+  }
+  // Only does anything while the settings window is open.
+  if (settings_ram_label && currentTime - lastRamLabelUpdate >= ramLabelUpdateInterval) {
+    update_settings_ram_label();
+    lastRamLabelUpdate = currentTime;
   }
   if (currentTime - lastDateTimeUpdate >= dateTimeUpdateInterval && !is_ota_updating) {
     time_t now;
