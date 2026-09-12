@@ -1108,6 +1108,7 @@ void updateEventDisplay(lv_obj_t *calendar) {
     eventContainer = lv_obj_create(lv_scr_act());
     lv_obj_set_size(eventContainer, 400, 175);
     lv_obj_align(eventContainer, LV_ALIGN_TOP_RIGHT, -10, 50);
+    lv_obj_set_style_bg_color(eventContainer, lv_color_hex(0x000000), 0);
     lv_obj_set_style_border_width(eventContainer, 0, 0);
     lv_obj_set_scrollbar_mode(eventContainer, LV_SCROLLBAR_MODE_OFF);
     if (debug == 1) Serial.println("[APP] Created eventContainer");
@@ -1116,17 +1117,11 @@ void updateEventDisplay(lv_obj_t *calendar) {
     lv_obj_invalidate(eventContainer);
   }
 
-  // Panel colours are re-applied on every call rather than only at creation, so a
-  // theme change actually reaches the preview. This used to be a fixed black,
-  // which is why the labels sitting directly on it had to be hard-coded too - and
-  // why they could not simply be themed: dark text on a black panel is invisible.
-  // It now matches the weather panel directly below it.
-  uint8_t ev_gray = 255 - (g_ui_darkness * 255 / 100);
-  lv_color_t ev_panel_bg = lv_color_make(ev_gray, ev_gray, ev_gray);
-  lv_color_t ev_panel_text = (g_ui_darkness > 50) ? lv_color_hex(0xFFFFFF)
-                                                  : lv_color_hex(0x2d3436);
-  lv_obj_set_style_bg_color(eventContainer, ev_panel_bg, 0);
-  lv_obj_set_style_bg_opa(eventContainer, LV_OPA_COVER, 0);
+  // The panel keeps its original fixed black background. Only the text colours in
+  // here follow the theme, as asked. Labels sitting directly on that black use the
+  // theme ACCENT rather than the light/dark body colour: the accent is a mid-tone
+  // in every scheme, so it stays legible on black in a light theme too, where a
+  // dark body colour would disappear.
 
   // Set highlighted dates on calendar (unchanged)
   if (debug == 1) Serial.println("[APP] Setting highlighted dates...");
@@ -1172,12 +1167,9 @@ void updateEventDisplay(lv_obj_t *calendar) {
       lv_obj_set_size(event_cont, 381, 30); // 50% height
       lv_obj_align(event_cont, LV_ALIGN_TOP_MID, 0, y_offset);
       // Apply gray semi-transparent background
-      // Same scheme-driven tint as the other cards. The fixed grey fill with
-      // faded-yellow text on it was the last hard-coded pair in the preview.
-      lv_obj_set_style_bg_color(event_cont, scheme_card_a(), 0);
-      lv_obj_set_style_bg_grad_color(event_cont, scheme_card_b(), 0);
-      lv_obj_set_style_bg_grad_dir(event_cont, LV_GRAD_DIR_HOR, 0);
-      lv_obj_set_style_bg_opa(event_cont, LV_OPA_COVER, 0);
+      // Original fixed grey fill restored. Only the title colour is themed.
+      lv_obj_set_style_bg_color(event_cont, lv_color_hex(0x808080), 0);
+      lv_obj_set_style_bg_opa(event_cont, LV_OPA_70, 0);
       lv_obj_set_style_radius(event_cont, 10, 0);
       lv_obj_set_style_pad_all(event_cont, 5, 0);
       lv_obj_set_user_data(event_cont, (void*)(intptr_t)i);
@@ -1306,7 +1298,7 @@ void updateEventDisplay(lv_obj_t *calendar) {
     lv_obj_t *upcoming_label = lv_label_create(eventContainer);
     lv_label_set_text(upcoming_label, "Due in more than 3 days");
     lv_obj_set_style_text_font(upcoming_label, &lv_font_montserrat_14_bold, 0);
-    lv_obj_set_style_text_color(upcoming_label, ev_panel_text, 0);
+    lv_obj_set_style_text_color(upcoming_label, scheme_accent(), 0);
     lv_obj_align(upcoming_label, LV_ALIGN_TOP_LEFT, 10, y_offset);
     y_offset += 25;
 
@@ -1316,8 +1308,8 @@ void updateEventDisplay(lv_obj_t *calendar) {
         lv_obj_t *event_cont = lv_obj_create(eventContainer);
         lv_obj_set_size(event_cont, 361, 65);
         lv_obj_align(event_cont, LV_ALIGN_TOP_MID, 0, y_offset);
-        lv_obj_set_style_bg_color(event_cont, scheme_card_a(), 0);
-        lv_obj_set_style_bg_grad_color(event_cont, scheme_card_b(), 0);
+        lv_obj_set_style_bg_color(event_cont, lv_color_hex(0x74b9ff), 0); // Light blue for upcoming
+        lv_obj_set_style_bg_grad_color(event_cont, lv_color_hex(0x0984e3), 0);
         lv_obj_set_style_bg_grad_dir(event_cont, LV_GRAD_DIR_HOR, 0);
         lv_obj_set_style_radius(event_cont, 10, 0);
         lv_obj_set_style_pad_all(event_cont, 5, 0);
@@ -1418,7 +1410,7 @@ lv_obj_update_layout(eventContainer);
   lv_obj_t *noEventsLabel = lv_label_create(eventContainer);
   lv_label_set_text(noEventsLabel, "No events");
   lv_obj_set_style_text_font(noEventsLabel, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(noEventsLabel, ev_panel_text, 0);
+  lv_obj_set_style_text_color(noEventsLabel, scheme_accent(), 0);
   lv_obj_align(noEventsLabel, LV_ALIGN_TOP_LEFT, 10, y_offset + 20);  // Minor adjustment: +20 to avoid overlap with time if y_offset=-10
 
   // Create/start blink and time-update timer (pass colon as user data)
