@@ -27,7 +27,6 @@ $SCHEMES = [
     'Indigo'    => '#3F51B5',
 ];
 
-// Handle logout the same way firmware.php does
 if (isset($_GET['logout'])) {
     $stmt = $db->prepare("DELETE FROM persistent_sessions WHERE user_id = ?");
     $stmt->execute([$_SESSION['user_id']]);
@@ -45,24 +44,56 @@ if (isset($_GET['logout'])) {
     exit;
 }
 
-$themePath = 'update/theme.json';
-$theme     = ['revision' => 1, 'scheme' => 'Blue', 'darkness' => 0];
-if (file_exists($themePath)) {
-    $loaded = json_decode((string)file_get_contents($themePath), true);
-    if (is_array($loaded)) {
-        $theme = array_merge($theme, $loaded);
+// Atomic write: temp file then rename, so a device polling mid-write can never
+// read a half-written file. Same pattern firmware.php uses for version.json.
+function publish_json(string $path, array $data): bool {
+    $tempFile = tempnam(sys_get_temp_dir(), 'cfg_');
+    if ($tempFile === false) {
+        return false;
     }
+    if (file_put_contents($tempFile, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)) === false) {
+        @unlink($tempFile);
+        return false;
+    }
+    if (!rename($tempFile, $path)) {
+        @unlink($tempFile);
+        return false;
+    }
+    @chmod($path, 0644);
+    return true;
 }
+
+function read_json(string $path, array $default): array {
+    if (!file_exists($path)) {
+        return $default;
+    }
+    $loaded = json_decode((string)file_get_contents($path), true);
+    return is_array($loaded) ? array_merge($default, $loaded) : $default;
+}
+
+function h($v): string { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); }
+
+$themePath  = 'update/theme.json';
+$policyPath = 'update/policy.json';
+
+$theme  = read_json($themePath, ['revision' => 1, 'scheme' => 'Blue', 'darkness' => 0]);
+$policy = read_json($policyPath, [
+    'revision'             => 1,
+    'auto_firmware_update' => false,
+    'quiet_start'          => 2,
+    'quiet_end'            => 5,
+]);
 
 $success_message = '';
 $error_message   = '';
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_theme'])) {
-    $token_ok = !empty($_POST['csrf']) && !empty($_SESSION['theme_csrf'])
-                && hash_equals($_SESSION['theme_csrf'], (string)$_POST['csrf']);
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $token_ok = !empty($_POST['csrf']) && !empty($_SESSION['dev_csrf'])
+                && hash_equals($_SESSION['dev_csrf'], (string)$_POST['csrf']);
     if (!$token_ok) {
         $error_message = 'Security token expired. Please reload the page and try again.';
-    } else {
+
+    } elseif (isset($_POST['save_theme'])) {
         $scheme   = isset($_POST['scheme']) ? (string)$_POST['scheme'] : '';
         $darkness = isset($_POST['darkness']) ? (int)$_POST['darkness'] : 0;
 
@@ -70,92 +101,116 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_theme'])) {
             $error_message = 'Unknown colour scheme.';
         } elseif ($darkness < 0 || $darkness > 100) {
             $error_message = 'Brightness must be between 0 and 100.';
+        } elseif ((string)$theme['scheme'] === $scheme && (int)$theme['darkness'] === $darkness) {
+            $success_message = 'No change - nothing published.';
         } else {
+            // Bump the revision only on a real change, so devices do not
+            // re-apply (and override a local pick) for nothing.
             $newTheme = [
                 'revision' => ((int)$theme['revision']) + 1,
                 'scheme'   => $scheme,
                 'darkness' => $darkness,
                 'updated'  => gmdate('c'),
             ];
-            // Same atomic write pattern firmware.php uses for version.json:
-            // write a temp file, then rename it into place so a device polling
-            // mid-write can never read a half-written file.
-            $tempFile = tempnam(sys_get_temp_dir(), 'theme_');
-            if ($tempFile === false) {
-                $error_message = 'Could not create a temporary file.';
+            if (publish_json($themePath, $newTheme)) {
+                $theme           = $newTheme;
+                $success_message = 'Appearance saved. Devices pick it up within about a minute.';
             } else {
-                file_put_contents($tempFile, json_encode($newTheme, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
-                if (rename($tempFile, $themePath)) {
-                    @chmod($themePath, 0644);
-                    $theme           = $newTheme;
-                    $success_message = 'Saved. Devices pick this up within about 5 minutes.';
-                } else {
-                    @unlink($tempFile);
-                    $error_message = 'Could not write update/theme.json. Check the update/ directory permissions.';
-                }
+                $error_message = 'Could not write update/theme.json. Check the update/ directory permissions.';
+            }
+        }
+
+    } elseif (isset($_POST['save_policy'])) {
+        $autoUpdate = isset($_POST['auto_firmware_update']) && $_POST['auto_firmware_update'] === '1';
+        $qStart     = isset($_POST['quiet_start']) ? (int)$_POST['quiet_start'] : 2;
+        $qEnd       = isset($_POST['quiet_end']) ? (int)$_POST['quiet_end'] : 5;
+
+        if ($qStart < 0 || $qStart > 23 || $qEnd < 0 || $qEnd > 23) {
+            $error_message = 'Quiet-window hours must be between 0 and 23.';
+        } elseif ((bool)$policy['auto_firmware_update'] === $autoUpdate
+                  && (int)$policy['quiet_start'] === $qStart
+                  && (int)$policy['quiet_end'] === $qEnd) {
+            $success_message = 'No change - nothing published.';
+        } else {
+            $newPolicy = [
+                'revision'             => ((int)$policy['revision']) + 1,
+                'auto_firmware_update' => $autoUpdate,
+                'quiet_start'          => $qStart,
+                'quiet_end'            => $qEnd,
+                'updated'              => gmdate('c'),
+            ];
+            if (publish_json($policyPath, $newPolicy)) {
+                $policy          = $newPolicy;
+                $success_message = 'Update policy saved. Devices check it within about 100 seconds.';
+            } else {
+                $error_message = 'Could not write update/policy.json. Check the update/ directory permissions.';
             }
         }
     }
 }
 
-if (empty($_SESSION['theme_csrf'])) {
-    $_SESSION['theme_csrf'] = bin2hex(random_bytes(16));
+if (empty($_SESSION['dev_csrf'])) {
+    $_SESSION['dev_csrf'] = bin2hex(random_bytes(16));
 }
-$csrf = $_SESSION['theme_csrf'];
+$csrf = $_SESSION['dev_csrf'];
 
 $activeScheme   = array_key_exists((string)$theme['scheme'], $SCHEMES) ? (string)$theme['scheme'] : 'Blue';
 $activeDarkness = max(0, min(100, (int)$theme['darkness']));
 $previewHex     = $SCHEMES[$activeScheme];
-// The device renders brightness as a grey screen: gray = 255 - (darkness * 255 / 100)
-// and flips its text to white above 50.
-$previewGray  = 255 - (int)round($activeDarkness * 255 / 100);
-$textOnGray   = $activeDarkness > 50 ? '#FFFFFF' : '#000000';
+$previewGray    = 255 - (int)round($activeDarkness * 255 / 100);
+$textOnGray     = $activeDarkness > 50 ? '#FFFFFF' : '#000000';
+
+$autoUpdate  = (bool)$policy['auto_firmware_update'];
+$qStart      = max(0, min(23, (int)$policy['quiet_start']));
+$qEnd        = max(0, min(23, (int)$policy['quiet_end']));
+// The device treats start == end as "never".
+$windowNever = ($qStart === $qEnd);
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Theme Portal</title>
+    <title>Device Portal</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="min-h-screen bg-gradient-to-br from-blue-900 to-blue-500 flex items-center justify-center p-4">
     <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-8">
         <div class="flex items-center justify-between mb-6">
-            <h1 class="text-2xl font-bold text-gray-800">Theme Portal</h1>
+            <h1 class="text-2xl font-bold text-gray-800">Device Portal</h1>
             <div class="flex gap-3 text-sm">
-                <a href="firmware.php" class="text-blue-600 hover:underline">Firmware</a>
+                <a href="firmware.php" class="text-blue-600 hover:underline">Firmware upload</a>
                 <a href="?logout=1" class="text-red-600 hover:underline">Logout</a>
             </div>
         </div>
 
-        <p class="text-gray-600 text-sm mb-6">
-            Sets the default calendar colour scheme. A colour chosen on the device itself
-            overrides this until you change the value here, then it is re-applied.
-        </p>
-
         <?php if ($success_message !== ''): ?>
             <div class="mb-4 rounded-lg bg-green-100 border border-green-300 text-green-800 px-4 py-3 text-sm">
-                <?= htmlspecialchars($success_message, ENT_QUOTES, 'UTF-8') ?>
+                <?= h($success_message) ?>
             </div>
         <?php endif; ?>
         <?php if ($error_message !== ''): ?>
             <div class="mb-4 rounded-lg bg-red-100 border border-red-300 text-red-800 px-4 py-3 text-sm">
-                <?= htmlspecialchars($error_message, ENT_QUOTES, 'UTF-8') ?>
+                <?= h($error_message) ?>
             </div>
         <?php endif; ?>
 
-        <form method="post" class="space-y-6">
-            <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8') ?>">
+        <h2 class="text-lg font-semibold text-gray-800 mb-1">Appearance</h2>
+        <p class="text-gray-600 text-sm mb-4">
+            Sets the default colour scheme. A colour chosen on the device itself wins until you
+            change the value here, then this is re-applied.
+        </p>
+
+        <form method="post" class="space-y-5 mb-8">
+            <input type="hidden" name="csrf" value="<?= h($csrf) ?>">
 
             <div>
                 <label for="scheme" class="block text-sm font-semibold text-gray-700 mb-2">Colour scheme</label>
                 <select id="scheme" name="scheme"
                         class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
                     <?php foreach ($SCHEMES as $name => $hex): ?>
-                        <option value="<?= htmlspecialchars($name, ENT_QUOTES, 'UTF-8') ?>"
-                            <?= $name === $activeScheme ? 'selected' : '' ?>>
-                            <?= htmlspecialchars($name, ENT_QUOTES, 'UTF-8') ?>
+                        <option value="<?= h($name) ?>" <?= $name === $activeScheme ? 'selected' : '' ?>>
+                            <?= h($name) ?>
                         </option>
                     <?php endforeach; ?>
                 </select>
@@ -179,23 +234,88 @@ $textOnGray   = $activeDarkness > 50 ? '#FFFFFF' : '#000000';
 
             <div>
                 <span class="block text-sm font-semibold text-gray-700 mb-2">Preview</span>
-                <div id="screenPreview" class="rounded-lg border border-gray-300 h-24 flex items-center justify-center"
+                <div id="screenPreview" class="rounded-lg border border-gray-300 h-20 flex items-center justify-center"
                      style="background: rgb(<?= $previewGray ?>,<?= $previewGray ?>,<?= $previewGray ?>); color: <?= $textOnGray ?>;">
-                    <span class="inline-block w-10 h-10 rounded-full mr-3"
-                          style="background: <?= htmlspecialchars($previewHex, ENT_QUOTES, 'UTF-8') ?>;"></span>
+                    <span class="inline-block w-9 h-9 rounded-full mr-3"
+                          style="background: <?= h($previewHex) ?>;"></span>
                     <span class="font-semibold">Accent + screen</span>
                 </div>
             </div>
 
             <button type="submit" name="save_theme" value="1"
                     class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg transition">
-                Save theme
+                Save appearance
             </button>
         </form>
 
-        <div class="mt-6 pt-4 border-t border-gray-200 text-xs text-gray-500">
-            <p>Currently published as <code>update/theme.json</code> (revision <?= (int)$theme['revision'] ?>):</p>
-            <pre class="mt-2 bg-gray-50 rounded p-3 overflow-x-auto"><?= htmlspecialchars(json_encode($theme, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES), ENT_QUOTES, 'UTF-8') ?></pre>
+        <h2 class="text-lg font-semibold text-gray-800 mb-1">Updates</h2>
+        <p class="text-gray-600 text-sm mb-4">
+            Upload a new firmware on the <a href="firmware.php" class="text-blue-600 hover:underline">Firmware upload</a>
+            page. By default the device only shows an update button and waits to be pressed. Switch this on
+            and it installs a newer firmware by itself &mdash; but only inside the quiet window, so a
+            wall-mounted calendar is not rebooted while somebody is using it.
+        </p>
+
+        <form method="post" class="space-y-5">
+            <input type="hidden" name="csrf" value="<?= h($csrf) ?>">
+
+            <label class="flex items-start gap-3 cursor-pointer">
+                <input type="checkbox" name="auto_firmware_update" value="1" <?= $autoUpdate ? 'checked' : '' ?>
+                       class="mt-1 w-4 h-4">
+                <span>
+                    <span class="font-semibold text-gray-800">Install firmware updates automatically</span>
+                    <span class="block text-sm text-gray-600">
+                        The device updates on its next check and reboots itself. It retries at most every
+                        15 minutes, and a failed attempt leaves a Retry prompt on screen.
+                    </span>
+                </span>
+            </label>
+
+            <div class="flex flex-wrap items-center gap-4">
+                <div>
+                    <label for="quiet_start" class="block text-sm font-semibold text-gray-700 mb-2">Quiet window from</label>
+                    <select id="quiet_start" name="quiet_start"
+                            class="border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <?php for ($i = 0; $i < 24; $i++): ?>
+                            <option value="<?= $i ?>" <?= $i === $qStart ? 'selected' : '' ?>><?= sprintf('%02d:00', $i) ?></option>
+                        <?php endfor; ?>
+                    </select>
+                </div>
+                <div>
+                    <label for="quiet_end" class="block text-sm font-semibold text-gray-700 mb-2">until</label>
+                    <select id="quiet_end" name="quiet_end"
+                            class="border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <?php for ($i = 0; $i < 24; $i++): ?>
+                            <option value="<?= $i ?>" <?= $i === $qEnd ? 'selected' : '' ?>><?= sprintf('%02d:00', $i) ?></option>
+                        <?php endfor; ?>
+                    </select>
+                </div>
+            </div>
+
+            <p class="text-sm <?= $windowNever ? 'text-amber-700 font-semibold' : 'text-gray-500' ?>">
+                <?php if ($windowNever): ?>
+                    Start and end are the same, so the window is empty and automatic updates will
+                    never run &mdash; set different hours to enable them.
+                <?php else: ?>
+                    Local device time. A window that runs past midnight is fine (e.g. 23:00 to 04:00).
+                <?php endif; ?>
+            </p>
+
+            <button type="submit" name="save_policy" value="1"
+                    class="w-full bg-gray-800 hover:bg-gray-900 text-white font-semibold py-3 rounded-lg transition">
+                Save update policy
+            </button>
+        </form>
+
+        <div class="mt-8 pt-4 border-t border-gray-200 text-xs text-gray-500 grid md:grid-cols-2 gap-4">
+            <div>
+                <p class="font-semibold text-gray-600 mb-1">update/theme.json (revision <?= (int)$theme['revision'] ?>)</p>
+                <pre class="bg-gray-50 rounded p-3 overflow-x-auto"><?= h(json_encode($theme, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)) ?></pre>
+            </div>
+            <div>
+                <p class="font-semibold text-gray-600 mb-1">update/policy.json (revision <?= (int)$policy['revision'] ?>)</p>
+                <pre class="bg-gray-50 rounded p-3 overflow-x-auto"><?= h(json_encode($policy, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)) ?></pre>
+            </div>
         </div>
     </div>
 </body>

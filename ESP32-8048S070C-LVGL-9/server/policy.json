@@ -1,0 +1,6 @@
+{
+    "revision": 1,
+    "auto_firmware_update": false,
+    "quiet_start": 2,
+    "quiet_end": 5
+}

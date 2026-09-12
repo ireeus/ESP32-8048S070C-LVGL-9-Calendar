@@ -380,8 +380,18 @@ static unsigned long lastWeatherLocationCheck = 0;
 // server's value actually changes, so a colour picked on the device is not
 // stomped by every poll.
 static unsigned long lastThemeCheck = 0;
-const unsigned long themeUpdateInterval = 300000UL; // 5 minutes
+// Colours are meant to feel immediate when changed on the site, so this polls
+// once a minute rather than every five.
+const unsigned long themeUpdateInterval = 60000UL; // 1 minute
 static String themeSignature = "";                  // last server value we applied
+// Automatic firmware update policy, also controlled from the website
+// (update/policy.json). Defaults are OFF and a 02:00-05:00 quiet window.
+static bool g_autoFirmwareUpdate = false;
+static int g_quietStartHour = 2;
+static int g_quietEndHour = 5;
+static String policySignature = "";
+static unsigned long lastAutoUpdateAttempt = 0;
+const unsigned long autoUpdateRetryInterval = 900000UL; // 15 min between tries
 const unsigned long weatherLocationInterval = 1800000UL; // 30 minutes
 ////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -3283,6 +3293,38 @@ static bool versionIsNewer(const String &candidate, const String &current) {
   }
   return false; // equal
 }
+// True only while the local clock is inside the configured quiet window.
+// Handles a window that wraps past midnight (e.g. 23:00-04:00), and treats an
+// empty window as "never". A clock that has not synced yet also means "never",
+// so a device that cannot tell the time will not reboot itself.
+static bool inQuietWindow() {
+  if (g_quietStartHour == g_quietEndHour) return false;
+  struct tm t;
+  if (!getLocalTime(&t, 100)) return false;
+  int h = t.tm_hour;
+  if (g_quietStartHour < g_quietEndHour) return h >= g_quietStartHour && h < g_quietEndHour;
+  return h >= g_quietStartHour || h < g_quietEndHour;
+}
+// Called from loop() right after the version check. Everything about this is
+// conservative: it only runs when the site has explicitly switched it on, only
+// inside the quiet window, and never on a failed attempt more often than the
+// retry interval. A failure just leaves the OTA dialog up with a Retry button.
+static void maybeAutoUpdate() {
+  if (!g_autoFirmwareUpdate) return;
+  if (is_ota_updating) return;
+  if (!versionIsNewer(latestFirmwareVersion, currentFirmwareVersion)) return;
+  if (!inQuietWindow()) return;
+  // Even at 03:00, do not pull the screen out from under a finger.
+  lv_indev_t *indev = lv_indev_get_next(NULL);
+  if (indev && lv_indev_get_state(indev) == LV_INDEV_STATE_PRESSED) return;
+  if (millis() - lastAutoUpdateAttempt < autoUpdateRetryInterval) return;
+  lastAutoUpdateAttempt = millis();
+  if (debug == 1) {
+    Serial.println("[OTA] Quiet window open - updating automatically to " + latestFirmwareVersion);
+  }
+  update_btn_cb(NULL); // build the progress dialog...
+  ota_start();         // ...and go
+}
 void updateFirmwareButton() {
   if (versionIsNewer(latestFirmwareVersion, currentFirmwareVersion)) {
     if (!firmware_update_btn) {
@@ -3371,6 +3413,54 @@ void apply_ui_darkness(int value) {
 void darkness_slider_cb(lv_event_t *e) {
   lv_obj_t *slider = (lv_obj_t*)lv_event_get_target(e);
   apply_ui_darkness(lv_slider_get_value(slider));
+}
+// ---- Remote update policy --------------------------------------------------
+// The website publishes update/policy.json:
+//     { "revision": 1, "auto_firmware_update": false, "quiet_start": 2, "quiet_end": 5 }
+// When auto_firmware_update is true the device installs a newer firmware by
+// itself, but only inside the quiet window - a wall-mounted calendar should not
+// reboot while somebody is using it.
+void fetchUpdatePolicy() {
+  if (WiFi.status() != WL_CONNECTED) return;
+  String url = "https://crontech.uk/update/policy.json";
+  HTTPClient http;
+  http.begin(url);
+  int httpCode = http.GET();
+  if (httpCode != HTTP_CODE_OK) {
+    if (debug == 1) Serial.println("[POLICY] fetch failed: HTTP " + String(httpCode));
+    http.end();
+    return;
+  }
+  String payload = http.getString();
+  http.end();
+  JsonDocument doc;
+  if (deserializeJson(doc, payload)) return;
+
+  int rev = doc["revision"] | -1;
+  bool autoUpdate = doc["auto_firmware_update"] | false;
+  int qStart = doc["quiet_start"] | 2;
+  int qEnd = doc["quiet_end"] | 5;
+  if (qStart < 0 || qStart > 23) qStart = 2;
+  if (qEnd < 0 || qEnd > 23) qEnd = 5;
+
+  String sig = String(rev) + "|" + String(autoUpdate ? 1 : 0) + "|" +
+               String(qStart) + "|" + String(qEnd);
+  if (sig == policySignature) return;
+
+  policySignature = sig;
+  g_autoFirmwareUpdate = autoUpdate;
+  g_quietStartHour = qStart;
+  g_quietEndHour = qEnd;
+  preferences.begin("ui", false);
+  preferences.putBool("auto_upd", g_autoFirmwareUpdate);
+  preferences.putInt("quiet_start", g_quietStartHour);
+  preferences.putInt("quiet_end", g_quietEndHour);
+  preferences.putString("policy_sig", policySignature);
+  preferences.end();
+  if (debug == 1) {
+    Serial.println("[POLICY] auto=" + String(g_autoFirmwareUpdate ? "on" : "off") +
+                   " window=" + String(g_quietStartHour) + ":00-" + String(g_quietEndHour) + ":00");
+  }
 }
 // ---- Remote theme ----------------------------------------------------------
 // The website publishes update/theme.json:
@@ -4119,6 +4209,7 @@ static void runBootFetchStep(int step) {
       break;
     case BOOT_STEP_FIRMWARE:
       checkFirmwareUpdate();
+      fetchUpdatePolicy();
       updateFirmwareButton();
       break;
     case BOOT_STEP_BACKGROUND_NAME:
@@ -4181,6 +4272,10 @@ void setup() {
   g_ui_darkness = preferences.getInt("ui_darkness", 0);
   g_ui_scheme = preferences.getInt("ui_scheme", 0);
   themeSignature = preferences.getString("theme_sig", "");
+  g_autoFirmwareUpdate = preferences.getBool("auto_upd", false);
+  g_quietStartHour = preferences.getInt("quiet_start", 2);
+  g_quietEndHour = preferences.getInt("quiet_end", 5);
+  policySignature = preferences.getString("policy_sig", "");
   preferences.end();
   if (g_ui_scheme < 0 || g_ui_scheme >= COLOR_SCHEME_COUNT) g_ui_scheme = 0;
   preferences.begin("wifi", false);
@@ -4296,7 +4391,9 @@ void loop() {
   }
   if (currentTime - lastFirmwareCheck >= firmwareCheckInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
     checkFirmwareUpdate();
+    fetchUpdatePolicy();
     updateFirmwareButton();
+    maybeAutoUpdate();
     lastFirmwareCheck = currentTime;
   }
   if (currentTime - lastNotificationCheck >= notificationInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
