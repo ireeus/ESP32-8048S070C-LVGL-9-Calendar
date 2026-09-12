@@ -1239,9 +1239,39 @@ void updateEventDisplay(lv_obj_t *calendar) {
   lv_obj_set_style_text_font(event_title_label, &lv_font_montserrat_14_bold, 0);
   lv_obj_set_style_text_color(event_title_label, lv_color_white(), 0);
   lv_obj_align(event_title_label, LV_ALIGN_LEFT_MID, 0, 0);
-  // First card sits just under the 26px bar: 26 + 8px gap. The -10 this used to be
-  // was compensating for the panel padding, which is gone.
-  int y_offset = 34;
+
+  // The list is a SEPARATE child below the bar, and it is the thing that scrolls.
+  // Previously the cards were children of the panel itself, so the heading would
+  // have scrolled away with them.
+  lv_obj_t *event_list = lv_obj_create(eventContainer);
+  lv_obj_set_size(event_list, LV_PCT(100), 149); // 175 panel - 26 title bar
+  lv_obj_align(event_list, LV_ALIGN_TOP_MID, 0, 26);
+  lv_obj_set_style_bg_opa(event_list, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(event_list, 0, 0);
+  lv_obj_set_style_radius(event_list, 0, 0);
+  lv_obj_set_style_pad_all(event_list, 0, 0);
+  lv_obj_set_scroll_dir(event_list, LV_DIR_VER);
+  // AUTO rather than OFF: with the scrollbar hidden there was no way to tell that
+  // more events existed below the fold.
+  lv_obj_set_scrollbar_mode(event_list, LV_SCROLLBAR_MODE_AUTO);
+  lv_obj_set_style_width(event_list, 6, LV_PART_SCROLLBAR);
+  lv_obj_set_style_bg_color(event_list, lv_color_hex(0xBBBBBB), LV_PART_SCROLLBAR);
+  lv_obj_set_style_bg_opa(event_list, LV_OPA_60, LV_PART_SCROLLBAR);
+
+  // Only the TEXT inside a card opens the details popup now, so a drag that starts
+  // anywhere - including on the text - scrolls the list instead. CLICKED rather
+  // than PRESSED is what makes that work: LVGL drops CLICKED once the gesture turns
+  // into a scroll, whereas PRESSED fires the instant the finger lands, which is
+  // exactly what made the list impossible to scroll before.
+  // NOTE lv_label REMOVES LV_OBJ_FLAG_CLICKABLE in its own constructor
+  // (lv_label.c), so it has to be added back or the handler never runs at all.
+  auto link_event_text = [&](lv_obj_t *lbl, int idx) {
+    lv_obj_add_flag(lbl, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_user_data(lbl, (void *)(intptr_t)idx);
+    lv_obj_add_event_cb(lbl, show_event_details_cb, LV_EVENT_CLICKED, NULL);
+  };
+  // Small top gap inside the list so the first card does not touch the bar.
+  int y_offset = 4;
   int total_displayed = 0;
   time_t now;
   time(&now);
@@ -1254,7 +1284,7 @@ void updateEventDisplay(lv_obj_t *calendar) {
   for (int i = 0; i < numEvents && total_displayed < MAX_EVENT_CHIPS; i++) {
     if (events[i].start_time < todayStart && events[i].end_time > now) {
       // This is an ongoing event
-      lv_obj_t *event_cont = lv_obj_create(eventContainer);
+      lv_obj_t *event_cont = lv_obj_create(event_list);
       lv_obj_set_size(event_cont, 381, 30); // 50% height
       lv_obj_align(event_cont, LV_ALIGN_TOP_MID, 0, y_offset);
       // Apply gray semi-transparent background
@@ -1263,8 +1293,6 @@ void updateEventDisplay(lv_obj_t *calendar) {
       lv_obj_set_style_bg_opa(event_cont, LV_OPA_70, 0);
       lv_obj_set_style_radius(event_cont, 10, 0);
       lv_obj_set_style_pad_all(event_cont, 5, 0);
-      lv_obj_set_user_data(event_cont, (void*)(intptr_t)i);
-      lv_obj_add_event_cb(event_cont, show_event_details_cb, LV_EVENT_PRESSED, NULL);
 
       // Title with remaining days (faded yellow)
       String summary = events[i].summary;
@@ -1282,6 +1310,11 @@ void updateEventDisplay(lv_obj_t *calendar) {
       lv_obj_set_width(title_label, lv_pct(100));
       lv_obj_align(title_label, LV_ALIGN_TOP_LEFT, -10, 0);
 
+      // Link the card's TEXT only - see link_event_text() above.
+      for (uint32_t ci = 0; ci < lv_obj_get_child_cnt(event_cont); ci++) {
+        lv_obj_t *ch = lv_obj_get_child(event_cont, ci);
+        if (lv_obj_check_type(ch, &lv_label_class)) link_event_text(ch, i);
+      }
       y_offset += 35; // Adjusted for smaller height
       total_displayed++;
     }
@@ -1290,7 +1323,7 @@ void updateEventDisplay(lv_obj_t *calendar) {
   // Step 2: Display today's events (unchanged)
   for (int i = 0; i < numEvents && total_displayed < MAX_EVENT_CHIPS; i++) {
     if (events[i].isToday) {
-      lv_obj_t *event_cont = lv_obj_create(eventContainer);
+      lv_obj_t *event_cont = lv_obj_create(event_list);
       lv_obj_set_size(event_cont, 361, 65);
       lv_obj_align(event_cont, LV_ALIGN_TOP_MID, 0, y_offset);
       // Card tint now follows the active scheme. The fixed pink gradient with
@@ -1301,8 +1334,6 @@ void updateEventDisplay(lv_obj_t *calendar) {
       lv_obj_set_style_bg_grad_dir(event_cont, LV_GRAD_DIR_HOR, 0);
       lv_obj_set_style_radius(event_cont, 10, 0);
       lv_obj_set_style_pad_all(event_cont, 5, 0);
-      lv_obj_set_user_data(event_cont, (void*)(intptr_t)i);
-      lv_obj_add_event_cb(event_cont, show_event_details_cb, LV_EVENT_PRESSED, NULL);
 
       String summary = events[i].summary;
       if (summary.length() > 55) summary = summary.substring(0, 55) + "...";
@@ -1370,6 +1401,10 @@ void updateEventDisplay(lv_obj_t *calendar) {
         lv_obj_align_to(desc_label, time_base, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 0);
       }
 
+      for (uint32_t ci = 0; ci < lv_obj_get_child_cnt(event_cont); ci++) {
+        lv_obj_t *ch = lv_obj_get_child(event_cont, ci);
+        if (lv_obj_check_type(ch, &lv_label_class)) link_event_text(ch, i);
+      }
       y_offset += 70; // Adjusted for height
       total_displayed++;
     }
@@ -1401,7 +1436,7 @@ void updateEventDisplay(lv_obj_t *calendar) {
     // Display upcoming events (similar to today's, but with date)
     for (int i = 0; i < numEvents && total_displayed < MAX_EVENT_CHIPS; i++) {
       if (!events[i].isToday && events[i].start_time >= todayStart) {
-        lv_obj_t *event_cont = lv_obj_create(eventContainer);
+        lv_obj_t *event_cont = lv_obj_create(event_list);
         lv_obj_set_size(event_cont, 361, 65);
         lv_obj_align(event_cont, LV_ALIGN_TOP_MID, 0, y_offset);
         lv_obj_set_style_bg_color(event_cont, lv_color_hex(0x74b9ff), 0); // Light blue for upcoming
@@ -1409,8 +1444,7 @@ void updateEventDisplay(lv_obj_t *calendar) {
         lv_obj_set_style_bg_grad_dir(event_cont, LV_GRAD_DIR_HOR, 0);
         lv_obj_set_style_radius(event_cont, 10, 0);
         lv_obj_set_style_pad_all(event_cont, 5, 0);
-        lv_obj_set_user_data(event_cont, (void*)(intptr_t)i);
-        lv_obj_add_event_cb(event_cont, show_event_details_cb, LV_EVENT_PRESSED, NULL);
+
 
         String summary = events[i].summary;
         if (summary.length() > 55) summary = summary.substring(0, 55) + "...";
@@ -1449,6 +1483,10 @@ void updateEventDisplay(lv_obj_t *calendar) {
           lv_obj_align_to(desc_label, date_label, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 0);
         }
 
+        for (uint32_t ci = 0; ci < lv_obj_get_child_cnt(event_cont); ci++) {
+          lv_obj_t *ch = lv_obj_get_child(event_cont, ci);
+          if (lv_obj_check_type(ch, &lv_label_class)) link_event_text(ch, i);
+        }
         y_offset += 70;
         total_displayed++;
       }
