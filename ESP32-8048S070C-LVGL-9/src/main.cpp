@@ -3009,6 +3009,16 @@ static bool otaDownloading = false;
 static size_t otaWritten = 0;
 static size_t otaTotal = 0;
 static unsigned long otaLastUiTick = 0;
+// The RGB panel's framebuffer lives in PSRAM, and on the ESP32-S3 the flash and
+// the PSRAM share the SPI0 bus. Any flash write therefore blocks the panel's DMA
+// and it loses sync, which is the torn/garbage picture seen while updating.
+// ESP-IDF 4.4 has no bounce buffer to decouple the two (that needs IDF 5.x), so
+// the picture is blanked while flash is being written and shown again in short
+// windows. The progress bar is still readable - it just advances in steps.
+#define OTA_WRITE_MS 500UL // how long the panel stays dark while writing
+#define OTA_SHOW_MS  350UL // how long the bar stays visible between bursts
+static bool otaPanelBlank = false;
+static unsigned long otaPhaseStart = 0;
 static lv_obj_t *ota_status_lbl = nullptr;
 static lv_obj_t *ota_bar = nullptr;
 static lv_obj_t *ota_action_btn = nullptr;
@@ -3019,6 +3029,32 @@ static void ota_set_status(const char *msg, bool is_error) {
   lv_label_set_text(ota_status_lbl, msg);
   lv_obj_set_style_text_color(ota_status_lbl, lv_color_hex(is_error ? 0xFF5252 : 0xFFFFFF), 0);
 }
+// TFT_BL is set up as an output by setup_display().
+static void ota_backlight(bool on) {
+#ifdef TFT_BL
+  digitalWrite(TFT_BL, on ? HIGH : LOW);
+#else
+  (void)on;
+#endif
+}
+static void ota_blank_panel() {
+  if (otaPanelBlank) return;
+  ota_backlight(false);
+  otaPanelBlank = true;
+  otaPhaseStart = millis();
+}
+static void ota_show_panel() {
+  if (!otaPanelBlank) return;
+  ota_backlight(true);
+  otaPanelBlank = false;
+  otaPhaseStart = millis();
+}
+// Safety net: whatever happens, never leave the screen dark.
+static void ota_restore_panel() {
+  ota_backlight(true);
+  otaPanelBlank = false;
+  otaPhaseStart = millis();
+}
 static void ota_close_transfer() {
   if (otaHttpActive) {
     otaHttp.end();
@@ -3027,6 +3063,7 @@ static void ota_close_transfer() {
   otaStream = nullptr;
   otaDownloading = false;
   is_ota_updating = false;
+  ota_restore_panel(); // a failure or a cancelled transfer must not leave it dark
 }
 // Back to a state the user can retry from, with the reason on screen.
 static void ota_fail(const char *msg) {
@@ -3081,26 +3118,46 @@ static void ota_start() {
     lv_bar_set_value(ota_bar, 0, LV_ANIM_OFF);
   }
   otaDownloading = true;
+  ota_restore_panel();
   ota_show_progress(true);
 }
 // One bounded slice per loop() iteration.
 static void serviceOta() {
   if (!otaDownloading || !otaStream) return;
-  uint8_t buff[512];
-  int budget = 8; // up to 4KB per pass, then hand the CPU back to LVGL
-  while (budget-- > 0 && otaWritten < otaTotal) {
-    size_t avail = otaStream->available();
-    if (!avail) { delay(1); break; } // nothing buffered: let WiFi and LVGL run
-    int c = otaStream->readBytes(buff, min(sizeof(buff), avail));
-    if (c <= 0) break;
-    if (Update.write(buff, c) != (size_t)c) {
-      Update.abort();
-      ota_fail("Writing the firmware to flash failed");
-      return;
+  unsigned long now = millis();
+
+  if (otaPanelBlank) {
+    // Dark window elapsed: bring the picture back so the bar can be read.
+    if (now - otaPhaseStart >= OTA_WRITE_MS) {
+      ota_show_panel();
+      ota_show_progress(true);
     }
-    otaWritten += c;
+  } else {
+    // Visible window elapsed: blank again and get on with the flash writes.
+    if (now - otaPhaseStart < OTA_SHOW_MS) return;
+    ota_blank_panel();
   }
-  ota_show_progress(false);
+
+  if (otaPanelBlank) {
+    // Dark: this is the only time we touch flash, so any DMA underrun happens
+    // where there is nothing on screen to tear.
+    uint8_t buff[512];
+    int budget = 16; // up to 8KB per window
+    while (budget-- > 0 && otaWritten < otaTotal) {
+      size_t avail = otaStream->available();
+      if (!avail) { delay(1); break; } // nothing buffered: let WiFi and LVGL run
+      int c = otaStream->readBytes(buff, min(sizeof(buff), avail));
+      if (c <= 0) break;
+      if (Update.write(buff, c) != (size_t)c) {
+        Update.abort();
+        ota_fail("Writing the firmware to flash failed");
+        return;
+      }
+      otaWritten += c;
+    }
+    ota_show_progress(false);
+  }
+
   if (otaWritten < otaTotal) return;
 
   // ---- download finished ----
@@ -3109,10 +3166,13 @@ static void serviceOta() {
   otaDownloading = false;
   otaStream = nullptr;
   if (ota_bar) lv_bar_set_value(ota_bar, 100, LV_ANIM_OFF);
+  // Update.end() writes flash as well, so it has to happen while the panel is
+  // still blank. A failure restores the panel through ota_close_transfer().
   if (!Update.end(true)) { ota_fail("Could not finalise the update"); return; }
   preferences.begin("firmware", false);
   preferences.putString("version", latestFirmwareVersion);
   preferences.end();
+  ota_show_panel(); // no more flash writes - safe to show the result
   ota_set_status("Update complete. Restarting...", false);
   is_ota_updating = false;
   lv_refr_now(NULL); // make sure the user sees it before the reboot

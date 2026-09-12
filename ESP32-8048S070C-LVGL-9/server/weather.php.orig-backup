@@ -1,0 +1,135 @@
+<?php
+// weather.php - Weather functionality
+include 'config.php';
+if (!isset($_SESSION['user_id'])) {
+    header("Location: login.php");
+    exit;
+}
+$weather = get_weather_data();
+?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#ffb703">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Custom Calendar">
+    <link rel="apple-touch-icon" href="icon-192x192.png">
+    <link rel="manifest" href="manifest.json">
+    <title>Weather - Custom Calendar Service</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root { --primary:#ffb703; --primary-hover:#fb8500; --bg-body:#f4f7f9; --bg-card:#ffffff; --text-main:#111827; --text-muted:#4b5563; --border-light:#e5e7eb; }
+        * { box-sizing: border-box; font-family: 'Montserrat', sans-serif; }
+        body { background-color: var(--bg-body); color: var(--text-main); margin:0; padding:0; line-height:1.6; padding-top:72px; }
+
+        .menu { position:fixed; top:0; left:0; width:100%; background:#fff; box-shadow:0 2px 10px rgba(0,0,0,.05); display:flex; align-items:center; justify-content:center; gap:1.5rem; padding:1rem 1.25rem; z-index:100; }
+        .menu-items { display:flex; justify-content:center; gap:2rem; list-style:none; margin:0; padding:0; }
+        .menu-items li a { color:var(--text-main); text-decoration:none; font-weight:700; font-size:.82rem; text-transform:uppercase; letter-spacing:.5px; transition:color .2s; }
+        .menu-items li a:hover { color:var(--primary-hover); }
+        .menu-toggle { display:none; }
+        .bar { height:3px; width:25px; background:#111827; margin:4px 0; }
+
+        .weather-section { display:flex; align-items:center; justify-content:center; text-align:center; padding:2rem 1rem; width:100%; }
+        .weather-content { width:100%; max-width:1000px; }
+        .weather-card { display:flex; flex-direction:column; align-items:center; background:var(--bg-card); border:1px solid var(--border-light); border-radius:16px; box-shadow:0 15px 35px rgba(0,0,0,.10); padding:2rem; width:100%; text-align:center; }
+        .location { font-size:1.1rem; font-weight:700; color:var(--text-main); }
+        .weather-icon { width:100px; height:100px; margin:.5rem 0; }
+        .weather-icon img { max-width:100%; max-height:100%; object-fit:contain; }
+        .weather-temp { font-size:3rem; font-weight:800; color:var(--text-main); }
+        .weather-desc { font-size:1.25rem; color:var(--text-muted); text-transform:capitalize; }
+        .weather-details { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:1rem; margin:1.25rem 0; width:100%; }
+        .weather-detail-item { background:#f3f4f6; border:1px solid var(--border-light); padding:1rem; border-radius:.5rem; text-align:center; }
+        .weather-detail-label { display:block; font-size:.8rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:.5px; }
+        .weather-detail-value { font-size:1.15rem; font-weight:700; color:var(--text-main); }
+        .update-time { font-size:.85rem; color:var(--text-muted); }
+        .feature-icon { width:50px; height:50px; }
+        .feature-icon img { max-width:100%; max-height:100%; object-fit:contain; }
+
+        .forecast-section { display:flex; align-items:center; justify-content:center; text-align:center; padding:2rem 1rem; background:var(--bg-body); }
+        .forecast-content { z-index:2; width:100%; max-width:1100px; }
+        .forecast-row { display:flex; justify-content:center; gap:1rem; margin-top:1rem; flex-wrap:nowrap; overflow-x:auto; min-width:100%; }
+        .forecast-day { display:flex; flex-direction:column; align-items:center; background:var(--bg-card); border:1px solid var(--border-light); border-radius:12px; padding:1rem; text-align:center; min-width:12%; box-shadow:0 4px 12px rgba(0,0,0,.05); transition:transform .2s; }
+        .forecast-day:hover { transform:translateY(-4px); }
+        .forecast-day .day { font-weight:700; margin-bottom:.5rem; color:var(--text-main); }
+        .forecast-day .temps { font-size:1.1rem; margin-bottom:.4rem; color:var(--text-main); font-weight:600; }
+        .forecast-day .desc { opacity:.9; margin-bottom:.4rem; color:var(--text-muted); font-size:.82rem; text-transform:capitalize; }
+        .forecast-day .precip { font-size:.82rem; color:var(--text-muted); }
+        footer { padding:2rem; text-align:center; background:#111827; color:#9ca3af; font-size:.8rem; }
+
+        @media(max-width:768px){
+            .weather-temp{font-size:2.4rem;}
+            .forecast-row{flex-wrap:wrap;justify-content:center;}
+            .forecast-day{min-width:40%;}
+            .menu{flex-direction:column;align-items:flex-start;}
+            .menu-toggle{display:flex;flex-direction:column;cursor:pointer;position:absolute;right:20px;top:18px;}
+            .menu-items{display:none;flex-direction:column;width:100%;text-align:left;gap:.8rem;}
+            .menu-items.active{display:flex;}
+        }
+    </style>
+</head>
+<body>
+    <?php include 'menu.php'; ?>
+    <section class="weather-section">
+        <div class="weather-content">
+            <div class="weather-card">
+                <div class="location"><?php echo htmlspecialchars($weather['location_name']); ?>                <i class="update-time">Updated: <?php echo date('H:i'); ?></i>
+</div>
+                <div class="weather-icon"><img src="<?php echo $weather['icon_class']; ?>" alt="<?php echo $weather['description']; ?>"></div>
+                <div class="weather-temp"><?php echo round($weather['current']['temperature_2m'] ?? 0); ?>°C</div>
+                <div class="weather-desc"><?php echo $weather['description']; ?></div>
+                <div class="weather-details">
+                    <div class="weather-detail-item feels-like">
+                        <span class="weather-detail-label">Feels like</span>
+                        <span class="weather-detail-value"><?php echo round($weather['current']['apparent_temperature'] ?? 0); ?>°C</span>
+                    </div>
+                    <div class="weather-detail-item humidity">
+                        <span class="weather-detail-label">Humidity</span>
+                        <span class="weather-detail-value"><?php echo $weather['current']['relative_humidity_2m'] ?? 0; ?>%</span>
+                    </div>
+                    <div class="weather-detail-item wind">
+                        <span class="weather-detail-label">Wind</span>
+                        <span class="weather-detail-value"><?php echo round($weather['current']['wind_speed_10m'] ?? 0); ?> km/h</span>
+                    </div>
+                    <div class="weather-detail-item precip">
+                        <span class="weather-detail-label">Precip</span>
+                        <span class="weather-detail-value"><?php echo $weather['current']['precipitation'] ?? 0; ?> mm</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+    <section class="forecast-section">
+            <div class="forecast-row">
+                <?php foreach ($weather['daily']['time'] as $i => $time): ?>
+                    <div class="forecast-day">
+                        <div class="day"><?php echo date('D, M j', strtotime($time)); ?></div>
+                        <div class="feature-icon"><img src="<?php echo get_icon_class($weather['daily']['weather_code'][$i]); ?>" alt="<?php echo $weather['weather_codes'][$weather['daily']['weather_code'][$i]] ?? 'Unknown'; ?>"></div>
+                        <div class="temps"><?php echo round($weather['daily']['temperature_2m_max'][$i]); ?>° / <?php echo round($weather['daily']['temperature_2m_min'][$i]); ?>°</div>
+                        <div class="desc"><?php echo $weather['weather_codes'][$weather['daily']['weather_code'][$i]] ?? 'Unknown'; ?></div>
+                        <div class="precip">Precip: <?php echo $weather['daily']['precipitation_sum'][$i] ?? 0; ?> mm</div>
+                    </div>
+                <?php endforeach; ?>
+        </div>
+    </section>
+    <footer>
+        <p>&copy; 2023 Custom Calendar Service. All rights reserved.</p>
+    </footer>
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/service-worker.js')
+                    .then(registration => {
+                        console.log('Service Worker registered with scope:', registration.scope);
+                    })
+                    .catch(error => {
+                        console.error('Service Worker registration failed:', error);
+                    });
+            });
+        }
+    </script>
+</body>
+</html>
