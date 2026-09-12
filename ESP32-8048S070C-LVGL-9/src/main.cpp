@@ -1022,19 +1022,20 @@ void updateWeatherDisplay() {
     lv_obj_set_scrollbar_mode(sec, LV_SCROLLBAR_MODE_OFF);
     weather_sections[si] = sec;
   }
-  // Section 1: condition icon. It had NO zoom and drew at its native 68px, while
-  // every other icon in this panel is scaled (the forecast icons are 128 -> 34px).
-  // 68 * 170/256 = 45px.
-  lv_obj_t *weather_img = lv_img_create(weather_sections[0]);
-  lv_img_set_src(weather_img, getWeatherImage(next_weather.weather_code));
-  lv_img_set_zoom(weather_img, 170);
-  lv_obj_center(weather_img);
-  // Section 2: temperature.
-  lv_obj_t *temp_label = lv_label_create(weather_sections[1]);
+  // Section 1: temperature. Swapped with the icon, so the reading now leads and
+  // the condition picture sits in the middle section.
+  lv_obj_t *temp_label = lv_label_create(weather_sections[0]);
   lv_label_set_text(temp_label, (String(current_weather.temperature_2m + temp_adjust, 1) + "°C").c_str());
   lv_obj_set_style_text_font(temp_label, &lv_font_montserrat_24, 0);
   lv_obj_set_style_text_color(temp_label, temp_text_color, 0);
   lv_obj_center(temp_label);
+  // Section 2: condition icon. It had NO zoom and drew at its native 68px, while
+  // every other icon in this panel is scaled (the forecast icons are 128 -> 34px).
+  // 68 * 170/256 = 45px.
+  lv_obj_t *weather_img = lv_img_create(weather_sections[1]);
+  lv_img_set_src(weather_img, getWeatherImage(next_weather.weather_code));
+  lv_img_set_zoom(weather_img, 170);
+  lv_obj_center(weather_img);
   // Section 3: condition.
   lv_obj_t *desc_label = lv_label_create(weather_sections[2]);
   lv_label_set_text(desc_label, desc.c_str());
@@ -4204,7 +4205,9 @@ void setup_calendar() {
   updateWeatherDisplay();
   button_bar = lv_obj_create(lv_scr_act());
   lv_obj_set_size(button_bar, 350, 40);
-  lv_obj_align_to(button_bar, calendar, LV_ALIGN_OUT_BOTTOM_MID, 0, 10);
+  // 10 -> 20 centres the row in the 80px between the calendar's bottom edge
+  // (y 399) and the bottom of the screen (y 479): 20px above, 20px below.
+  lv_obj_align_to(button_bar, calendar, LV_ALIGN_OUT_BOTTOM_MID, 0, 20);
   lv_obj_set_flex_flow(button_bar, LV_FLEX_FLOW_ROW);
   lv_obj_set_flex_align(button_bar, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
   lv_obj_set_style_bg_opa(button_bar, LV_OPA_TRANSP, 0);
