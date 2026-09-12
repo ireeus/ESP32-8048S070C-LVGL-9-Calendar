@@ -4065,9 +4065,10 @@ void setup_calendar() {
   lv_obj_set_style_bg_color(taskbar, taskbar_bg(), 0);
   lv_obj_set_style_bg_opa(taskbar, LV_OPA_COVER, 0);
   lv_obj_set_style_radius(taskbar, 0, 0); // a strip, not a rounded card
-  lv_obj_set_style_border_side(taskbar, LV_BORDER_SIDE_BOTTOM, 0);
-  lv_obj_set_style_border_width(taskbar, 2, 0);
-  lv_obj_set_style_border_color(taskbar, scheme_accent(), 0); // the one themed touch
+  // No border. The accent line under the strip ate 2px of the bar's height and
+  // only separated it from a background it already contrasts with, so the strip
+  // and the page now meet directly. The strip is also now entirely theme-free.
+  lv_obj_set_style_border_width(taskbar, 0, 0);
   lv_obj_set_style_pad_left(taskbar, 12, 0);
   lv_obj_set_style_pad_right(taskbar, 12, 0);
   lv_obj_set_style_pad_top(taskbar, 0, 0);
