@@ -438,10 +438,33 @@ if (!isset($_SESSION['user_id'])) {
     exit;
 }
 
-// The colour scheme and brightness picked on settings.php -> Themes belong to the
-// Cron-Tab DEVICE, not to this page. The calendar used to read user_theme and
-// restyle itself from it; that is deliberately gone, so the site keeps the fixed
-// look it had before and only the device changes.
+// ---------------------------------------------------------------------------
+// Per-user theme, set on settings.php -> Themes. Applies to this account's
+// calendar only. Wrapped because the table is created by settings.php and may
+// not exist yet on a brand-new account.
+// ---------------------------------------------------------------------------
+$__schemes = [
+    'Blue'      => ['#2196F3', '#1976D2'], 'Green'     => ['#4CAF50', '#388E3C'],
+    'Blue Grey' => ['#607D8B', '#455A64'], 'Orange'    => ['#FF9800', '#F57C00'],
+    'Red'       => ['#F44336', '#D32F2F'], 'Purple'    => ['#9C27B0', '#7B1FA2'],
+    'Teal'      => ['#009688', '#00796B'], 'Indigo'    => ['#3F51B5', '#303F9F'],
+];
+$__theme = ['scheme' => 'Blue', 'darkness' => 0];
+try {
+    $__stmt = $db->prepare("SELECT scheme, darkness FROM user_theme WHERE user_id = ?");
+    $__stmt->execute([$_SESSION['user_id']]);
+    $__row = $__stmt->fetch(PDO::FETCH_ASSOC);
+    if ($__row) { $__theme = $__row; }
+} catch (PDOException $e) { /* no user_theme table yet */ }
+if (!array_key_exists((string)$__theme['scheme'], $__schemes)) { $__theme['scheme'] = 'Blue'; }
+$__dark      = max(0, min(100, (int)$__theme['darkness']));
+$__primary   = $__schemes[(string)$__theme['scheme']][0];
+$__hover     = $__schemes[(string)$__theme['scheme']][1];
+$__gray      = 255 - (int)round($__dark * 255 / 100);
+$__is_dark   = ($__dark > 50);
+$__text      = $__is_dark ? '#ECEFF1' : '#111827';
+$__card      = $__is_dark ? '#1b1b1b' : '#ffffff';
+$__border    = $__is_dark ? '#333333' : '#e5e7eb';
 
 ?>
 <!DOCTYPE html>
@@ -967,6 +990,32 @@ if (!isset($_SESSION['user_id'])) {
     }
 </style>
 
+    <!-- Per-user theme (settings.php -> Themes) -->
+    <style>
+        :root {
+            --primary: <?php echo $__primary; ?>;
+            --primary-hover: <?php echo $__hover; ?>;
+            --bg-body: rgb(<?php echo $__gray; ?>,<?php echo $__gray; ?>,<?php echo $__gray; ?>);
+            --bg-card: <?php echo $__card; ?>;
+            --text-main: <?php echo $__text; ?>;
+            --border-light: <?php echo $__border; ?>;
+        }
+<?php if ($__is_dark): ?>
+        /* FullCalendar ships its own light stylesheet, so the grid needs telling. */
+        .fc, .fc .fc-view-harness, .fc .fc-scrollgrid, .fc .fc-daygrid-day,
+        .fc .fc-timegrid-slot, .fc .fc-col-header-cell, .fc .fc-list {
+            background: var(--bg-card); color: var(--text-main);
+        }
+        .fc-theme-standard td, .fc-theme-standard th, .fc .fc-scrollgrid {
+            border-color: var(--border-light);
+        }
+        .fc .fc-day-today { background: rgba(255,255,255,.07) !important; }
+        .fc .fc-button, .fc .fc-button-primary {
+            background: var(--bg-card); border-color: var(--border-light); color: var(--text-main);
+        }
+        .fc .fc-toolbar-title, .fc a { color: var(--text-main); }
+<?php endif; ?>
+    </style>
 </head>
 <body>
     <?php include 'menu.php'; ?>

@@ -559,7 +559,7 @@ if (!array_key_exists($active_tab, $TABS)) { $active_tab = 'calendar'; }
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <meta name="theme-color" content="<?php echo $THEME_SCHEMES[(string)$user_theme['scheme']][0]; ?>">
+    <meta name="theme-color" content="#ffb703">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Custom Calendar">
@@ -569,35 +569,12 @@ if (!array_key_exists($active_tab, $TABS)) { $active_tab = 'calendar'; }
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="app.css">
-<?php
-    // Mirror the theme the DEVICE is using: same scheme, same brightness curve.
-    // The firmware builds its background as a grey ramp and flips to light text
-    // past 50, so this computes the identical thing - which makes the picker
-    // below a true preview of the Cron-Tab rather than a detached setting.
-    $__gray    = 255 - (int)round(((int)$user_theme['darkness']) * 255 / 100);
-    $__is_dark = ((int)$user_theme['darkness'] > 50);
-    $__scheme  = (string)$user_theme['scheme'];
-?>
-<style>
-    /* Must come after app.css: same specificity, so the later declaration wins. */
-    :root {
-        --primary:       <?php echo $THEME_SCHEMES[$__scheme][0]; ?>;
-        --primary-hover: <?php echo $THEME_SCHEMES[$__scheme][1]; ?>;
-        --bg-body:       rgb(<?php echo $__gray; ?>, <?php echo $__gray; ?>, <?php echo $__gray; ?>);
-        --bg-card:       <?php echo $__is_dark ? '#1b1b1b' : '#ffffff'; ?>;
-        --text-main:     <?php echo $__is_dark ? '#ECEFF1' : '#111827'; ?>;
-        --text-muted:    <?php echo $__is_dark ? '#9aa4ad' : '#4b5563'; ?>;
-        --border-light:  <?php echo $__is_dark ? '#333333' : '#e5e7eb'; ?>;
-        --footer-bg:     <?php echo $__is_dark ? '#1b1b1b' : '#111827'; ?>;
-        --footer-text:   #9ca3af;
-    }
-</style>
     <style>
         body {
             padding-top: 60px;
             font-family: 'Montserrat', sans-serif;
-            background: var(--bg-body);
-            color: var(--text-main);
+            background: #f4f7f9;
+            color: #111827;
             overflow-x: hidden;
         }
         .form-section {
@@ -694,7 +671,7 @@ if (!array_key_exists($active_tab, $TABS)) { $active_tab = 'calendar'; }
             transition: color 0.3s;
         }
         .menu a:hover {
-            color: var(--primary);
+            color: #ffb703;
         }
         footer {
             padding: 2rem;
@@ -749,12 +726,12 @@ if (!array_key_exists($active_tab, $TABS)) { $active_tab = 'calendar'; }
             font-size: 1.2rem;
         }
         .link-text a {
-            color: var(--primary);
+            color: #ffb703;
             text-decoration: none;
             transition: color 0.3s;
         }
         .link-text a:hover {
-            color: var(--primary-hover);
+            color: #fb8500;
             text-decoration: underline;
         }
         .menu-toggle {
@@ -786,7 +763,7 @@ if (!array_key_exists($active_tab, $TABS)) { $active_tab = 'calendar'; }
             transition: color 0.3s;
         }
         .menu-items a:hover {
-            color: var(--primary);
+            color: #ffb703;
         }
         #cityInputSection {
             display: none;
@@ -883,18 +860,15 @@ if (!array_key_exists($active_tab, $TABS)) { $active_tab = 'calendar'; }
     </style>
 
 <style>
-    /* These used to hard-code #f4f7f9 / #ffb703 / #fb8500 with !important, which is
-       exactly why changing the scheme did nothing to this page: an !important
-       literal beats a variable every time. They read the tokens now, and the tokens
-       above are set from the device's own theme. */
-    body { background:var(--bg-body) !important; color:var(--text-main) !important; font-family:'Montserrat',sans-serif !important; }
-    .menu { background:var(--bg-card) !important; }
-    .menu a, .menu-items a, .menu-items li a { color:var(--text-main) !important; }
-    .menu a:hover, .menu-items a:hover, .menu-items li a:hover { color:var(--primary-hover) !important; }
-    h1, h2, h3, h4, h5, .hero-title { color:var(--text-main) !important; }
-    .cta-btn, .btn-primary { background:var(--primary) !important; color:#111 !important; }
-    .cta-btn:hover, .btn-primary:hover { background:var(--primary-hover) !important; }
-    footer { background:var(--footer-bg) !important; color:var(--footer-text) !important; }
+    /* index.php theme override */
+    body { background:#f4f7f9 !important; color:#111827 !important; font-family:'Montserrat',sans-serif !important; }
+    .menu { background:#ffffff !important; }
+    .menu a, .menu-items a, .menu-items li a { color:#111827 !important; }
+    .menu a:hover, .menu-items a:hover, .menu-items li a:hover { color:#fb8500 !important; }
+    h1, h2, h3, h4, h5, .hero-title { color:#111827 !important; }
+    .cta-btn, .btn-primary { background:#ffb703 !important; color:#111 !important; }
+    .cta-btn:hover, .btn-primary:hover { background:#fb8500 !important; }
+    footer { background:#111827 !important; color:#9ca3af !important; }
 
         /* ---- settings tabs ---- */
         .settings-tabs { display:flex; gap:.5rem; flex-wrap:wrap; border-bottom:2px solid var(--border-light); margin:0 0 1.5rem; }
@@ -984,8 +958,8 @@ if (!array_key_exists($active_tab, $TABS)) { $active_tab = 'calendar'; }
             <div class="settings-panel" id="panel-themes" <?php echo $active_tab !== 'themes' ? 'hidden' : ''; ?>>
                 <div class="settings-grid">
                     <div class="settings-col">
-                        <h2 class="text-2xl font-bold mb-4">My Cron-Tab theme</h2>
-                        <p class="text-base mb-4">Changes your <strong>Cron-Tab device</strong> only. Your website calendar keeps its standard look, and other accounts are not affected.</p>
+                        <h2 class="text-2xl font-bold mb-4">My calendar theme</h2>
+                        <p class="text-base mb-4">Changes your calendar only &mdash; other accounts are not affected.</p>
                         <?php if ($theme_message): ?>
                             <p class="<?php echo $theme_error_flag ? 'error-msg' : 'text-green-500'; ?> mb-4"><?php echo htmlspecialchars($theme_message); ?></p>
                         <?php endif; ?>
