@@ -9,6 +9,12 @@
 #include <esp_system.h>  // For ESP.restart()
 #include <LittleFS.h>     // background-image cache (the unused spiffs partition)
 extern const lv_font_t technology_98;
+// Real bold face, generated into src/fonts/lv_font_montserrat_14_bold.c.
+// LVGL has no bold style property, and its text_outline_stroke only renders for
+// FreeType vector glyphs (see lv_draw_sw_letter.c), so the bitmap fonts used
+// here cannot be faux-bolded - a second face is the only way to actually
+// embolden the event titles.
+extern const lv_font_t lv_font_montserrat_14_bold;
 // Build version
 const String build_version = "2.2.0";
 int debug =0; // Change to 1 to enable serial prints
@@ -266,13 +272,6 @@ static lv_color_t scheme_accent_tint(int lvl) { return lv_palette_lighten(scheme
 static lv_color_t scheme_card_a()        { return (g_ui_darkness > 50) ? scheme_accent_dark() : scheme_accent_soft(); }
 static lv_color_t scheme_card_b()        { return (g_ui_darkness > 50) ? scheme_accent_deep() : scheme_accent(); }
 static lv_color_t scheme_card_text()     { return (g_ui_darkness > 50) ? lv_color_hex(0xECEFF1) : scheme_accent_deep(); }
-// Text for a card whose background is a FIXED light colour - the "due in more
-// than 3 days" cards, which are always the same light blue gradient. Those cards
-// do not respond to the brightness slider, so their text must not either:
-// scheme_card_text() flipped it to near-white in dark mode and it disappeared
-// against the light background. Near-black keeps ~4.6:1 contrast even at the
-// darker end of that gradient.
-static lv_color_t scheme_text_on_light()  { return lv_color_hex(0x101820); }
 static int temp_adjust = 0;// Global temperature adjustment
 static unsigned long lastHolidayUpdate = 0;
 const unsigned long holidayUpdateInterval = 2592000000UL; // 30 days in milliseconds
@@ -1109,7 +1108,6 @@ void updateEventDisplay(lv_obj_t *calendar) {
     eventContainer = lv_obj_create(lv_scr_act());
     lv_obj_set_size(eventContainer, 400, 175);
     lv_obj_align(eventContainer, LV_ALIGN_TOP_RIGHT, -10, 50);
-    lv_obj_set_style_bg_color(eventContainer, lv_color_hex(0x000000), 0);
     lv_obj_set_style_border_width(eventContainer, 0, 0);
     lv_obj_set_scrollbar_mode(eventContainer, LV_SCROLLBAR_MODE_OFF);
     if (debug == 1) Serial.println("[APP] Created eventContainer");
@@ -1117,6 +1115,18 @@ void updateEventDisplay(lv_obj_t *calendar) {
     lv_obj_clean(eventContainer);
     lv_obj_invalidate(eventContainer);
   }
+
+  // Panel colours are re-applied on every call rather than only at creation, so a
+  // theme change actually reaches the preview. This used to be a fixed black,
+  // which is why the labels sitting directly on it had to be hard-coded too - and
+  // why they could not simply be themed: dark text on a black panel is invisible.
+  // It now matches the weather panel directly below it.
+  uint8_t ev_gray = 255 - (g_ui_darkness * 255 / 100);
+  lv_color_t ev_panel_bg = lv_color_make(ev_gray, ev_gray, ev_gray);
+  lv_color_t ev_panel_text = (g_ui_darkness > 50) ? lv_color_hex(0xFFFFFF)
+                                                  : lv_color_hex(0x2d3436);
+  lv_obj_set_style_bg_color(eventContainer, ev_panel_bg, 0);
+  lv_obj_set_style_bg_opa(eventContainer, LV_OPA_COVER, 0);
 
   // Set highlighted dates on calendar (unchanged)
   if (debug == 1) Serial.println("[APP] Setting highlighted dates...");
@@ -1162,8 +1172,12 @@ void updateEventDisplay(lv_obj_t *calendar) {
       lv_obj_set_size(event_cont, 381, 30); // 50% height
       lv_obj_align(event_cont, LV_ALIGN_TOP_MID, 0, y_offset);
       // Apply gray semi-transparent background
-      lv_obj_set_style_bg_color(event_cont, lv_color_hex(0x808080), 0);
-      lv_obj_set_style_bg_opa(event_cont, LV_OPA_70, 0); // 50% opacity
+      // Same scheme-driven tint as the other cards. The fixed grey fill with
+      // faded-yellow text on it was the last hard-coded pair in the preview.
+      lv_obj_set_style_bg_color(event_cont, scheme_card_a(), 0);
+      lv_obj_set_style_bg_grad_color(event_cont, scheme_card_b(), 0);
+      lv_obj_set_style_bg_grad_dir(event_cont, LV_GRAD_DIR_HOR, 0);
+      lv_obj_set_style_bg_opa(event_cont, LV_OPA_COVER, 0);
       lv_obj_set_style_radius(event_cont, 10, 0);
       lv_obj_set_style_pad_all(event_cont, 5, 0);
       lv_obj_set_user_data(event_cont, (void*)(intptr_t)i);
@@ -1178,8 +1192,8 @@ void updateEventDisplay(lv_obj_t *calendar) {
       summary += " (" + String(remaining_days) + " days)";
       lv_obj_t *title_label = lv_label_create(event_cont);
       lv_label_set_text(title_label, summary.c_str());
-      lv_obj_set_style_text_color(title_label, lv_color_hex(0xFFFF99), 0); // Faded yellow
-      lv_obj_set_style_text_font(title_label, &lv_font_montserrat_14, 0);
+      lv_obj_set_style_text_color(title_label, scheme_card_text(), 0);
+      lv_obj_set_style_text_font(title_label, &lv_font_montserrat_14_bold, 0);
       lv_obj_set_style_text_align(title_label, LV_TEXT_ALIGN_LEFT, 0);
       lv_label_set_long_mode(title_label, LV_LABEL_LONG_WRAP);
       lv_obj_set_width(title_label, lv_pct(100));
@@ -1218,7 +1232,7 @@ void updateEventDisplay(lv_obj_t *calendar) {
       lv_obj_t *title_label = lv_label_create(event_cont);
       lv_label_set_text(title_label, summary.c_str());
       lv_obj_set_style_text_color(title_label, scheme_card_text(), 0);
-      lv_obj_set_style_text_font(title_label, &lv_font_montserrat_14, 0);
+      lv_obj_set_style_text_font(title_label, &lv_font_montserrat_14_bold, 0);
       lv_obj_set_style_text_align(title_label, LV_TEXT_ALIGN_LEFT, 0);
       lv_label_set_long_mode(title_label, LV_LABEL_LONG_WRAP);
       lv_obj_set_width(title_label, lv_pct(100));
@@ -1291,8 +1305,8 @@ void updateEventDisplay(lv_obj_t *calendar) {
     // Upcoming label
     lv_obj_t *upcoming_label = lv_label_create(eventContainer);
     lv_label_set_text(upcoming_label, "Due in more than 3 days");
-    lv_obj_set_style_text_font(upcoming_label, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(upcoming_label, lv_color_hex(0xCAE4CA), 0);
+    lv_obj_set_style_text_font(upcoming_label, &lv_font_montserrat_14_bold, 0);
+    lv_obj_set_style_text_color(upcoming_label, ev_panel_text, 0);
     lv_obj_align(upcoming_label, LV_ALIGN_TOP_LEFT, 10, y_offset);
     y_offset += 25;
 
@@ -1302,8 +1316,8 @@ void updateEventDisplay(lv_obj_t *calendar) {
         lv_obj_t *event_cont = lv_obj_create(eventContainer);
         lv_obj_set_size(event_cont, 361, 65);
         lv_obj_align(event_cont, LV_ALIGN_TOP_MID, 0, y_offset);
-        lv_obj_set_style_bg_color(event_cont, lv_color_hex(0x74b9ff), 0); // Light blue for upcoming
-        lv_obj_set_style_bg_grad_color(event_cont, lv_color_hex(0x0984e3), 0);
+        lv_obj_set_style_bg_color(event_cont, scheme_card_a(), 0);
+        lv_obj_set_style_bg_grad_color(event_cont, scheme_card_b(), 0);
         lv_obj_set_style_bg_grad_dir(event_cont, LV_GRAD_DIR_HOR, 0);
         lv_obj_set_style_radius(event_cont, 10, 0);
         lv_obj_set_style_pad_all(event_cont, 5, 0);
@@ -1317,8 +1331,8 @@ void updateEventDisplay(lv_obj_t *calendar) {
         // Title label (blue)
         lv_obj_t *title_label = lv_label_create(event_cont);
         lv_label_set_text(title_label, summary.c_str());
-        lv_obj_set_style_text_color(title_label, scheme_text_on_light(), 0);
-        lv_obj_set_style_text_font(title_label, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_color(title_label, scheme_card_text(), 0);
+        lv_obj_set_style_text_font(title_label, &lv_font_montserrat_14_bold, 0);
         lv_obj_set_style_text_align(title_label, LV_TEXT_ALIGN_LEFT, 0);
         lv_label_set_long_mode(title_label, LV_LABEL_LONG_WRAP);
         lv_obj_set_width(title_label, lv_pct(100));
@@ -1327,7 +1341,7 @@ void updateEventDisplay(lv_obj_t *calendar) {
         // Date row
         lv_obj_t *date_label = lv_label_create(event_cont);
         lv_label_set_text(date_label, ("On " + start_date_str).c_str());
-        lv_obj_set_style_text_color(date_label, scheme_text_on_light(), 0);
+        lv_obj_set_style_text_color(date_label, scheme_card_text(), 0);
         lv_obj_set_style_text_font(date_label, &lv_font_montserrat_14, 0);
         lv_obj_set_style_text_align(date_label, LV_TEXT_ALIGN_LEFT, 0);
         lv_obj_align_to(date_label, title_label, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 0);
@@ -1359,7 +1373,7 @@ if (total_displayed == 0) {
   lv_obj_t *large_time_hours = lv_label_create(eventContainer);
   lv_label_set_text(large_time_hours, hours_buf);
   lv_obj_set_style_text_font(large_time_hours, &technology_98, 0);
-  lv_obj_set_style_text_color(large_time_hours, lv_color_hex(0xFF0000), 0);
+  lv_obj_set_style_text_color(large_time_hours, scheme_accent(), 0);
   lv_obj_set_style_text_align(large_time_hours, LV_TEXT_ALIGN_CENTER, 0);
   lv_label_set_long_mode(large_time_hours, LV_LABEL_LONG_CLIP);
 
@@ -1367,7 +1381,7 @@ if (total_displayed == 0) {
   lv_obj_t *large_time_colon = lv_label_create(eventContainer);
   lv_label_set_text(large_time_colon, ":");
   lv_obj_set_style_text_font(large_time_colon, &technology_98, 0);
-  lv_obj_set_style_text_color(large_time_colon, lv_color_hex(0xFF0000), 0);
+  lv_obj_set_style_text_color(large_time_colon, scheme_accent(), 0);
   lv_obj_set_style_text_align(large_time_colon, LV_TEXT_ALIGN_CENTER, 0);
   lv_obj_set_style_text_opa(large_time_colon, LV_OPA_COVER, 0);  // Start visible
   lv_label_set_long_mode(large_time_colon, LV_LABEL_LONG_CLIP);
@@ -1376,7 +1390,7 @@ if (total_displayed == 0) {
   lv_obj_t *large_time_minutes = lv_label_create(eventContainer);
   lv_label_set_text(large_time_minutes, mins_buf);
   lv_obj_set_style_text_font(large_time_minutes, &technology_98, 0);
-  lv_obj_set_style_text_color(large_time_minutes, lv_color_hex(0xFF0000), 0);
+  lv_obj_set_style_text_color(large_time_minutes, scheme_accent(), 0);
   lv_obj_set_style_text_align(large_time_minutes, LV_TEXT_ALIGN_CENTER, 0);
   lv_label_set_long_mode(large_time_minutes, LV_LABEL_LONG_CLIP);
 
@@ -1404,7 +1418,7 @@ lv_obj_update_layout(eventContainer);
   lv_obj_t *noEventsLabel = lv_label_create(eventContainer);
   lv_label_set_text(noEventsLabel, "No events");
   lv_obj_set_style_text_font(noEventsLabel, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(noEventsLabel, lv_color_hex(0xFFFFFF), 0);
+  lv_obj_set_style_text_color(noEventsLabel, ev_panel_text, 0);
   lv_obj_align(noEventsLabel, LV_ALIGN_TOP_LEFT, 10, y_offset + 20);  // Minor adjustment: +20 to avoid overlap with time if y_offset=-10
 
   // Create/start blink and time-update timer (pass colon as user data)
