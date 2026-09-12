@@ -603,6 +603,32 @@ String URLEncode(const String& str) {
   }
   return encoded;
 }
+// Fold typographic punctuation onto ASCII.
+//
+// The fonts here only carry the ASCII block: LVGL's built-in montserrat faces are
+// generated with 0x20-0x7F plus a degree sign and a bullet, and the bold face in
+// src/fonts/ covers 32-127 and 256-383. Anything outside that has no glyph and is
+// drawn as an empty box.
+//
+// A phone keyboard, the website's editor and gov.uk all emit the CURLY apostrophe
+// U+2019 rather than ASCII 0x27, which is what turned "New Year's Day" into
+// "New Year[]s Day". It is folded here as the text is read in, so every label that
+// shows server data is covered without touching each one.
+static String fontSafe(const String &in) {
+  String out = in;
+  out.replace("\xE2\x80\x98", "'");   // U+2018 left single quote
+  out.replace("\xE2\x80\x99", "'");   // U+2019 right single quote  <- the common one
+  out.replace("\xE2\x80\x9A", "'");   // U+201A single low-9 quote
+  out.replace("\xE2\x80\x9B", "'");   // U+201B single high-reversed-9 quote
+  out.replace("\xE2\x80\x9C", "\"");  // U+201C left double quote
+  out.replace("\xE2\x80\x9D", "\"");  // U+201D right double quote
+  out.replace("\xE2\x80\x9E", "\"");  // U+201E double low-9 quote
+  out.replace("\xE2\x80\x93", "-");   // U+2013 en dash
+  out.replace("\xE2\x80\x94", "-");   // U+2014 em dash
+  out.replace("\xE2\x80\xA6", "..."); // U+2026 horizontal ellipsis
+  out.replace("\xC2\xA0", " ");       // U+00A0 no-break space
+  return out;
+}
 void rearrange_calendar_parts(lv_obj_t *cal) {
   lv_obj_t *header = NULL;
   lv_obj_t *btnm = lv_calendar_get_btnmatrix(cal);
@@ -1100,7 +1126,7 @@ void updateWeatherDisplay() {
   lv_obj_set_style_bg_grad_color(hum_cont, scheme_accent_tint(3), 0);
   lv_obj_set_style_bg_grad_dir(hum_cont, LV_GRAD_DIR_HOR, 0);
   lv_obj_set_style_radius(hum_cont, UI_RADIUS, 0);
-  make_chip_value(hum_cont, "Hum",
+  make_chip_value(hum_cont, "Humidity",
                   String((int)current_weather.relative_humidity_2m) + "%");
   // Wind (UPDATED: Dark text color)
   lv_obj_t *wind_cont = lv_obj_create(buttons_cont);
@@ -3304,8 +3330,11 @@ void updateHolidayLabel() {
   for (int i = 0; i < numHolidays; i++) {
     if (holidays[i].year == year && holidays[i].month == month) {
       has_holiday = true;
+      // Titles are folded to ASCII by fontSafe() as the feed is read, so the old
+      // "'" -> " " hack is gone: it turned "New Year's Day" into "New Year s Day"
+      // and, because gov.uk sends the CURLY apostrophe, never fixed the box it was
+      // written for.
       String processed_title = holidays[i].title;
-      processed_title.replace("'", " ");  // Replace apostrophe with space to avoid glyph issues
       if (content_str != "") content_str += ", ";
       content_str += processed_title + " (" + String(holidays[i].day) + ")";
     }
@@ -4753,7 +4782,7 @@ void fetchWeatherLocation() {
       http.end();
       return;
     }
-    location = doc["city_name"].as<String>();
+    location = fontSafe(doc["city_name"].as<String>());
     lat = String(doc["latitude"].as<float>(), 6);
     lon = String(doc["longitude"].as<float>(), 6);
     preferences.begin("location", false);
@@ -5450,10 +5479,10 @@ void addEvent(JsonObject eventObj) {
     if (debug == 1) Serial.println("[APP] Event limit reached (300)");
     return;
   }
-  events[numEvents].summary = eventObj["summary"].as<String>();
+  events[numEvents].summary = fontSafe(eventObj["summary"].as<String>());
   events[numEvents].start = eventObj["start"].as<String>();
   events[numEvents].end = eventObj["end"].as<String>();
-  events[numEvents].description = eventObj["description"].as<String>();
+  events[numEvents].description = fontSafe(eventObj["description"].as<String>());
   String remind_before_str = eventObj["remind_before"].as<String>();
   if (events[numEvents].start.isEmpty() || events[numEvents].end.isEmpty()) {
     if (debug == 1) Serial.println("[APP] Event " + String(numEvents) + " has empty start/end, skipping");
@@ -5639,7 +5668,7 @@ void save_settings_cb(lv_event_t *e) {
       JsonDocument doc;
       DeserializationError error = deserializeJson(doc, payload);
       if (!error) {
-        location = doc["city_name"].as<String>();
+        location = fontSafe(doc["city_name"].as<String>());
         lat = String(doc["latitude"].as<float>(), 6);
         lon = String(doc["longitude"].as<float>(), 6);
         preferences.begin("location", false);
@@ -5726,7 +5755,7 @@ void fetchBankHolidays() {
     for (JsonObject evt : eventsArray) {
       if (numHolidays >= 100) break;
       String date = evt["date"].as<String>();
-      String title = evt["title"].as<String>();
+      String title = fontSafe(evt["title"].as<String>());
       int y, m, d;
       if (sscanf(date.c_str(), "%d-%d-%d", &y, &m, &d) == 3) {
         holidays[numHolidays].year = y;
