@@ -56,6 +56,9 @@ void wifi_logout_cb(lv_event_t *e);
 void api_logout_cb(lv_event_t *e);
 void keyboard_event_cb(lv_event_t *e);
 void show_wifi_setup_screen();
+void initTime(); // defined near setup(); declared here for the WiFi wizard
+static void wifi_setup_teardown();
+static void serviceWifiSetup();
 void show_api_code_screen();
 void show_location_screen();
 void show_settings_popup();
@@ -149,6 +152,18 @@ void fetchWeatherLocation();// forward declaration for new function
 Preferences preferences;
 // LVGL objects
 static lv_obj_t *wifi_setup_screen = nullptr;
+// WiFi setup screen widgets. Held here instead of dug out with
+// lv_obj_get_child(screen, N): the old code assumed the password box was child
+// index 1, so any layout change would silently hand it the wrong widget.
+static lv_obj_t *wifi_ssid_dd = nullptr;     // network dropdown
+static lv_obj_t *wifi_pass_ta = nullptr;     // password box
+static lv_obj_t *wifi_status_lbl = nullptr;  // the one reused status/error line
+static bool wifi_scan_pending = false;
+static unsigned long wifi_scan_started = 0;
+static bool wifi_connect_pending = false;
+static unsigned long wifi_connect_started = 0;
+static String wifi_pending_ssid = "";
+static String wifi_pending_password = "";
 static lv_obj_t *api_code_screen = nullptr;
 static lv_obj_t *location_screen = nullptr;
 static lv_obj_t *settings_popup = nullptr;
@@ -1360,53 +1375,135 @@ lv_obj_update_layout(eventContainer);
 
 }
 
-void wifi_connect_cb(lv_event_t * e) {
-  if (debug == 1) Serial.println("[APP] WiFi connect button clicked");
-  lv_obj_t *dropdown = (lv_obj_t*)lv_event_get_user_data(e);
-  lv_obj_t *password_ta = lv_obj_get_child(wifi_setup_screen, 1);
-  char selected_ssid[32];
-  lv_dropdown_get_selected_str(dropdown, selected_ssid, sizeof(selected_ssid));
-  String ssid_str = String(selected_ssid);
-  String password_str = String(lv_textarea_get_text(password_ta));
-  if (debug == 1) Serial.println("[APP] Connecting to WiFi: " + ssid_str);
-  WiFi.begin(ssid_str.c_str(), password_str.c_str());
-  int attempts = 0;
-  while (WiFi.status() != WL_CONNECTED && attempts < 20) {
-    delay(500);
-    if (debug == 1) Serial.print(".");
-    attempts++;
+// ---- WiFi setup: network list + connection state machine -------------------
+// Nothing here blocks any more. The old code ran a blocking WiFi.scanNetworks()
+// before it created a single widget (so the screen stayed black for 1-3s) and
+// then blocked for up to 10s inside the Connect handler with no feedback at all.
+#define WIFI_MAX_SSID_SHOWN 10
+#define WIFI_SCAN_TIMEOUT_MS 20000UL
+#define WIFI_CONNECT_TIMEOUT_MS 20000UL
+
+static void wifi_set_status(const char *msg, bool is_error) {
+  if (!wifi_status_lbl) return;
+  lv_label_set_text(wifi_status_lbl, msg);
+  lv_obj_set_style_text_color(wifi_status_lbl,
+                              lv_color_hex(is_error ? 0xFF5252 : 0x8BC34A), 0);
+}
+static void wifi_fill_network_list() {
+  if (!wifi_ssid_dd) return;
+  int n = WiFi.scanComplete();
+  if (n < 0) {
+    // -1 while still running, -2 if it never started. Bound it with a timeout
+    // rather than depending on those two constants.
+    if (millis() - wifi_scan_started < WIFI_SCAN_TIMEOUT_MS) return;
+    n = 0;
   }
+  wifi_scan_pending = false;
+  if (n == 0) {
+    lv_dropdown_set_options(wifi_ssid_dd, "No networks found");
+    wifi_set_status("No networks found - check the router is in range", true);
+    return;
+  }
+  String list;
+  int shown = (n < WIFI_MAX_SSID_SHOWN) ? n : WIFI_MAX_SSID_SHOWN;
+  for (int i = 0; i < shown; i++) {
+    if (i) list += "\n"; // separator BETWEEN entries, so no trailing blank option
+    list += WiFi.SSID(i);
+  }
+  lv_dropdown_set_options(wifi_ssid_dd, list.c_str());
+  lv_dropdown_set_selected(wifi_ssid_dd, 0);
+  wifi_set_status("", false);
+}
+static void wifi_scan_start() {
+  if (wifi_scan_pending) return;
+  if (wifi_ssid_dd) lv_dropdown_set_options(wifi_ssid_dd, "Scanning...");
+  wifi_set_status("Scanning for networks...", false);
+  WiFi.scanDelete();      // release the previous result first
+  wifi_scan_started = millis();
+  wifi_scan_pending = true;
+  WiFi.scanNetworks(true); // asynchronous: returns immediately
+}
+// Single teardown for the screen, so the widget pointers can never dangle.
+static void wifi_setup_teardown() {
+  wifi_scan_pending = false;
+  wifi_connect_pending = false;
+  wifi_ssid_dd = nullptr;
+  wifi_pass_ta = nullptr;
+  wifi_status_lbl = nullptr;
+  if (wifi_setup_screen) {
+    lv_obj_del(wifi_setup_screen);
+    wifi_setup_screen = nullptr;
+  }
+}
+// Carry on with the first-run wizard now that we are online.
+static void wifi_after_connected() {
+  initTime(); // everything downstream needs a correct clock
+  preferences.begin("api", false);
+  apiCode = preferences.getString("apiCode", "");
+  preferences.end();
+  if (apiCode == "") {
+    show_api_code_screen();
+    return;
+  }
+  preferences.begin("location", false);
+  location = preferences.getString("location", "");
+  preferences.end();
+  if (location == "") {
+    show_location_screen();
+    return;
+  }
+  setup_calendar();
+  fetchAfterUiReady();
+}
+static void wifi_connect_start() {
+  if (wifi_connect_pending) return;
+  if (!wifi_ssid_dd) return;
+  char selected[33] = {0};
+  lv_dropdown_get_selected_str(wifi_ssid_dd, selected, sizeof(selected));
+  String want = String(selected);
+  // With an empty list the dropdown is showing one of these placeholders.
+  if (want.isEmpty() || want == "Scanning..." || want == "No networks found") {
+    wifi_set_status("Pick a network from the list first", true);
+    return;
+  }
+  wifi_pending_ssid = want;
+  wifi_pending_password = String(wifi_pass_ta ? lv_textarea_get_text(wifi_pass_ta) : "");
+  wifi_connect_started = millis();
+  wifi_connect_pending = true;
+  String msg = "Connecting to " + want + "...";
+  wifi_set_status(msg.c_str(), false);
+  WiFi.disconnect(); // clear any half-open attempt so begin() starts clean
+  WiFi.begin(wifi_pending_ssid.c_str(), wifi_pending_password.c_str());
+}
+// Driven from loop(): finishes the scan and completes or aborts a connection.
+static void serviceWifiSetup() {
+  if (wifi_scan_pending) wifi_fill_network_list();
+  if (!wifi_connect_pending) return;
   if (WiFi.status() == WL_CONNECTED) {
-    if (debug == 1) Serial.println("[APP] WiFi connected! IP: " + WiFi.localIP().toString());
+    wifi_connect_pending = false;
     preferences.begin("wifi", false);
-    preferences.putString("ssid", ssid_str);
-    preferences.putString("password", password_str);
+    preferences.putString("ssid", wifi_pending_ssid);
+    preferences.putString("password", wifi_pending_password);
     preferences.end();
-    if (debug == 1) Serial.println("[APP] WiFi credentials saved");
-    lv_obj_add_flag(wifi_setup_screen, LV_OBJ_FLAG_HIDDEN);
-    preferences.begin("api", false);
-    apiCode = preferences.getString("apiCode", "");
-    preferences.end();
-    if (apiCode == "") {
-      show_api_code_screen();
-    } else {
-      preferences.begin("location", false);
-      location = preferences.getString("location", "");
-      preferences.end();
-      if (location == "") {
-        show_location_screen();
-      } else {
-        setup_calendar();
-        fetchAfterUiReady();
-      }
-    }
-  } else {
-    if (debug == 1) Serial.println("[APP] WiFi connection failed");
-    lv_obj_t *error_label = lv_label_create(wifi_setup_screen);
-    lv_label_set_text(error_label, "Connection failed");
-    lv_obj_set_style_text_color(error_label, lv_color_hex(0xFF0000), 0);
-    lv_obj_align(error_label, LV_ALIGN_TOP_MID, 0, 200);
+    ssid = wifi_pending_ssid;
+    password = wifi_pending_password;
+    wifi_setup_teardown();
+    wifi_after_connected();
+    return;
   }
+  if (millis() - wifi_connect_started >= WIFI_CONNECT_TIMEOUT_MS) {
+    wifi_connect_pending = false;
+    WiFi.disconnect();
+    wifi_set_status("Connection failed - check the password and try again", true);
+  }
+}
+void wifi_connect_cb(lv_event_t * e) {
+  (void)e;
+  wifi_connect_start();
+}
+static void wifi_rescan_cb(lv_event_t * e) {
+  (void)e;
+  wifi_scan_start();
 }
 void api_code_submit_cb(lv_event_t * e) {
   if (debug == 1) Serial.println("[APP] API code submit button clicked");
@@ -1701,10 +1798,7 @@ static void do_wifi_logout() {
   preferences.clear();
   preferences.end();
   WiFi.disconnect();
-  if (wifi_setup_screen) {
-    lv_obj_del(wifi_setup_screen);
-    wifi_setup_screen = nullptr;
-  }
+  wifi_setup_teardown(); // also clears the widget pointers
   if (settings_popup) {
     lv_obj_add_flag(settings_popup, LV_OBJ_FLAG_HIDDEN);
     lv_obj_del(settings_popup);
@@ -1824,73 +1918,128 @@ void keyboard_event_cb(lv_event_t * e) {
     }
 }
 void show_wifi_setup_screen() {
+  if (wifi_setup_screen) return; // already up; never build a second one
   if (debug == 1) Serial.println("[APP] Showing WiFi setup screen...");
+
   wifi_setup_screen = lv_obj_create(lv_scr_act());
   lv_obj_set_size(wifi_setup_screen, 800, 480);
   lv_obj_set_style_bg_color(wifi_setup_screen, lv_color_hex(0x000000), 0);
-  int n = WiFi.scanNetworks();
-  if (debug == 1) Serial.println("[APP] Found " + String(n) + " networks");
-  String ssid_list = "";
-  for (int i = 0; i < n && i < 10; i++) {
-    ssid_list += WiFi.SSID(i);
-    if (i < n - 1) ssid_list += "\n";
-  }
-  lv_obj_t *dropdown = lv_dropdown_create(wifi_setup_screen);
-  lv_dropdown_set_options(dropdown, ssid_list.c_str());
-  lv_obj_set_width(dropdown, 300);
-  lv_obj_align(dropdown, LV_ALIGN_TOP_MID, 0, 50);
-  lv_obj_set_style_text_font(dropdown, &lv_font_montserrat_14, 0);
-  lv_obj_t *password_ta = lv_textarea_create(wifi_setup_screen);
-  lv_textarea_set_password_mode(password_ta, true);
-  lv_textarea_set_one_line(password_ta, true);
-  lv_textarea_set_placeholder_text(password_ta, "Enter password");
-  lv_obj_set_width(password_ta, 300);
-  lv_obj_align(password_ta, LV_ALIGN_TOP_MID, 0, 120);
-  lv_obj_set_style_text_font(password_ta, &lv_font_montserrat_14, 0);
-  lv_obj_add_event_cb(password_ta, keyboard_event_cb, LV_EVENT_FOCUSED, password_ta);
-  lv_obj_add_event_cb(password_ta, keyboard_event_cb, LV_EVENT_DEFOCUSED, password_ta);
+  lv_obj_set_style_border_width(wifi_setup_screen, 0, 0);
+  lv_obj_set_style_radius(wifi_setup_screen, 0, 0);
+  lv_obj_set_style_pad_all(wifi_setup_screen, 0, 0);
+  lv_obj_clear_flag(wifi_setup_screen, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scrollbar_mode(wifi_setup_screen, LV_SCROLLBAR_MODE_OFF);
+
+  lv_obj_t *wifi_title = lv_label_create(wifi_setup_screen);
+  lv_label_set_text(wifi_title, "WiFi Setup");
+  lv_obj_set_style_text_font(wifi_title, &lv_font_montserrat_24, 0);
+  lv_obj_set_style_text_color(wifi_title, lv_color_hex(0xFFFFFF), 0);
+  lv_obj_align(wifi_title, LV_ALIGN_TOP_LEFT, 20, 10);
+
+  // ---- left half: the form -------------------------------------------------
+  lv_obj_t *net_cap = lv_label_create(wifi_setup_screen);
+  lv_label_set_text(net_cap, "Network");
+  lv_obj_set_style_text_font(net_cap, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(net_cap, lv_color_hex(0xAAAAAA), 0);
+  lv_obj_align(net_cap, LV_ALIGN_TOP_LEFT, 20, 58);
+
+  wifi_ssid_dd = lv_dropdown_create(wifi_setup_screen);
+  lv_dropdown_set_options(wifi_ssid_dd, "Scanning...");
+  lv_obj_set_width(wifi_ssid_dd, 300);
+  lv_obj_align(wifi_ssid_dd, LV_ALIGN_TOP_LEFT, 20, 80);
+  lv_obj_set_style_text_font(wifi_ssid_dd, &lv_font_montserrat_14, 0);
+
+  lv_obj_t *scan_btn = lv_button_create(wifi_setup_screen);
+  lv_obj_set_size(scan_btn, 110, 44);
+  lv_obj_align(scan_btn, LV_ALIGN_TOP_LEFT, 330, 79);
+  lv_obj_set_style_bg_color(scan_btn, scheme_accent(), 0);
+  lv_obj_set_style_bg_color(scan_btn, scheme_accent_dark(), LV_STATE_PRESSED);
+  lv_obj_set_style_radius(scan_btn, 10, 0);
+  lv_obj_add_event_cb(scan_btn, wifi_rescan_cb, LV_EVENT_PRESSED, NULL);
+  lv_obj_t *scan_lbl = lv_label_create(scan_btn);
+  lv_label_set_text(scan_lbl, "Rescan");
+  lv_obj_center(scan_lbl);
+  lv_obj_set_style_text_font(scan_lbl, &lv_font_montserrat_14, 0);
+
+  lv_obj_t *pw_cap = lv_label_create(wifi_setup_screen);
+  lv_label_set_text(pw_cap, "Password");
+  lv_obj_set_style_text_font(pw_cap, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(pw_cap, lv_color_hex(0xAAAAAA), 0);
+  lv_obj_align(pw_cap, LV_ALIGN_TOP_LEFT, 20, 136);
+
+  wifi_pass_ta = lv_textarea_create(wifi_setup_screen);
+  lv_textarea_set_password_mode(wifi_pass_ta, true);
+  lv_textarea_set_one_line(wifi_pass_ta, true);
+  lv_textarea_set_placeholder_text(wifi_pass_ta, "Enter password");
+  lv_obj_set_width(wifi_pass_ta, 420);
+  lv_obj_align(wifi_pass_ta, LV_ALIGN_TOP_LEFT, 20, 158);
+  lv_obj_set_style_text_font(wifi_pass_ta, &lv_font_montserrat_14, 0);
+  lv_obj_add_event_cb(wifi_pass_ta, keyboard_event_cb, LV_EVENT_FOCUSED, wifi_pass_ta);
+  lv_obj_add_event_cb(wifi_pass_ta, keyboard_event_cb, LV_EVENT_DEFOCUSED, wifi_pass_ta);
+
   lv_obj_t *connect_btn = lv_button_create(wifi_setup_screen);
-  lv_obj_align(connect_btn, LV_ALIGN_TOP_MID, 0, 190);
-  lv_obj_set_size(connect_btn, 120, 40);
-  lv_obj_add_event_cb(connect_btn, wifi_connect_cb, LV_EVENT_PRESSED, dropdown);
+  lv_obj_set_size(connect_btn, 160, 46);
+  lv_obj_align(connect_btn, LV_ALIGN_TOP_LEFT, 20, 216);
+  lv_obj_set_style_bg_color(connect_btn, lv_color_hex(0x00A86B), 0);
+  lv_obj_set_style_radius(connect_btn, 10, 0);
+  lv_obj_add_event_cb(connect_btn, wifi_connect_cb, LV_EVENT_PRESSED, NULL);
   lv_obj_t *connect_label = lv_label_create(connect_btn);
   lv_label_set_text(connect_label, "Connect");
   lv_obj_center(connect_label);
   lv_obj_set_style_text_font(connect_label, &lv_font_montserrat_14, 0);
-  if (ssid != "") {
+
+  // Only offered when there is something to log out of.
+  if (!ssid.isEmpty()) {
     lv_obj_t *wifi_logout_btn = lv_button_create(wifi_setup_screen);
-    lv_obj_add_event_cb(wifi_logout_btn, wifi_logout_cb, LV_EVENT_PRESSED, NULL);
-    lv_obj_align(wifi_logout_btn, LV_ALIGN_TOP_MID, 0, 260);
-    lv_obj_set_size(wifi_logout_btn, 120, 40);
+    lv_obj_set_size(wifi_logout_btn, 160, 46);
+    lv_obj_align(wifi_logout_btn, LV_ALIGN_TOP_LEFT, 190, 216);
     lv_obj_set_style_bg_color(wifi_logout_btn, lv_color_hex(0x333333), 0);
+    lv_obj_set_style_radius(wifi_logout_btn, 10, 0);
+    lv_obj_add_event_cb(wifi_logout_btn, wifi_logout_cb, LV_EVENT_PRESSED, NULL);
     lv_obj_t *wifi_logout_label = lv_label_create(wifi_logout_btn);
     lv_label_set_text(wifi_logout_label, "WiFi Logout");
     lv_obj_center(wifi_logout_label);
     lv_obj_set_style_text_font(wifi_logout_label, &lv_font_montserrat_14, 0);
   }
+
+  // One reused status line. The old code created a NEW "Connection failed" label
+  // on every attempt, so repeated failures stacked on top of each other - and it
+  // was placed at y=200, directly over the Connect button.
+  wifi_status_lbl = lv_label_create(wifi_setup_screen);
+  lv_label_set_text(wifi_status_lbl, "");
+  lv_obj_set_style_text_font(wifi_status_lbl, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(wifi_status_lbl, lv_color_hex(0x8BC34A), 0);
+  lv_obj_set_width(wifi_status_lbl, 420);
+  lv_label_set_long_mode(wifi_status_lbl, LV_LABEL_LONG_WRAP);
+  lv_obj_align(wifi_status_lbl, LV_ALIGN_TOP_LEFT, 20, 274);
+
+  // ---- right half: QR + instructions ---------------------------------------
+  // The QR used to be aligned BOTTOM_MID with a +90 offset, which pushed it 90px
+  // BELOW the bottom edge of the screen with only a sliver visible.
+  lv_obj_t *qr_img = lv_img_create(wifi_setup_screen);
+  lv_img_set_src(qr_img, &qr);
+  lv_img_set_zoom(qr_img, 120); // 298px source -> ~140px
+  lv_obj_align(qr_img, LV_ALIGN_TOP_RIGHT, -115, 70);
+  // No img_recolor: the style only applies with img_recolor_opa set, and COVER
+  // would flatten the whole code to one colour and make it unscannable.
+
+  lv_obj_t *instruction_label = lv_label_create(wifi_setup_screen);
+  lv_label_set_text(instruction_label,
+                    "Register on crontech.uk to use CronTab.\nScan the QR code for quick setup.");
+  lv_obj_set_style_text_color(instruction_label, lv_color_hex(0xFFFFFF), 0);
+  lv_obj_set_style_text_font(instruction_label, &lv_font_montserrat_14, 0);
+  lv_label_set_long_mode(instruction_label, LV_LABEL_LONG_WRAP);
+  lv_obj_set_width(instruction_label, 300);
+  lv_obj_set_style_text_align(instruction_label, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_align_to(instruction_label, qr_img, LV_ALIGN_OUT_BOTTOM_MID, 0, 14);
+
   if (!keyboard) {
     keyboard = lv_keyboard_create(lv_scr_act());
     lv_obj_add_flag(keyboard, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_style_text_font(keyboard, &lv_font_montserrat_14, 0);
   }
- // UPDATED: Add QR code image under the UI, positioned at y-offset -10
-  lv_obj_t *qr_img = lv_img_create(wifi_setup_screen);  // Create on the screen container
-  lv_img_set_src(qr_img, &qr);
-  lv_img_set_zoom(qr_img, 120);  // Scale for visibility (adjust as needed)
-  lv_obj_align(qr_img, LV_ALIGN_BOTTOM_MID, 0, 90);  // Position under buttons/text areas
-  lv_obj_set_style_img_recolor(qr_img, lv_color_hex(0xFFFFFF), 0);  // Ensure white for dark background
 
-  // NEW: Add instructional text label above the QR for context and guidance
-  lv_obj_t *instruction_label = lv_label_create(wifi_setup_screen);
-  lv_label_set_text(instruction_label, "Register on crontech.uk to use CronTab. Scan the QR code for quick setup.");
-  lv_obj_set_style_text_color(instruction_label, lv_color_hex(0xFFFFFF), 0);
-  lv_obj_set_style_text_font(instruction_label, &lv_font_montserrat_14, 0);
-  lv_label_set_long_mode(instruction_label, LV_LABEL_LONG_WRAP);  // Enable text wrapping for longer sentences
-  lv_obj_set_width(instruction_label, 600);  // Set a reasonable width for wrapping on 800px screen
-  lv_obj_align_to(instruction_label, qr_img, LV_ALIGN_OUT_TOP_MID, 0, 70);  // Position 20px above QR
-
-  if (debug == 1) Serial.println("[APP] WiFi setup screen shown with QR code and instructional text");;
-
+  wifi_scan_start(); // the list fills in when the async scan completes
 }
 
 
@@ -3853,6 +4002,8 @@ void loop() {
   // Post-UI fetch queue: one blocking request per iteration, with LVGL drawing
   // in between, instead of the whole sequence in one go.
   serviceBootFetchQueue();
+  // WiFi wizard: finishes the async scan and the in-progress connection attempt.
+  serviceWifiSetup();
 
   unsigned long currentTime = millis();
   if (currentTime - lastRefreshTime >= refreshInterval && calendar && WiFi.status() == WL_CONNECTED && !is_ota_updating) {

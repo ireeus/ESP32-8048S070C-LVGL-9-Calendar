@@ -66,6 +66,15 @@ void my_touchpad_read(lv_indev_t *indev, lv_indev_data_t *data)
 }
 void setup_display()
 {
+  // Several first-run paths reach this twice: setup() initialises the display so
+  // it can show the WiFi wizard, and setup_calendar() calls it again once the
+  // wizard finishes. Without this guard the second call allocated a second 384KB
+  // LVGL draw buffer, created a second display AND a second input device, and ran
+  // gfx.begin()/lv_init() again - leaking the first buffer and leaving LVGL with
+  // two displays registered.
+  static bool display_ready = false;
+  if (display_ready) return;
+  display_ready = true;
   Serial.begin(115200);
   Serial.println("Initializing display...");
   Serial.printf("Free heap before init: %d bytes\n", heap_caps_get_free_size(MALLOC_CAP_8BIT));
