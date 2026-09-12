@@ -2489,7 +2489,14 @@ void show_settings_popup() {
     lv_obj_set_style_width(settings_popup, 10, LV_PART_SCROLLBAR);
     lv_obj_set_style_bg_color(settings_popup, lv_color_hex(0xBBBBBB), LV_PART_SCROLLBAR);
     lv_obj_set_flex_flow(settings_popup, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(settings_popup, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    // SPACE_BETWEEN, not START: the popup is a fixed 464px tall but its body is
+    // LV_SIZE_CONTENT, so packing from the top left the button row floating just
+    // under the body (and the empty space below it). This pins the row to the
+    // bottom of the window instead. With only two children the two are pushed to
+    // opposite ends; if the content ever overflows there is no free space to
+    // distribute, so it behaves exactly like START again.
+    lv_obj_set_flex_align(settings_popup, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_START,
+                          LV_FLEX_ALIGN_START);
 
     // ---- small layout helpers --------------------------------------------
     auto make_panel = [](lv_obj_t *parent) {
