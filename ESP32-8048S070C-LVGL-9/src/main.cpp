@@ -4050,9 +4050,13 @@ void setup_calendar() {
     return;
   }
   lv_obj_set_size(calendar, 350, 350);
-  // 60 -> 78 to clear the 40px taskbar: the month label is anchored to the top
-  // of the calendar and would otherwise sit underneath the strip.
-  lv_obj_align(calendar, LV_ALIGN_TOP_LEFT, 10, 78);
+  // Top-aligned with eventContainer - both columns now start on the same line at
+  // y=50. The old 78 existed only to clear the 40px taskbar for the month label
+  // that used to sit above the calendar; that label now lives INSIDE the frame,
+  // so the space is free. Because button_bar is anchored to the calendar's bottom
+  // edge, this also lifts the button row from y 438..477 to y 410..449 - 31px of
+  // clearance off the bottom of the screen instead of 2px.
+  lv_obj_align(calendar, LV_ALIGN_TOP_LEFT, 10, 50);
   showed_year = timeinfo.tm_year + 1900;
   showed_month = timeinfo.tm_mon + 1;
   lv_calendar_set_showed_date(calendar, showed_year, showed_month);
