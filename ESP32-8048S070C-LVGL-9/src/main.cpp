@@ -10,7 +10,7 @@
 #include <LittleFS.h>     // background-image cache (the unused spiffs partition)
 extern const lv_font_t technology_98;
 // Build version
-const String build_version = "2.1";
+const String build_version = "2.2.0";
 int debug =0; // Change to 1 to enable serial prints
 // Firmware check interval variable
 const unsigned long firmwareCheckInterval = 100000UL; // 5 minutes in milliseconds
@@ -341,7 +341,7 @@ String last_ignored_notification = "";
 String current_notification_text = "";
 String backgroundFilename = ""; // New: Store the background image filename
 // OTA variables
-String currentFirmwareVersion = "1.0.0"; // Loaded from Preferences in setup()
+String currentFirmwareVersion = "2.2.0"; // replaced by build_version in setup()
 String latestFirmwareVersion = "";
 String firmwareUrl = "";
 WiFiClientSecure client;
@@ -3018,7 +3018,7 @@ static unsigned long otaLastUiTick = 0;
 // up in, so the artefacts become invisible rather than merely brief. LVGL is not
 // refreshed while that is on screen; the progress bar appears afterwards, once
 // the update has been verified and committed.
-#define OTA_VERIFY_MS 2500UL // length of the finishing bar sweep
+#define OTA_VERIFY_MS 3250UL // finishing bar sweep (2.5s + 30%)
 static bool otaBlackout = false;       // screen is flat; LVGL must not repaint
 static bool otaVerifying = false;      // running the finishing bar
 static unsigned long otaVerifyStart = 0;
@@ -3040,10 +3040,19 @@ static void ota_backlight(bool on) {
   (void)on;
 #endif
 }
-// Take the picture down to one flat colour. This is the whole trick: with
-// nothing on screen, a DMA underrun has nothing to corrupt.
+// Take the screen right down: backlight off AND a flat framebuffer.
+//
+// The backlight (TFT_BL, GPIO 2) is the only part of the panel this board lets
+// software control. The panel itself is hard-wired to the 3.3V rail, a dumb RGB
+// panel has no command interface, and the ESP-IDF 4.4 RGB driver exposes no
+// sleep/stop/power API - so there is no way to actually power it down. Switching
+// the backlight off is what makes it go black, and it also removes the faint
+// glow and the flicker of a panel that is losing sync.
+//
+// The framebuffer is flattened as well, so that when the backlight comes back on
+// there is a clean black frame rather than a flash of whatever was left over.
 static void ota_blackout_on() {
-  ota_backlight(true); // the backlight stays on - this is a black picture, not a dark panel
+  ota_backlight(false);
   gfx.fillScreen(0x0000);
   otaBlackout = true;
 }
@@ -3134,10 +3143,14 @@ static void serviceOta() {
     if (ota_bar) lv_bar_set_value(ota_bar, pct, LV_ANIM_OFF);
     if (elapsed < OTA_VERIFY_MS) return;
     otaVerifying = false;
-    ota_set_status("Update complete. Restarting...", false);
+    char done_msg[80];
+    snprintf(done_msg, sizeof(done_msg), "Firmware updated to %s  [OK]",
+             latestFirmwareVersion.c_str());
+    ota_set_status(done_msg, false);
+    if (ota_status_lbl) lv_obj_set_style_text_color(ota_status_lbl, lv_color_hex(0x8BC34A), 0);
     is_ota_updating = false;
-    lv_refr_now(NULL);
-    delay(1200);
+    lv_refr_now(NULL); // make sure it is on screen before the reboot
+    delay(1500);
     ESP.restart();
     return;
   }
@@ -3204,7 +3217,7 @@ void update_btn_cb(lv_event_t *e) {
   // success - and success reboots - so a failed update left the user with no
   // button and no explanation. The popup covers it, so it is left alone.
   update_popup = lv_obj_create(lv_scr_act());
-  lv_obj_set_size(update_popup, 620, 300);
+  lv_obj_set_size(update_popup, 620, 350); // extra line for the dark-screen warning
   lv_obj_align(update_popup, LV_ALIGN_CENTER, 0, 0);
   lv_obj_set_style_bg_color(update_popup, lv_color_hex(0x1A1A1A), 0);
   lv_obj_set_style_border_color(update_popup, scheme_accent(), 0);
@@ -3230,6 +3243,18 @@ void update_btn_cb(lv_event_t *e) {
                                                         : latestFirmwareVersion.c_str());
   lv_obj_set_style_text_font(ota_ver, &lv_font_montserrat_14, 0);
   lv_obj_set_style_text_color(ota_ver, lv_color_hex(0xAAAAAA), 0);
+
+  // The screen genuinely goes dark for the whole download, which looks exactly
+  // like the device has died. Say so up front.
+  lv_obj_t *ota_note = lv_label_create(update_popup);
+  lv_label_set_text(ota_note,
+      "The screen will switch off for about a minute while the update downloads, "
+      "then come back to verify it. Do not turn the device off.");
+  lv_obj_set_style_text_font(ota_note, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(ota_note, lv_color_hex(0xFFD166), 0);
+  lv_obj_set_width(ota_note, LV_PCT(100));
+  lv_obj_set_style_text_align(ota_note, LV_TEXT_ALIGN_CENTER, 0);
+  lv_label_set_long_mode(ota_note, LV_LABEL_LONG_WRAP);
 
   ota_bar = lv_bar_create(update_popup);
   lv_obj_set_size(ota_bar, 540, 18);
