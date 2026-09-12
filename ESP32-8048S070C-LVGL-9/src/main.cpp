@@ -272,6 +272,14 @@ static lv_color_t scheme_accent_tint(int lvl) { return lv_palette_lighten(scheme
 static lv_color_t scheme_card_a()        { return (g_ui_darkness > 50) ? scheme_accent_dark() : scheme_accent_soft(); }
 static lv_color_t scheme_card_b()        { return (g_ui_darkness > 50) ? scheme_accent_deep() : scheme_accent(); }
 static lv_color_t scheme_card_text()     { return (g_ui_darkness > 50) ? lv_color_hex(0xECEFF1) : scheme_accent_deep(); }
+// Text for the "due in more than 3 days" cards. Their background is a FIXED bright
+// blue gradient that does not follow the theme, so neither the light/dark body
+// colour nor scheme_card_text() reads on it - the latter is near-white once the
+// darkness slider passes 50, which is the barely-visible white that was reported.
+// These stay dark while keeping the theme's hue, and the title is one step deeper
+// than the rest of the card's text.
+static lv_color_t scheme_upcoming_text()       { return scheme_accent_deep(); }
+static lv_color_t scheme_upcoming_title_text() { return lv_color_darken(scheme_accent_deep(), LV_OPA_40); }
 static int temp_adjust = 0;// Global temperature adjustment
 static unsigned long lastHolidayUpdate = 0;
 const unsigned long holidayUpdateInterval = 2592000000UL; // 30 days in milliseconds
@@ -1318,12 +1326,14 @@ void updateEventDisplay(lv_obj_t *calendar) {
 
         String summary = events[i].summary;
         if (summary.length() > 55) summary = summary.substring(0, 55) + "...";
+        String description = events[i].description;
+        if (description.length() > 55) description = description.substring(0, 55) + "...";
         String start_date_str = events[i].start.substring(0, 10); // YYYY-MM-DD
 
         // Title label (blue)
         lv_obj_t *title_label = lv_label_create(event_cont);
         lv_label_set_text(title_label, summary.c_str());
-        lv_obj_set_style_text_color(title_label, scheme_card_text(), 0);
+        lv_obj_set_style_text_color(title_label, scheme_upcoming_title_text(), 0);
         lv_obj_set_style_text_font(title_label, &lv_font_montserrat_14_bold, 0);
         lv_obj_set_style_text_align(title_label, LV_TEXT_ALIGN_LEFT, 0);
         lv_label_set_long_mode(title_label, LV_LABEL_LONG_WRAP);
@@ -1333,10 +1343,23 @@ void updateEventDisplay(lv_obj_t *calendar) {
         // Date row
         lv_obj_t *date_label = lv_label_create(event_cont);
         lv_label_set_text(date_label, ("On " + start_date_str).c_str());
-        lv_obj_set_style_text_color(date_label, scheme_card_text(), 0);
+        lv_obj_set_style_text_color(date_label, scheme_upcoming_text(), 0);
         lv_obj_set_style_text_font(date_label, &lv_font_montserrat_14, 0);
         lv_obj_set_style_text_align(date_label, LV_TEXT_ALIGN_LEFT, 0);
         lv_obj_align_to(date_label, title_label, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 0);
+
+        // Description. The today-cards had one and these did not, which is why it
+        // looked missing rather than absent by design.
+        if (description.length() > 0) {
+          lv_obj_t *desc_label = lv_label_create(event_cont);
+          lv_label_set_text(desc_label, description.c_str());
+          lv_obj_set_style_text_color(desc_label, scheme_upcoming_text(), 0);
+          lv_obj_set_style_text_font(desc_label, &lv_font_montserrat_14, 0);
+          lv_obj_set_style_text_align(desc_label, LV_TEXT_ALIGN_LEFT, 0);
+          lv_label_set_long_mode(desc_label, LV_LABEL_LONG_WRAP);
+          lv_obj_set_width(desc_label, lv_pct(100));
+          lv_obj_align_to(desc_label, date_label, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 0);
+        }
 
         y_offset += 70;
         total_displayed++;
