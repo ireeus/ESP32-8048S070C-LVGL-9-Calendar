@@ -3009,16 +3009,19 @@ static bool otaDownloading = false;
 static size_t otaWritten = 0;
 static size_t otaTotal = 0;
 static unsigned long otaLastUiTick = 0;
-// The RGB panel's framebuffer lives in PSRAM, and on the ESP32-S3 the flash and
-// the PSRAM share the SPI0 bus. Any flash write therefore blocks the panel's DMA
-// and it loses sync, which is the torn/garbage picture seen while updating.
-// ESP-IDF 4.4 has no bounce buffer to decouple the two (that needs IDF 5.x), so
-// the picture is blanked while flash is being written and shown again in short
-// windows. The progress bar is still readable - it just advances in steps.
-#define OTA_WRITE_MS 500UL // how long the panel stays dark while writing
-#define OTA_SHOW_MS  350UL // how long the bar stays visible between bursts
-static bool otaPanelBlank = false;
-static unsigned long otaPhaseStart = 0;
+// The RGB panel is a dumb panel: its framebuffer lives in PSRAM and the panel's
+// DMA reads it continuously. On the ESP32-S3 the flash shares that bus, so every
+// flash write starves the DMA and the panel loses sync - that is the tearing seen
+// while updating. ESP-IDF 4.4 has no bounce buffer to decouple the two (that
+// needs IDF 5.x), so instead the picture is taken down to ONE FLAT COLOUR for the
+// whole download. A uniform framebuffer has no contrast for a torn line to show
+// up in, so the artefacts become invisible rather than merely brief. LVGL is not
+// refreshed while that is on screen; the progress bar appears afterwards, once
+// the update has been verified and committed.
+#define OTA_VERIFY_MS 2500UL // length of the finishing bar sweep
+static bool otaBlackout = false;       // screen is flat; LVGL must not repaint
+static bool otaVerifying = false;      // running the finishing bar
+static unsigned long otaVerifyStart = 0;
 static lv_obj_t *ota_status_lbl = nullptr;
 static lv_obj_t *ota_bar = nullptr;
 static lv_obj_t *ota_action_btn = nullptr;
@@ -3037,23 +3040,19 @@ static void ota_backlight(bool on) {
   (void)on;
 #endif
 }
-static void ota_blank_panel() {
-  if (otaPanelBlank) return;
-  ota_backlight(false);
-  otaPanelBlank = true;
-  otaPhaseStart = millis();
+// Take the picture down to one flat colour. This is the whole trick: with
+// nothing on screen, a DMA underrun has nothing to corrupt.
+static void ota_blackout_on() {
+  ota_backlight(true); // the backlight stays on - this is a black picture, not a dark panel
+  gfx.fillScreen(0x0000);
+  otaBlackout = true;
 }
-static void ota_show_panel() {
-  if (!otaPanelBlank) return;
+// Bring the UI back. The entire screen has to be invalidated, because the
+// framebuffer LVGL thinks it owns was overwritten underneath it.
+static void ota_ui_show() {
   ota_backlight(true);
-  otaPanelBlank = false;
-  otaPhaseStart = millis();
-}
-// Safety net: whatever happens, never leave the screen dark.
-static void ota_restore_panel() {
-  ota_backlight(true);
-  otaPanelBlank = false;
-  otaPhaseStart = millis();
+  otaBlackout = false;
+  if (lv_scr_act()) lv_obj_invalidate(lv_scr_act());
 }
 static void ota_close_transfer() {
   if (otaHttpActive) {
@@ -3062,8 +3061,9 @@ static void ota_close_transfer() {
   }
   otaStream = nullptr;
   otaDownloading = false;
+  otaVerifying = false;
   is_ota_updating = false;
-  ota_restore_panel(); // a failure or a cancelled transfer must not leave it dark
+  ota_ui_show(); // a failure or a cancelled transfer must never leave the screen flat
 }
 // Back to a state the user can retry from, with the reason on screen.
 static void ota_fail(const char *msg) {
@@ -3118,46 +3118,47 @@ static void ota_start() {
     lv_bar_set_value(ota_bar, 0, LV_ANIM_OFF);
   }
   otaDownloading = true;
-  ota_restore_panel();
-  ota_show_progress(true);
+  // From here until the download completes, the screen is one flat colour.
+  ota_blackout_on();
 }
 // One bounded slice per loop() iteration.
 static void serviceOta() {
+  // ---- finishing sweep -----------------------------------------------------
+  // By the time this runs the update has ALREADY been validated and committed by
+  // Update.end(). The sweep is therefore reassurance that the install completed,
+  // not a measurement of it - and it only ever runs on a confirmed-good update.
+  if (otaVerifying) {
+    unsigned long elapsed = millis() - otaVerifyStart;
+    int pct = (int)((elapsed * 100) / OTA_VERIFY_MS);
+    if (pct > 100) pct = 100;
+    if (ota_bar) lv_bar_set_value(ota_bar, pct, LV_ANIM_OFF);
+    if (elapsed < OTA_VERIFY_MS) return;
+    otaVerifying = false;
+    ota_set_status("Update complete. Restarting...", false);
+    is_ota_updating = false;
+    lv_refr_now(NULL);
+    delay(1200);
+    ESP.restart();
+    return;
+  }
+
   if (!otaDownloading || !otaStream) return;
-  unsigned long now = millis();
 
-  if (otaPanelBlank) {
-    // Dark window elapsed: bring the picture back so the bar can be read.
-    if (now - otaPhaseStart >= OTA_WRITE_MS) {
-      ota_show_panel();
-      ota_show_progress(true);
+  // ---- download: every flash write happens while the screen is flat --------
+  uint8_t buff[512];
+  int budget = 16; // up to 8KB per pass, then hand the CPU back
+  while (budget-- > 0 && otaWritten < otaTotal) {
+    size_t avail = otaStream->available();
+    if (!avail) { delay(1); break; } // nothing buffered: let WiFi run
+    int c = otaStream->readBytes(buff, min(sizeof(buff), avail));
+    if (c <= 0) break;
+    if (Update.write(buff, c) != (size_t)c) {
+      Update.abort();
+      ota_fail("Writing the firmware to flash failed");
+      return;
     }
-  } else {
-    // Visible window elapsed: blank again and get on with the flash writes.
-    if (now - otaPhaseStart < OTA_SHOW_MS) return;
-    ota_blank_panel();
+    otaWritten += c;
   }
-
-  if (otaPanelBlank) {
-    // Dark: this is the only time we touch flash, so any DMA underrun happens
-    // where there is nothing on screen to tear.
-    uint8_t buff[512];
-    int budget = 16; // up to 8KB per window
-    while (budget-- > 0 && otaWritten < otaTotal) {
-      size_t avail = otaStream->available();
-      if (!avail) { delay(1); break; } // nothing buffered: let WiFi and LVGL run
-      int c = otaStream->readBytes(buff, min(sizeof(buff), avail));
-      if (c <= 0) break;
-      if (Update.write(buff, c) != (size_t)c) {
-        Update.abort();
-        ota_fail("Writing the firmware to flash failed");
-        return;
-      }
-      otaWritten += c;
-    }
-    ota_show_progress(false);
-  }
-
   if (otaWritten < otaTotal) return;
 
   // ---- download finished ----
@@ -3165,19 +3166,19 @@ static void serviceOta() {
   otaHttpActive = false;
   otaDownloading = false;
   otaStream = nullptr;
-  if (ota_bar) lv_bar_set_value(ota_bar, 100, LV_ANIM_OFF);
-  // Update.end() writes flash as well, so it has to happen while the panel is
-  // still blank. A failure restores the panel through ota_close_transfer().
+  // Update.end() validates what was written and switches the boot partition. It
+  // also writes a few flash sectors, so it runs while the screen is still flat.
   if (!Update.end(true)) { ota_fail("Could not finalise the update"); return; }
   preferences.begin("firmware", false);
   preferences.putString("version", latestFirmwareVersion);
   preferences.end();
-  ota_show_panel(); // no more flash writes - safe to show the result
-  ota_set_status("Update complete. Restarting...", false);
-  is_ota_updating = false;
-  lv_refr_now(NULL); // make sure the user sees it before the reboot
-  delay(1500);
-  ESP.restart();
+
+  // Only now, with the update confirmed, does the picture come back.
+  ota_ui_show();
+  if (ota_bar) lv_bar_set_value(ota_bar, 0, LV_ANIM_OFF);
+  ota_set_status("Verifying update...", false);
+  otaVerifying = true;
+  otaVerifyStart = millis();
 }
 static void ota_action_cb(lv_event_t *e) {
   (void)e;
@@ -4401,19 +4402,22 @@ void setup() {
 ///////////////////////////////////////////////////////////////////////
 
 void loop() {
-  // LVGL runs at all times now, including during a firmware update, so the update
-  // screen can show a live progress bar instead of a frozen frame.
+  lv_tick_inc(5);
+
+  if (is_ota_updating) {
+    // While the blackout is up LVGL must not repaint, or it would draw the UI
+    // straight back over the flat screen. Once the download is done and the
+    // finishing bar is up, it runs normally again.
+    if (!otaBlackout) loop_display();
+    serviceOta();
+    delay(otaBlackout ? 1 : 5);
+    return;
+  }
+
   // loop_display() is the ONLY caller of lv_task_handler(): the OTA code used to
   // call it re-entrantly from inside a button callback, which is what made the
   // display jump.
   loop_display();
-  lv_tick_inc(5);
-
-  if (is_ota_updating) {
-    serviceOta(); // one bounded slice of the download, then hand back to LVGL
-    delay(1);
-    return;
-  }
 
   // Scheduled restart logic: Trigger at midnight on Sundays or the 1st of each month
   static int prev_sec = -1;  // Track previous second to avoid multi-trigger at exact midnight
