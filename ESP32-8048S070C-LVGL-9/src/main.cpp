@@ -209,6 +209,10 @@ static lv_obj_t *taskbar = nullptr; // front-page status strip
 // what made the hard-coded bank-holiday colours unreadable. Nothing here is
 // derived from the theme, so the strip stays legible under every scheme.
 #define TASKBAR_H 40
+// Height of the strip reserved at the top of the calendar for the month/year.
+// lv_calendar renders the weekday row as the BUTTON MATRIX's first row, so the
+// only way to make room above it is to pad the matrix down from the top.
+#define CAL_MONTH_BAND 34
 static lv_color_t taskbar_bg()   { return lv_color_hex(0x14181D); }
 static lv_color_t taskbar_text() { return lv_color_hex(0xF2F4F7); }
 static lv_obj_t *prev_btn_obj = nullptr;   // recoloured on scheme change
@@ -4071,6 +4075,7 @@ void setup_calendar() {
     lv_obj_set_style_pad_row(cal_btnm, 4, LV_PART_MAIN);
     lv_obj_set_style_pad_column(cal_btnm, 4, LV_PART_MAIN);
     lv_obj_set_style_pad_all(cal_btnm, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_top(cal_btnm, CAL_MONTH_BAND, LV_PART_MAIN);
   }
   // Everything accent-coloured about the calendar (event-day outline, pressed
   // cells, and the "today" marker LVGL draws from the theme primary) is applied
@@ -4082,10 +4087,14 @@ void setup_calendar() {
   // The firmware version is deliberately not shown here any more - the settings
   // popup carries the single copy, so the front page is left clean.
   if (debug == 1) Serial.println("[APP] Creating month label...");
-  month_label = lv_label_create(lv_scr_act());
+  // The month/year now sits inside the calendar frame instead of floating above
+  // it. It MUST be FLOATING: lv_calendar lays its children out with a column flex,
+  // so an ordinary child would become a flex item and push the day grid around.
+  month_label = lv_label_create(calendar);
   lv_obj_set_style_text_font(month_label, &lv_font_montserrat_24, 0);
   lv_obj_set_style_text_color(month_label, text_color, 0);
-  lv_obj_align_to(month_label, calendar, LV_ALIGN_OUT_TOP_MID, -150, -5); // Restored original position
+  lv_obj_add_flag(month_label, LV_OBJ_FLAG_FLOATING);
+  lv_obj_align(month_label, LV_ALIGN_TOP_MID, 0, 0);
   // ---- front-page taskbar -------------------------------------------------
   // Holidays, the ParcelBox icon, WiFi and the clock used to float loose on the
   // screen, each themed independently. They now share one strip with a fixed
