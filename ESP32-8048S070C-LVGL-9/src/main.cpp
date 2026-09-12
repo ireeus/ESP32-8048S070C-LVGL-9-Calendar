@@ -714,6 +714,9 @@ void fetchNotifications() {
         lv_obj_null_on_delete(&notification_img); // Auto-null if deleted elsewhere
         lv_img_set_src(notification_img, &box);
         lv_img_set_zoom(notification_img, 102);
+        // Same black-on-transparent art as the WiFi icon, so the same treatment.
+        lv_obj_set_style_image_recolor(notification_img, taskbar_text(), 0);
+        lv_obj_set_style_image_recolor_opa(notification_img, LV_OPA_COVER, 0);
         if (taskbar && lv_obj_get_child_cnt(taskbar) > 1) lv_obj_move_to_index(notification_img, 1);
         lv_obj_add_flag(notification_img, LV_OBJ_FLAG_CLICKABLE); // Make the image clickable
         lv_obj_add_event_cb(notification_img, notification_click_cb, LV_EVENT_CLICKED, NULL);
@@ -4086,6 +4089,13 @@ void setup_calendar() {
   wifi_icon = lv_img_create(taskbar);
   lv_img_set_src(wifi_icon, getWifiImage());
   lv_img_set_zoom(wifi_icon, 109);
+  // The source art is a black glyph on transparency, so it was invisible against
+  // the strip. Recolouring overwrites the RGB while keeping the alpha channel, so
+  // the anti-aliased edges survive and it reads as a clean white silhouette.
+  // Only safe because these really are ARGB8888 with a transparent background -
+  // on an opaque image the same call would paint a solid white block.
+  lv_obj_set_style_image_recolor(wifi_icon, taskbar_text(), 0);
+  lv_obj_set_style_image_recolor_opa(wifi_icon, LV_OPA_COVER, 0);
   if (debug == 1) Serial.println("[APP] Creating date-time label...");
   date_time_label = lv_label_create(taskbar);
   lv_obj_set_style_text_font(date_time_label, &lv_font_montserrat_24, 0);
