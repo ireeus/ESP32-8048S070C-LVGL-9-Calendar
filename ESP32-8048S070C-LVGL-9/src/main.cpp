@@ -1342,8 +1342,8 @@ void updateEventDisplay(lv_obj_t *calendar) {
       // This is an ongoing event
       lv_obj_t *event_cont = lv_obj_create(event_list);
       // Width is a PERCENTAGE of the list, not a fixed 381px, so the cards track
-      // the widget if its size ever changes. 95% leaves a 10px margin each side.
-      lv_obj_set_size(event_cont, LV_PCT(95), 30); // 50% height
+      // the widget if its size ever changes. 98% leaves a 4px margin each side.
+      lv_obj_set_size(event_cont, LV_PCT(98), 30); // 50% height
       lv_obj_align(event_cont, LV_ALIGN_TOP_MID, 0, y_offset);
       // Apply gray semi-transparent background
       // Original fixed grey fill restored. Only the title colour is themed.
@@ -1382,7 +1382,7 @@ void updateEventDisplay(lv_obj_t *calendar) {
   for (int i = 0; i < numEvents && total_displayed < MAX_EVENT_CHIPS; i++) {
     if (events[i].isToday) {
       lv_obj_t *event_cont = lv_obj_create(event_list);
-      lv_obj_set_size(event_cont, LV_PCT(95), 65);
+      lv_obj_set_size(event_cont, LV_PCT(98), 65);
       lv_obj_align(event_cont, LV_ALIGN_TOP_MID, 0, y_offset);
       // Card tint now follows the active scheme. The fixed pink gradient with
       // pure-blue and maroon text on top of it was the worst offender for
@@ -1495,7 +1495,7 @@ void updateEventDisplay(lv_obj_t *calendar) {
     for (int i = 0; i < numEvents && total_displayed < MAX_EVENT_CHIPS; i++) {
       if (!events[i].isToday && events[i].start_time >= todayStart) {
         lv_obj_t *event_cont = lv_obj_create(event_list);
-        lv_obj_set_size(event_cont, LV_PCT(95), 65);
+        lv_obj_set_size(event_cont, LV_PCT(98), 65);
         lv_obj_align(event_cont, LV_ALIGN_TOP_MID, 0, y_offset);
         lv_obj_set_style_bg_color(event_cont, lv_color_hex(0x74b9ff), 0); // Light blue for upcoming
         lv_obj_set_style_bg_grad_color(event_cont, lv_color_hex(0x0984e3), 0);
