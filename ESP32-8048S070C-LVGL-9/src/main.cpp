@@ -221,6 +221,11 @@ static lv_obj_t *taskbar = nullptr; // front-page status strip
 // lv_calendar renders the weekday row as the BUTTON MATRIX's first row, so the
 // only way to make room above it is to pad the matrix down from the top.
 #define CAL_MONTH_BAND 34
+// One corner curve for every rectangular surface - panels, title bars, cards,
+// chips, buttons and popups. They used to be a mix of 12 / 10 / 8, and the
+// theme gave objects that set nothing a ~6 card radius, so a 26px title bar at
+// 10 was visibly rounder than the panel holding it.
+#define UI_RADIUS 6
 static lv_color_t taskbar_bg()   { return lv_color_hex(0x14181D); }
 static lv_color_t taskbar_text() { return lv_color_hex(0xF2F4F7); }
 static lv_obj_t *prev_btn_obj = nullptr;   // recoloured on scheme change
@@ -950,7 +955,7 @@ void updateWeatherDisplay() {
     lv_obj_align(weatherContainer, LV_ALIGN_BOTTOM_RIGHT, -10, -13);
     lv_obj_set_style_bg_opa(weatherContainer, LV_OPA_90, 0);
     lv_obj_set_style_border_width(weatherContainer, 0, 0);
-    lv_obj_set_style_radius(weatherContainer, 10, 0);
+    lv_obj_set_style_radius(weatherContainer, UI_RADIUS, 0);
     lv_obj_set_style_shadow_color(weatherContainer, lv_color_hex(0x000000), 0);
     lv_obj_set_style_shadow_width(weatherContainer, 20, 0);
     lv_obj_set_style_shadow_opa(weatherContainer, LV_OPA_10, 0);
@@ -981,7 +986,7 @@ void updateWeatherDisplay() {
   lv_obj_set_style_bg_color(title_bar, scheme_accent_deep(), 0);
   lv_obj_set_style_bg_opa(title_bar, LV_OPA_COVER, 0);
   lv_obj_set_style_border_width(title_bar, 0, 0);
-  lv_obj_set_style_radius(title_bar, 10, 0); // matches the panel's rounded top
+  lv_obj_set_style_radius(title_bar, UI_RADIUS, 0); // matches the panel's rounded top
   lv_obj_set_style_pad_left(title_bar, 12, 0);
   lv_obj_set_style_pad_right(title_bar, 12, 0);
   lv_obj_set_style_pad_top(title_bar, 0, 0);
@@ -1071,7 +1076,7 @@ void updateWeatherDisplay() {
   lv_obj_set_style_bg_color(hum_cont, scheme_accent_tint(4), 0);
   lv_obj_set_style_bg_grad_color(hum_cont, scheme_accent_tint(3), 0);
   lv_obj_set_style_bg_grad_dir(hum_cont, LV_GRAD_DIR_HOR, 0);
-  lv_obj_set_style_radius(hum_cont, 10, 0);
+  lv_obj_set_style_radius(hum_cont, UI_RADIUS, 0);
   lv_obj_t *hum_val = lv_label_create(hum_cont);
   lv_label_set_text(hum_val, ("Hum\n" + String((int)current_weather.relative_humidity_2m) + "%").c_str());
   lv_obj_set_style_text_font(hum_val, &lv_font_montserrat_14, 0);
@@ -1084,7 +1089,7 @@ void updateWeatherDisplay() {
   lv_obj_set_style_bg_color(wind_cont, scheme_accent_tint(3), 0);
   lv_obj_set_style_bg_grad_color(wind_cont, scheme_accent_tint(2), 0);
   lv_obj_set_style_bg_grad_dir(wind_cont, LV_GRAD_DIR_HOR, 0);
-  lv_obj_set_style_radius(wind_cont, 10, 0);
+  lv_obj_set_style_radius(wind_cont, UI_RADIUS, 0);
   lv_obj_t *wind_val = lv_label_create(wind_cont);
   lv_label_set_text(wind_val, ("Wind\n" + String((int)current_weather.wind_speed_10m) + " km/h").c_str());
   lv_obj_set_style_text_font(wind_val, &lv_font_montserrat_14, 0);
@@ -1097,7 +1102,7 @@ lv_obj_set_size(pressure_cont, 108, 50);
 lv_obj_set_style_bg_color(pressure_cont, scheme_accent_tint(2), 0);
 lv_obj_set_style_bg_grad_color(pressure_cont, scheme_accent_tint(1), 0);
 lv_obj_set_style_bg_grad_dir(pressure_cont, LV_GRAD_DIR_HOR, 0);
-lv_obj_set_style_radius(pressure_cont, 10, 0);
+lv_obj_set_style_radius(pressure_cont, UI_RADIUS, 0);
 lv_obj_t *pressure_val = lv_label_create(pressure_cont);
 lv_label_set_text(pressure_val, ("Pressure\n" + String((int)current_weather.surface_pressure) + " hPa").c_str());
 lv_obj_set_style_text_font(pressure_val, &lv_font_montserrat_14, 0);
@@ -1180,6 +1185,7 @@ void updateEventDisplay(lv_obj_t *calendar) {
     lv_obj_set_size(eventContainer, 400, 175);
     lv_obj_align(eventContainer, LV_ALIGN_TOP_RIGHT, -10, 50);
     lv_obj_set_style_bg_color(eventContainer, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_radius(eventContainer, UI_RADIUS, 0); // was the theme's ~6 card default
     lv_obj_set_style_border_width(eventContainer, 0, 0);
     // No padding, so the title bar below can span the full width. The cards are
     // TOP_MID aligned and a symmetric padding does not move a centre, so the only
@@ -1240,7 +1246,7 @@ void updateEventDisplay(lv_obj_t *calendar) {
   lv_obj_set_style_bg_color(event_title_bar, scheme_accent_deep(), 0);
   lv_obj_set_style_bg_opa(event_title_bar, LV_OPA_COVER, 0);
   lv_obj_set_style_border_width(event_title_bar, 0, 0);
-  lv_obj_set_style_radius(event_title_bar, 10, 0); // matches the panel's rounded top
+  lv_obj_set_style_radius(event_title_bar, UI_RADIUS, 0); // matches the panel's rounded top
   lv_obj_set_style_pad_left(event_title_bar, 12, 0);
   lv_obj_set_style_pad_right(event_title_bar, 12, 0);
   lv_obj_set_style_pad_top(event_title_bar, 0, 0);
@@ -1304,7 +1310,7 @@ void updateEventDisplay(lv_obj_t *calendar) {
       // Original fixed grey fill restored. Only the title colour is themed.
       lv_obj_set_style_bg_color(event_cont, lv_color_hex(0x808080), 0);
       lv_obj_set_style_bg_opa(event_cont, LV_OPA_70, 0);
-      lv_obj_set_style_radius(event_cont, 10, 0);
+      lv_obj_set_style_radius(event_cont, UI_RADIUS, 0);
       lv_obj_set_style_pad_all(event_cont, 5, 0);
 
       // Title with remaining days (faded yellow)
@@ -1345,7 +1351,7 @@ void updateEventDisplay(lv_obj_t *calendar) {
       lv_obj_set_style_bg_color(event_cont, scheme_card_a(), 0);
       lv_obj_set_style_bg_grad_color(event_cont, scheme_card_b(), 0);
       lv_obj_set_style_bg_grad_dir(event_cont, LV_GRAD_DIR_HOR, 0);
-      lv_obj_set_style_radius(event_cont, 10, 0);
+      lv_obj_set_style_radius(event_cont, UI_RADIUS, 0);
       lv_obj_set_style_pad_all(event_cont, 5, 0);
 
       String summary = events[i].summary;
@@ -1455,7 +1461,7 @@ void updateEventDisplay(lv_obj_t *calendar) {
         lv_obj_set_style_bg_color(event_cont, lv_color_hex(0x74b9ff), 0); // Light blue for upcoming
         lv_obj_set_style_bg_grad_color(event_cont, lv_color_hex(0x0984e3), 0);
         lv_obj_set_style_bg_grad_dir(event_cont, LV_GRAD_DIR_HOR, 0);
-        lv_obj_set_style_radius(event_cont, 10, 0);
+        lv_obj_set_style_radius(event_cont, UI_RADIUS, 0);
         lv_obj_set_style_pad_all(event_cont, 5, 0);
 
 
@@ -1675,7 +1681,7 @@ static void wizard_button(lv_obj_t *scr, const char *text, lv_coord_t x, lv_coor
   lv_obj_set_size(b, w, 44);
   lv_obj_align(b, LV_ALIGN_TOP_LEFT, x, y);
   lv_obj_set_style_bg_color(b, bg, 0);
-  lv_obj_set_style_radius(b, 10, 0);
+  lv_obj_set_style_radius(b, UI_RADIUS, 0);
   lv_obj_add_event_cb(b, cb, LV_EVENT_PRESSED, ud);
   lv_obj_t *l = lv_label_create(b);
   lv_label_set_text(l, text);
@@ -1997,7 +2003,7 @@ void show_confirm_popup(const char *title, const char *message, const char *conf
   lv_obj_set_style_bg_color(confirm_popup, lv_color_hex(0x1A1A1A), 0);
   lv_obj_set_style_border_color(confirm_popup, lv_color_hex(0xFFB300), 0); // amber warning
   lv_obj_set_style_border_width(confirm_popup, 3, 0);
-  lv_obj_set_style_radius(confirm_popup, 10, 0);
+  lv_obj_set_style_radius(confirm_popup, UI_RADIUS, 0);
   lv_obj_set_style_pad_all(confirm_popup, 14, 0);
   lv_obj_set_style_pad_row(confirm_popup, 10, 0);
   lv_obj_set_flex_flow(confirm_popup, LV_FLEX_FLOW_COLUMN);
@@ -2033,7 +2039,7 @@ void show_confirm_popup(const char *title, const char *message, const char *conf
   lv_obj_t *cancel_btn = lv_button_create(btn_row);
   lv_obj_set_size(cancel_btn, 150, 46);
   lv_obj_set_style_bg_color(cancel_btn, lv_color_hex(0x555555), 0);
-  lv_obj_set_style_radius(cancel_btn, 10, 0);
+  lv_obj_set_style_radius(cancel_btn, UI_RADIUS, 0);
   lv_obj_add_event_cb(cancel_btn, confirm_cancel_cb, LV_EVENT_PRESSED, NULL);
   lv_obj_t *cancel_lbl = lv_label_create(cancel_btn);
   lv_label_set_text(cancel_lbl, "Cancel");
@@ -2043,7 +2049,7 @@ void show_confirm_popup(const char *title, const char *message, const char *conf
   lv_obj_t *ok_btn = lv_button_create(btn_row);
   lv_obj_set_size(ok_btn, 180, 46);
   lv_obj_set_style_bg_color(ok_btn, lv_color_hex(0xD32F2F), 0);
-  lv_obj_set_style_radius(ok_btn, 10, 0);
+  lv_obj_set_style_radius(ok_btn, UI_RADIUS, 0);
   lv_obj_add_event_cb(ok_btn, confirm_ok_cb, LV_EVENT_PRESSED, NULL);
   lv_obj_t *ok_lbl = lv_label_create(ok_btn);
   lv_label_set_text(ok_lbl, confirm_label);
@@ -2120,7 +2126,7 @@ static bool show_notification_popup(const char *title, const char *message) {
   lv_obj_set_style_bg_color(notification_popup, lv_color_hex(0x1A1A1A), 0);
   lv_obj_set_style_border_color(notification_popup, scheme_accent(), 0);
   lv_obj_set_style_border_width(notification_popup, 3, 0);
-  lv_obj_set_style_radius(notification_popup, 10, 0);
+  lv_obj_set_style_radius(notification_popup, UI_RADIUS, 0);
   lv_obj_set_style_pad_all(notification_popup, 14, 0);
   lv_obj_set_style_pad_row(notification_popup, 8, 0);
   lv_obj_set_flex_flow(notification_popup, LV_FLEX_FLOW_COLUMN);
@@ -2170,7 +2176,7 @@ static bool show_notification_popup(const char *title, const char *message) {
   lv_obj_t *dismiss_btn = lv_button_create(btn_row);
   lv_obj_set_size(dismiss_btn, 150, 46);
   lv_obj_set_style_bg_color(dismiss_btn, lv_color_hex(0x555555), 0);
-  lv_obj_set_style_radius(dismiss_btn, 10, 0);
+  lv_obj_set_style_radius(dismiss_btn, UI_RADIUS, 0);
   lv_obj_add_event_cb(dismiss_btn, notification_dismiss_cb, LV_EVENT_PRESSED, NULL);
   lv_obj_t *dismiss_lbl = lv_label_create(dismiss_btn);
   lv_label_set_text(dismiss_lbl, "Dismiss");
@@ -2181,7 +2187,7 @@ static bool show_notification_popup(const char *title, const char *message) {
   lv_obj_set_size(ack_btn, 220, 46);
   lv_obj_set_style_bg_color(ack_btn, scheme_accent(), 0);
   lv_obj_set_style_bg_color(ack_btn, scheme_accent_dark(), LV_STATE_PRESSED);
-  lv_obj_set_style_radius(ack_btn, 10, 0);
+  lv_obj_set_style_radius(ack_btn, UI_RADIUS, 0);
   lv_obj_add_event_cb(ack_btn, notification_ack_cb, LV_EVENT_PRESSED, NULL);
   lv_obj_t *ack_lbl = lv_label_create(ack_btn);
   lv_label_set_text(ack_lbl, "Acknowledge");
@@ -2473,7 +2479,7 @@ void show_settings_popup() {
     lv_obj_set_style_bg_color(settings_popup, lv_color_hex(0x000000), 0);
     lv_obj_set_style_border_color(settings_popup, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_border_width(settings_popup, 2, 0);
-    lv_obj_set_style_radius(settings_popup, 10, 0);
+    lv_obj_set_style_radius(settings_popup, UI_RADIUS, 0);
     lv_obj_set_style_pad_all(settings_popup, 10, 0);
     lv_obj_set_style_pad_row(settings_popup, 8, 0);
     // Plain vertical scrolling with a visible, easy-to-grab scrollbar.
@@ -2505,7 +2511,7 @@ void show_settings_popup() {
       lv_obj_set_style_bg_color(card, bg, 0);
       lv_obj_set_style_bg_grad_color(card, grad, 0);
       lv_obj_set_style_bg_grad_dir(card, LV_GRAD_DIR_HOR, 0);
-      lv_obj_set_style_radius(card, 8, 0);
+      lv_obj_set_style_radius(card, UI_RADIUS, 0);
       lv_obj_set_style_pad_all(card, 6, 0);
       lv_obj_set_style_pad_row(card, 4, 0);
       lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
@@ -2670,8 +2676,8 @@ void show_settings_popup() {
       lv_bar_set_range(bar, 0, 100);
       lv_bar_set_value(bar, 0, LV_ANIM_OFF);
       lv_obj_set_style_bg_color(bar, lv_color_hex(0x333333), LV_PART_MAIN);
-      lv_obj_set_style_radius(bar, 4, LV_PART_MAIN);
-      lv_obj_set_style_radius(bar, 4, LV_PART_INDICATOR);
+      lv_obj_set_style_radius(bar, UI_RADIUS, LV_PART_MAIN);
+      lv_obj_set_style_radius(bar, UI_RADIUS, LV_PART_INDICATOR);
 
       lv_obj_t *val = lv_label_create(col);
       lv_obj_set_style_text_font(val, &lv_font_montserrat_14, 0);
@@ -2867,7 +2873,7 @@ void show_new_event_popup(lv_calendar_date_t *selected_date) {
   lv_obj_set_style_bg_color(new_event_popup, lv_color_hex(0x000000), 0);
   lv_obj_set_style_border_color(new_event_popup, lv_color_hex(0xFFFFFF), 0);
   lv_obj_set_style_border_width(new_event_popup, 2, 0);
-  lv_obj_set_style_radius(new_event_popup, 8, 0);
+  lv_obj_set_style_radius(new_event_popup, UI_RADIUS, 0);
   lv_obj_set_style_pad_all(new_event_popup, 10, 0);
   lv_obj_set_scrollbar_mode(new_event_popup, LV_SCROLLBAR_MODE_AUTO);
   new_event_error_label = nullptr;
@@ -3583,7 +3589,7 @@ void update_btn_cb(lv_event_t *e) {
   lv_obj_set_style_bg_color(update_popup, lv_color_hex(0x1A1A1A), 0);
   lv_obj_set_style_border_color(update_popup, scheme_accent(), 0);
   lv_obj_set_style_border_width(update_popup, 3, 0);
-  lv_obj_set_style_radius(update_popup, 10, 0);
+  lv_obj_set_style_radius(update_popup, UI_RADIUS, 0);
   lv_obj_set_style_pad_all(update_popup, 16, 0);
   lv_obj_set_style_pad_row(update_popup, 12, 0);
   lv_obj_set_flex_flow(update_popup, LV_FLEX_FLOW_COLUMN);
@@ -3647,7 +3653,7 @@ void update_btn_cb(lv_event_t *e) {
   ota_action_btn = lv_button_create(ota_row);
   lv_obj_set_size(ota_action_btn, 180, 46);
   lv_obj_set_style_bg_color(ota_action_btn, lv_color_hex(0x00A86B), 0);
-  lv_obj_set_style_radius(ota_action_btn, 10, 0);
+  lv_obj_set_style_radius(ota_action_btn, UI_RADIUS, 0);
   lv_obj_add_event_cb(ota_action_btn, ota_action_cb, LV_EVENT_PRESSED, NULL);
   lv_obj_t *ota_al = lv_label_create(ota_action_btn);
   lv_label_set_text(ota_al, "Update Now");
@@ -3657,7 +3663,7 @@ void update_btn_cb(lv_event_t *e) {
   ota_close_btn = lv_button_create(ota_row);
   lv_obj_set_size(ota_close_btn, 140, 46);
   lv_obj_set_style_bg_color(ota_close_btn, lv_color_hex(0x555555), 0);
-  lv_obj_set_style_radius(ota_close_btn, 10, 0);
+  lv_obj_set_style_radius(ota_close_btn, UI_RADIUS, 0);
   lv_obj_add_event_cb(ota_close_btn, ota_close_cb, LV_EVENT_PRESSED, NULL);
   lv_obj_t *ota_cl = lv_label_create(ota_close_btn);
   lv_label_set_text(ota_cl, "Close");
@@ -3669,7 +3675,7 @@ void update_btn_cb(lv_event_t *e) {
   ota_ok_btn = lv_button_create(ota_row);
   lv_obj_set_size(ota_ok_btn, 140, 46);
   lv_obj_set_style_bg_color(ota_ok_btn, lv_color_hex(0x00A86B), 0);
-  lv_obj_set_style_radius(ota_ok_btn, 10, 0);
+  lv_obj_set_style_radius(ota_ok_btn, UI_RADIUS, 0);
   lv_obj_add_event_cb(ota_ok_btn, ota_restart_cb, LV_EVENT_PRESSED, NULL);
   lv_obj_t *ota_okl = lv_label_create(ota_ok_btn);
   lv_label_set_text(ota_okl, "OK");
@@ -3838,7 +3844,7 @@ void apply_calendar_theme(lv_obj_t *cal) {
   // CHECKED/DISABLED/PRESSED/... to states, never CUSTOM_1..4 -> USER_1..4.
   // Setting these on the object (rather than through a local lv_style_t) is what
   // makes a scheme change a plain re-call of this function.
-  lv_obj_set_style_radius(cal, 7, LV_PART_ITEMS | LV_STATE_CHECKED);
+  lv_obj_set_style_radius(cal, UI_RADIUS, LV_PART_ITEMS | LV_STATE_CHECKED);
   lv_obj_set_style_border_width(cal, 2, LV_PART_ITEMS | LV_STATE_CHECKED);
   lv_obj_set_style_border_opa(cal, LV_OPA_COVER, LV_PART_ITEMS | LV_STATE_CHECKED);
   lv_obj_set_style_border_color(cal, scheme_accent(), LV_PART_ITEMS | LV_STATE_CHECKED);
@@ -4198,7 +4204,7 @@ void setup_calendar() {
   lv_calendar_set_showed_date(calendar, showed_year, showed_month);
   lv_obj_add_event_cb(calendar, calendar_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
   // ---- Calendar card styling -------------------------------------------
-  lv_obj_set_style_radius(calendar, 12, LV_PART_MAIN);
+  lv_obj_set_style_radius(calendar, UI_RADIUS, LV_PART_MAIN);
   lv_obj_set_style_border_width(calendar, 2, LV_PART_MAIN);
   lv_obj_set_style_pad_all(calendar, 6, LV_PART_MAIN);
   lv_obj_set_style_shadow_color(calendar, lv_color_hex(0x000000), LV_PART_MAIN);
@@ -4208,7 +4214,7 @@ void setup_calendar() {
   // Rounded day cells with a little breathing room between them. The item
   // border must stay >= 1px: lv_draw_rect drops the border draw descriptor when
   // the width is 0, and LVGL's calendar marks "today" by recolouring it.
-  lv_obj_set_style_radius(calendar, 7, LV_PART_ITEMS);
+  lv_obj_set_style_radius(calendar, UI_RADIUS, LV_PART_ITEMS);
   lv_obj_set_style_border_width(calendar, 1, LV_PART_ITEMS);
   lv_obj_t *cal_btnm = lv_calendar_get_btnmatrix(calendar);
   if (cal_btnm) {
@@ -4308,7 +4314,7 @@ void setup_calendar() {
   prev_btn_obj = prev_btn;
   lv_obj_set_style_bg_color(prev_btn, scheme_accent(), 0);
   lv_obj_set_style_bg_color(prev_btn, scheme_accent_dark(), LV_STATE_PRESSED);
-  lv_obj_set_style_radius(prev_btn, 10, 0);
+  lv_obj_set_style_radius(prev_btn, UI_RADIUS, 0);
   lv_obj_set_style_shadow_color(prev_btn, lv_color_hex(0x000000), 0);
   lv_obj_set_style_shadow_width(prev_btn, 8, 0);
   lv_obj_set_style_shadow_opa(prev_btn, LV_OPA_20, 0);
@@ -4321,7 +4327,7 @@ void setup_calendar() {
   lv_obj_add_event_cb(settings_btn_obj, settings_btn_cb, LV_EVENT_PRESSED, NULL);
   lv_obj_set_style_bg_color(settings_btn_obj, lv_color_hex(0x2F3640), 0);
   lv_obj_set_style_bg_color(settings_btn_obj, lv_color_hex(0x1E242B), LV_STATE_PRESSED);
-  lv_obj_set_style_radius(settings_btn_obj, 10, 0);
+  lv_obj_set_style_radius(settings_btn_obj, UI_RADIUS, 0);
   lv_obj_set_style_shadow_color(settings_btn_obj, lv_color_hex(0x000000), 0);
   lv_obj_set_style_shadow_width(settings_btn_obj, 8, 0);
   lv_obj_set_style_shadow_opa(settings_btn_obj, LV_OPA_20, 0);
@@ -4337,7 +4343,7 @@ void setup_calendar() {
   next_btn_obj = next_btn;
   lv_obj_set_style_bg_color(next_btn, scheme_accent(), 0);
   lv_obj_set_style_bg_color(next_btn, scheme_accent_dark(), LV_STATE_PRESSED);
-  lv_obj_set_style_radius(next_btn, 10, 0);
+  lv_obj_set_style_radius(next_btn, UI_RADIUS, 0);
   lv_obj_set_style_shadow_color(next_btn, lv_color_hex(0x000000), 0);
   lv_obj_set_style_shadow_width(next_btn, 8, 0);
   lv_obj_set_style_shadow_opa(next_btn, LV_OPA_20, 0);
@@ -4432,7 +4438,7 @@ void show_day_events_popup(lv_calendar_date_t *date, const int *indices, int cou
   lv_obj_set_style_bg_color(day_events_popup, lv_color_hex(0x000000), 0);
   lv_obj_set_style_border_color(day_events_popup, lv_color_hex(0xFFFFFF), 0);
   lv_obj_set_style_border_width(day_events_popup, 2, 0);
-  lv_obj_set_style_radius(day_events_popup, 10, 0);
+  lv_obj_set_style_radius(day_events_popup, UI_RADIUS, 0);
   lv_obj_set_style_pad_all(day_events_popup, 10, 0);
   lv_obj_set_style_pad_row(day_events_popup, 8, 0);
   lv_obj_set_scroll_dir(day_events_popup, LV_DIR_VER);
@@ -4463,7 +4469,7 @@ void show_day_events_popup(lv_calendar_date_t *date, const int *indices, int cou
     lv_obj_set_style_bg_color(chip, scheme_accent_dark(), 0);
     lv_obj_set_style_bg_grad_color(chip, scheme_accent_deep(), 0);
     lv_obj_set_style_bg_grad_dir(chip, LV_GRAD_DIR_HOR, 0);
-    lv_obj_set_style_radius(chip, 8, 0);
+    lv_obj_set_style_radius(chip, UI_RADIUS, 0);
     lv_obj_set_style_border_width(chip, 0, 0);
     lv_obj_set_style_pad_all(chip, 8, 0);
     lv_obj_set_style_pad_row(chip, 2, 0);
@@ -4504,7 +4510,7 @@ void show_day_events_popup(lv_calendar_date_t *date, const int *indices, int cou
   lv_obj_t *add_btn = lv_button_create(btn_row);
   lv_obj_set_size(add_btn, 180, 42);
   lv_obj_set_style_bg_color(add_btn, lv_color_hex(0x00A86B), 0);
-  lv_obj_set_style_radius(add_btn, 10, 0);
+  lv_obj_set_style_radius(add_btn, UI_RADIUS, 0);
   lv_obj_add_event_cb(add_btn, day_events_add_cb, LV_EVENT_PRESSED, NULL);
   lv_obj_t *add_lbl = lv_label_create(add_btn);
   lv_label_set_text(add_lbl, LV_SYMBOL_PLUS " Add New Event");
@@ -4514,7 +4520,7 @@ void show_day_events_popup(lv_calendar_date_t *date, const int *indices, int cou
   lv_obj_t *close_btn = lv_button_create(btn_row);
   lv_obj_set_size(close_btn, 120, 42);
   lv_obj_set_style_bg_color(close_btn, lv_color_hex(0xFF0000), 0);
-  lv_obj_set_style_radius(close_btn, 10, 0);
+  lv_obj_set_style_radius(close_btn, UI_RADIUS, 0);
   lv_obj_add_event_cb(close_btn, day_events_close_cb, LV_EVENT_PRESSED, NULL);
   lv_obj_t *close_lbl = lv_label_create(close_btn);
   lv_label_set_text(close_lbl, "Close");
@@ -5205,7 +5211,7 @@ void show_event_details(int index, bool isReminder) {
       lv_obj_set_flex_align(day_cont, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
       lv_obj_set_style_bg_color(day_cont, lv_color_hex(0xF0F0F0), 0);
       lv_obj_set_style_bg_opa(day_cont, LV_OPA_90, 0);
-      lv_obj_set_style_radius(day_cont, 10, 0);
+      lv_obj_set_style_radius(day_cont, UI_RADIUS, 0);
       lv_obj_set_style_shadow_color(day_cont, lv_color_hex(0x000000), 0);
       lv_obj_set_style_shadow_width(day_cont, 10, 0);
       lv_obj_set_style_shadow_opa(day_cont, LV_OPA_20, 0);
