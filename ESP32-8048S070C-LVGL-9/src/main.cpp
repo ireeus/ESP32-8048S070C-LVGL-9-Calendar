@@ -1173,6 +1173,10 @@ void updateEventDisplay(lv_obj_t *calendar) {
     lv_obj_align(eventContainer, LV_ALIGN_TOP_RIGHT, -10, 50);
     lv_obj_set_style_bg_color(eventContainer, lv_color_hex(0x000000), 0);
     lv_obj_set_style_border_width(eventContainer, 0, 0);
+    // No padding, so the title bar below can span the full width. The cards are
+    // TOP_MID aligned and a symmetric padding does not move a centre, so the only
+    // thing that shifts is the vertical origin - handled by y_offset below.
+    lv_obj_set_style_pad_all(eventContainer, 0, 0);
     lv_obj_set_scrollbar_mode(eventContainer, LV_SCROLLBAR_MODE_OFF);
     if (debug == 1) Serial.println("[APP] Created eventContainer");
   } else {
@@ -1213,7 +1217,31 @@ void updateEventDisplay(lv_obj_t *calendar) {
     if (debug == 1) Serial.println("[APP] Error: Calendar object is null in updateEventDisplay");
   }
 
-  int y_offset = -10;
+  // ---- title bar ------------------------------------------------------------
+  // Mirrors the weather panel: full width across the top of the widget, on the
+  // accent's deepest shade, with the heading that used to sit in the list as a
+  // plain label.
+  lv_obj_t *event_title_bar = lv_obj_create(eventContainer);
+  lv_obj_set_size(event_title_bar, LV_PCT(100), 26);
+  lv_obj_align(event_title_bar, LV_ALIGN_TOP_MID, 0, 0);
+  lv_obj_set_style_bg_color(event_title_bar, scheme_accent_deep(), 0);
+  lv_obj_set_style_bg_opa(event_title_bar, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_width(event_title_bar, 0, 0);
+  lv_obj_set_style_radius(event_title_bar, 10, 0); // matches the panel's rounded top
+  lv_obj_set_style_pad_left(event_title_bar, 12, 0);
+  lv_obj_set_style_pad_right(event_title_bar, 12, 0);
+  lv_obj_set_style_pad_top(event_title_bar, 0, 0);
+  lv_obj_set_style_pad_bottom(event_title_bar, 0, 0);
+  lv_obj_clear_flag(event_title_bar, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scrollbar_mode(event_title_bar, LV_SCROLLBAR_MODE_OFF);
+  lv_obj_t *event_title_label = lv_label_create(event_title_bar);
+  lv_label_set_text(event_title_label, "Events");
+  lv_obj_set_style_text_font(event_title_label, &lv_font_montserrat_14_bold, 0);
+  lv_obj_set_style_text_color(event_title_label, lv_color_white(), 0);
+  lv_obj_align(event_title_label, LV_ALIGN_LEFT_MID, 0, 0);
+  // First card sits just under the 26px bar: 26 + 8px gap. The -10 this used to be
+  // was compensating for the panel padding, which is gone.
+  int y_offset = 34;
   int total_displayed = 0;
   time_t now;
   time(&now);
@@ -1355,15 +1383,20 @@ void updateEventDisplay(lv_obj_t *calendar) {
       upcoming_count++;
     }
   }
+  // The title bar has to describe whatever the panel actually ended up showing.
+  // By this point total_displayed counts only the ongoing/today cards, because
+  // the upcoming loop below has not run yet.
+  if (upcoming_count > 0 && total_displayed > 0) {
+    lv_label_set_text(event_title_label, "Today and upcoming");
+  } else if (upcoming_count > 0) {
+    lv_label_set_text(event_title_label, "Due in more than 3 days");
+  } else if (total_displayed > 0) {
+    lv_label_set_text(event_title_label, "Today");
+  }
 
   if (upcoming_count > 0 && total_displayed < MAX_EVENT_CHIPS) {
-    // Upcoming label
-    lv_obj_t *upcoming_label = lv_label_create(eventContainer);
-    lv_label_set_text(upcoming_label, "Due in more than 3 days");
-    lv_obj_set_style_text_font(upcoming_label, &lv_font_montserrat_14_bold, 0);
-    lv_obj_set_style_text_color(upcoming_label, scheme_accent(), 0);
-    lv_obj_align(upcoming_label, LV_ALIGN_TOP_LEFT, 10, y_offset);
-    y_offset += 25;
+    // The heading lives in the title bar now, so this block adds nothing to the
+    // list - and the 25px the label used to reserve is gone with it.
 
     // Display upcoming events (similar to today's, but with date)
     for (int i = 0; i < numEvents && total_displayed < MAX_EVENT_CHIPS; i++) {
@@ -1489,7 +1522,9 @@ lv_obj_update_layout(eventContainer);
   lv_label_set_text(noEventsLabel, "No events");
   lv_obj_set_style_text_font(noEventsLabel, &lv_font_montserrat_14, 0);
   lv_obj_set_style_text_color(noEventsLabel, scheme_accent(), 0);
-  lv_obj_align(noEventsLabel, LV_ALIGN_TOP_LEFT, 10, y_offset + 20);  // Minor adjustment: +20 to avoid overlap with time if y_offset=-10
+  // Fixed near the top rather than following y_offset, which now starts below the
+  // title bar and would push this caption into the large clock.
+  lv_obj_align(noEventsLabel, LV_ALIGN_TOP_LEFT, 12, 8);
 
   // Create/start blink and time-update timer (pass colon as user data)
   blink_timer = lv_timer_create(blink_time_update_cb, 1000, NULL);
