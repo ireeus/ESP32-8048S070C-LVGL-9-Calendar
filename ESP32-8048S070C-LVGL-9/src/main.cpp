@@ -1341,7 +1341,9 @@ void updateEventDisplay(lv_obj_t *calendar) {
     if (events[i].start_time < todayStart && events[i].end_time > now) {
       // This is an ongoing event
       lv_obj_t *event_cont = lv_obj_create(event_list);
-      lv_obj_set_size(event_cont, 381, 30); // 50% height
+      // Width is a PERCENTAGE of the list, not a fixed 381px, so the cards track
+      // the widget if its size ever changes. 95% leaves a 10px margin each side.
+      lv_obj_set_size(event_cont, LV_PCT(95), 30); // 50% height
       lv_obj_align(event_cont, LV_ALIGN_TOP_MID, 0, y_offset);
       // Apply gray semi-transparent background
       // Original fixed grey fill restored. Only the title colour is themed.
@@ -1380,7 +1382,7 @@ void updateEventDisplay(lv_obj_t *calendar) {
   for (int i = 0; i < numEvents && total_displayed < MAX_EVENT_CHIPS; i++) {
     if (events[i].isToday) {
       lv_obj_t *event_cont = lv_obj_create(event_list);
-      lv_obj_set_size(event_cont, 361, 65);
+      lv_obj_set_size(event_cont, LV_PCT(95), 65);
       lv_obj_align(event_cont, LV_ALIGN_TOP_MID, 0, y_offset);
       // Card tint now follows the active scheme. The fixed pink gradient with
       // pure-blue and maroon text on top of it was the worst offender for
@@ -1493,7 +1495,7 @@ void updateEventDisplay(lv_obj_t *calendar) {
     for (int i = 0; i < numEvents && total_displayed < MAX_EVENT_CHIPS; i++) {
       if (!events[i].isToday && events[i].start_time >= todayStart) {
         lv_obj_t *event_cont = lv_obj_create(event_list);
-        lv_obj_set_size(event_cont, 361, 65);
+        lv_obj_set_size(event_cont, LV_PCT(95), 65);
         lv_obj_align(event_cont, LV_ALIGN_TOP_MID, 0, y_offset);
         lv_obj_set_style_bg_color(event_cont, lv_color_hex(0x74b9ff), 0); // Light blue for upcoming
         lv_obj_set_style_bg_grad_color(event_cont, lv_color_hex(0x0984e3), 0);
@@ -1594,18 +1596,35 @@ if (total_displayed == 0) {
   big_clock_colon = large_time_colon;
   big_clock_minutes = large_time_minutes;
 
-// Dynamically calculate alignments based on text widths
-lv_point_t hours_size, colon_size, minutes_size;
-lv_text_get_size(&hours_size, hours_buf, &technology_98, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-lv_text_get_size(&colon_size, ":", &technology_98, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-lv_text_get_size(&minutes_size, mins_buf, &technology_98, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+// Lay the clock out from a REFERENCE string, not from the time currently shown.
+// The digit advances in this face are not uniform: "1" advances 227/16 px while
+// "8" advances 701/16, three times as much. Sizing each part from the text on
+// screen therefore made the whole clock re-centre, and the gap either side of the
+// colon change, from one minute to the next. "00" is the widest case, so every
+// slot is always that size and the geometry never moves.
+lv_point_t hours_ref, colon_size, mins_ref;
+lv_text_get_size(&hours_ref,  "00", &technology_98, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+lv_text_get_size(&colon_size,  ":", &technology_98, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+lv_text_get_size(&mins_ref,   "00", &technology_98, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
 
-lv_coord_t total_width = hours_size.x + colon_size.x + minutes_size.x;
+// The single spacing knob: the gap between a digit group and the colon. 0 leaves
+// the face's own side bearings as the gap, which is what it was drawn for.
+const lv_coord_t CLOCK_GAP = 0;
+
+lv_coord_t total_width = hours_ref.x + CLOCK_GAP + colon_size.x + CLOCK_GAP + mins_ref.x;
 lv_coord_t half_width = total_width / 2;
+lv_coord_t hours_x = -half_width + (hours_ref.x / 2);
+lv_coord_t colon_x = hours_x + hours_ref.x / 2 + CLOCK_GAP + (colon_size.x / 2);
+lv_coord_t mins_x  = colon_x + colon_size.x / 2 + CLOCK_GAP + (mins_ref.x / 2);
 
-lv_coord_t hours_x = -half_width + (hours_size.x / 2);
-lv_coord_t colon_x = hours_x + hours_size.x + (colon_size.x / 2) - 25;  // Reduced space by 15px
-lv_coord_t mins_x = colon_x + colon_size.x + (minutes_size.x / 2)-2;
+// Give each group its reference width, and press the digits up against the colon:
+// hours flush right, minutes flush left. Centring them in the slot instead would
+// leave a narrow "1" floating in the middle of a wide gap - which is exactly the
+// uneven look this is meant to remove.
+lv_obj_set_width(large_time_hours, hours_ref.x);
+lv_obj_set_style_text_align(large_time_hours, LV_TEXT_ALIGN_RIGHT, 0);
+lv_obj_set_width(large_time_minutes, mins_ref.x);
+lv_obj_set_style_text_align(large_time_minutes, LV_TEXT_ALIGN_LEFT, 0);
 
 lv_obj_align(large_time_hours, LV_ALIGN_CENTER, hours_x, 0);
 lv_obj_align(large_time_colon, LV_ALIGN_CENTER, colon_x, 0);
