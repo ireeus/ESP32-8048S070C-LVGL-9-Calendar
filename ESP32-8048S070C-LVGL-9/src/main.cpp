@@ -276,9 +276,12 @@ static lv_color_t scheme_card_text()     { return (g_ui_darkness > 50) ? lv_colo
 // blue gradient that does not follow the theme, so neither the light/dark body
 // colour nor scheme_card_text() reads on it - the latter is near-white once the
 // darkness slider passes 50, which is the barely-visible white that was reported.
-// These stay dark while keeping the theme's hue, and the title is one step deeper
-// than the rest of the card's text.
-static lv_color_t scheme_upcoming_text()       { return scheme_accent_deep(); }
+// These stay dark while keeping the theme's hue. Both are pulled toward black
+// because the gradient's right-hand end is a mid blue: plain accent_deep only
+// manages 1.7:1 against it and the date/description simply vanished into it.
+// NOTE lv_color_darken(c, lvl) keeps lvl/255 of the colour, so a SMALLER value is
+// DARKER - the title's 40 is deeper than the body's 60.
+static lv_color_t scheme_upcoming_text()       { return lv_color_darken(scheme_accent_deep(), LV_OPA_60); }
 static lv_color_t scheme_upcoming_title_text() { return lv_color_darken(scheme_accent_deep(), LV_OPA_40); }
 static int temp_adjust = 0;// Global temperature adjustment
 static unsigned long lastHolidayUpdate = 0;
