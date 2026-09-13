@@ -19,7 +19,7 @@ extern const lv_font_t lv_font_montserrat_14_bold;
 // Must be HIGHER than whatever update/version.json currently advertises, or the
 // device will keep offering (and auto-installing) a build that is not actually
 // newer. The site was on 2.2.6 when this was written.
-const String build_version = "2.2.8";
+const String build_version = "2.2.9";
 int debug =0; // Change to 1 to enable serial prints
 // Firmware check interval variable
 // Was 100000UL, which is 100 SECONDS, not the 5 minutes the comment claimed - so
@@ -454,7 +454,7 @@ String last_ignored_notification = "";
 String current_notification_text = "";
 String backgroundFilename = ""; // New: Store the background image filename
 // OTA variables
-String currentFirmwareVersion = "2.2.8"; // replaced by build_version in setup()
+String currentFirmwareVersion = "2.2.9"; // replaced by build_version in setup()
 String latestFirmwareVersion = "";
 String firmwareUrl = "";
 WiFiClientSecure client;
@@ -5574,6 +5574,46 @@ void setup() {
 
 ///////////////////////////////////////////////////////////////////////
 
+// ---- [FETCH] loop() stall instrumentation ------------------------------------
+// Everything below is a BLOCKING network or LVGL call running on the UI task.
+// While one is in flight, loop_display() -> lv_task_handler() is not being called
+// at all, so the screen cannot repaint and taps just queue up. That stall is the
+// thing the user actually feels, and these lines are the measurement of it.
+//
+// Deliberately NOT gated on `debug == 1`: that is a compile-time constant, and
+// the point is to read real numbers out of one ordinary flash instead of editing
+// a constant and remembering to put it back. Cost is two millis() calls per
+// block; volume is a few lines a minute (60s for events/theme/notifications,
+// 15min weather, 30min the rest). Remove once measured.
+//
+// How to read it: >100ms on a *fetch* is network (DNS + TLS handshake + body);
+// >100ms on a *redraw* is LVGL. The scope braces matter - the destructor prints.
+struct StallTimer {
+  const char *name;
+  uint32_t t0;
+  explicit StallTimer(const char *n) : name(n), t0(millis()) {}
+  ~StallTimer() {
+    Serial.printf("[FETCH] %-16s %6u ms\n", name, (unsigned)(millis() - t0));
+  }
+};
+
+// The same measurement for the calls that run on EVERY loop() pass (the boot
+// fetch queue, the theme push, the sync queue). Those normally return
+// immediately, so an unconditional line would be thousands a second; this one
+// stays silent unless the call actually blocked. The theme push is the one to
+// watch - its own comment says it blocks "for about a second", and it is on this
+// path every single pass whenever a theme is waiting to go out.
+struct StallTimerSlow {
+  const char *name;
+  uint32_t t0;
+  uint32_t threshold;
+  explicit StallTimerSlow(const char *n, uint32_t ms = 50) : name(n), t0(millis()), threshold(ms) {}
+  ~StallTimerSlow() {
+    const uint32_t dt = millis() - t0;
+    if (dt >= threshold) Serial.printf("[FETCH] %-16s %6u ms  <- blocked a loop pass\n", name, (unsigned)dt);
+  }
+};
+
 void loop() {
   lv_tick_inc(5);
 
@@ -5611,32 +5651,28 @@ void loop() {
   delay(5);
   // Post-UI fetch queue: one blocking request per iteration, with LVGL drawing
   // in between, instead of the whole sequence in one go.
-  serviceBootFetchQueue();
+  { StallTimerSlow st("boot queue");  serviceBootFetchQueue(); }
   // A theme picked on the device, on its way to the site. Not done inside the tap
   // callback because the request blocks for about a second.
-  pushThemeToServer();
+  { StallTimerSlow st("theme push");  pushThemeToServer(); }
   // A manual Sync from the settings popup: push the theme, then pull theme, parcel
   // box and location back. One request per pass, for the same reason.
-  serviceSyncQueue();
+  { StallTimerSlow st("sync queue");  serviceSyncQueue(); }
   // WiFi wizard: finishes the async scan and the in-progress connection attempt.
   serviceWifiSetup();
 
   unsigned long currentTime = millis();
   if (currentTime - lastRefreshTime >= refreshInterval && calendar && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
-    fetchEvents();
-    updateEventDisplay(calendar);
-    updateMonthLabel(calendar);
+    { StallTimer st("events fetch");  fetchEvents(); }
+    { StallTimer st("events redraw"); updateEventDisplay(calendar); updateMonthLabel(calendar); }
     lastRefreshTime = currentTime;
   }
   if (currentTime - lastThemeCheck >= themeUpdateInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
-    fetchThemeConfig();
+    { StallTimer st("theme fetch"); fetchThemeConfig(); }
     lastThemeCheck = currentTime;
   }
   if (currentTime - lastFirmwareCheck >= firmwareCheckInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
-    checkFirmwareUpdate();
-    fetchUpdatePolicy();
-    updateFirmwareButton();
-    maybeAutoUpdate();
+    { StallTimer st("firmware check"); checkFirmwareUpdate(); fetchUpdatePolicy(); updateFirmwareButton(); maybeAutoUpdate(); }
     lastFirmwareCheck = currentTime;
   }
   // Offer a pending update on its own schedule, not only when the version is
@@ -5660,7 +5696,7 @@ void loop() {
     updateAutoBrightness(false);
   }
   if (currentTime - lastNotificationCheck >= notificationInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
-    fetchNotifications();
+    { StallTimer st("notify fetch"); fetchNotifications(); }
     lastNotificationCheck = currentTime;
   }
   if (currentTime - lastWifiUpdate >= wifiUpdateInterval && !is_ota_updating) {
@@ -5670,11 +5706,11 @@ void loop() {
     lastWifiUpdate = currentTime;
   }
   if (currentTime - lastCredentialsCheck >= credentialsInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
-    fetchParcelBoxCredentials();
+    { StallTimer st("parcel creds"); fetchParcelBoxCredentials(); }
     lastCredentialsCheck = currentTime;
   }
   if (currentTime - lastWeatherLocationCheck >= weatherLocationInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
-    fetchWeatherLocation();
+    { StallTimer st("location fetch"); fetchWeatherLocation(); }
     lastWeatherLocationCheck = currentTime;
   }
   if (currentTime - lastTimeLabelUpdate >= timeLabelUpdateInterval && !is_ota_updating) {
@@ -5705,20 +5741,20 @@ void loop() {
     lastDateTimeUpdate = currentTime;
   }
   if (currentTime - lastWeatherUpdate >= weatherUpdateInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
-    fetchWeather();
-    updateWeatherDisplay();
+    { StallTimer st("weather fetch");  fetchWeather(); }
+    { StallTimer st("weather redraw"); updateWeatherDisplay(); }
     lastWeatherUpdate = currentTime;
   }
   if (currentTime - lastBackgroundUpdate >= backgroundUpdateInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
-    fetchBackgroundFilename();
-    fetchAndSetBackgroundImage();
+    { StallTimer st("background fetch"); fetchBackgroundFilename(); }
+    { StallTimer st("background blit");  fetchAndSetBackgroundImage(); }
     lastBackgroundUpdate = currentTime;
   }
   if (currentTime - lastHolidayUpdate >= holidayUpdateInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
-  fetchBankHolidays();
-  updateHolidayLabel();
-  lastHolidayUpdate = currentTime;
-}
+    { StallTimer st("holidays fetch");  fetchBankHolidays(); }
+    { StallTimer st("holidays redraw"); updateHolidayLabel(); }
+    lastHolidayUpdate = currentTime;
+  }
 }
 
 void show_event_details(int index, bool isReminder) {

@@ -277,7 +277,11 @@ void setup_display()
   display_ready = true;
   Serial.begin(115200);
   Serial.println("Initializing display...");
-  Serial.printf("Free heap before init: %d bytes\n", heap_caps_get_free_size(MALLOC_CAP_8BIT));
+  // MALLOC_CAP_8BIT covers internal SRAM *and* PSRAM, so the first line is a total,
+  // not the internal pool the Settings RAM meter reports. The second line is the
+  // one that matters for "can I fit an SRAM draw buffer".
+  Serial.printf("Free 8-bit heap before init: %d bytes (SRAM+PSRAM)\n", heap_caps_get_free_size(MALLOC_CAP_8BIT));
+  Serial.printf("Free internal heap before init: %d bytes\n", heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
   Serial.printf("Free PSRAM before init: %d bytes\n", heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
   // Initialize PSRAM
   bool psram_available = psramInit();
@@ -317,28 +321,44 @@ void setup_display()
   // panel's DMA, which is reading 768KB per frame out of the same memory the whole
   // time. Internal SRAM has none of that contention.
   //
-  // There is not room for 384KB of SRAM: the Settings meter reports roughly 173KB
-  // free of the 320KB internal pool once WiFi and TLS are up, and LVGL's own 128KB
-  // pool is a static array that does not even appear in that meter. So the SRAM
-  // option is a SMALLER buffer - 48 rows is 76.8KB - which trades more flushes
-  // (ten per full screen instead of two) for a much faster render. The bytes the
-  // flush copies are the same either way, so what is lost is only per-flush
-  // overhead and what is gained is every render pass.
+  // There is not room for a full-screen SRAM buffer: the boot log reports ~103KB
+  // free of the internal pool by the time the display comes up, and WiFi + TLS
+  // still have to fit afterwards. So the SRAM option is a SMALLER buffer - 48
+  // rows is 75KB - which trades more flushes (ten per full screen instead of two)
+  // for a much faster render. The bytes the flush copies are the same either way,
+  // so what is lost is only per-flush overhead and what is gained is every render
+  // pass.
   //
+  //  * THE TRAP: size the buffer with DRAW_BUF_BYTES_PER_PX, NOT sizeof(lv_color_t).
+  //    In LVGL 9 a lv_color_t is a depth-INDEPENDENT colour *value*, laid out as
+  //    RGB888 and therefore always 3 bytes (lv_color.h:109):
+  //        typedef struct { uint8_t blue, green, red; } lv_color_t;
+  //    The depth-specific pixel types are separate - lv_color16_t is the 2-byte
+  //    RGB565 one. The pixels in this buffer ARE RGB565 because LV_COLOR_DEPTH is
+  //    16, which is also what my_disp_flush() casts to uint16_t *. So sizing with
+  //    sizeof(lv_color_t) overstates every size by 50% at ANY depth, not because
+  //    of anything to do with this panel: the old log said "need 112KB" for a
+  //    48-row buffer that only needs 75KB. sizeof(lv_color16_t) == 2 is the
+  //    cross-check.
   //  * lv_display_set_buffers() wants the size in BYTES - it gets the height from
   //    buf_size / stride (see lv_display.c). An earlier version passed a pixel
   //    count, so LVGL used 60 rows of a 120-row buffer and half of it was dead.
   //  * One buffer, not two: my_disp_flush() copies synchronously and signals
   //    flush_ready before returning, so there is never a flush in flight for a
   //    second buffer to overlap with.
+#define DRAW_BUF_BYTES_PER_PX    2                    // RGB565 as my_disp_flush() sees it
 #define DRAW_BUF_PREFER_INTERNAL 1                    // 0 = always the big PSRAM buffer
-#define DRAW_BUF_INTERNAL_ROWS   48                   // 800 * 48 * 2  = 76.8KB
-#define DRAW_BUF_PSRAM_ROWS      240                  // 800 * 240 * 2 = 384KB
+#define DRAW_BUF_INTERNAL_ROWS   48                   // 800 * 48 * 2  = 75KB
+#define DRAW_BUF_PSRAM_ROWS      360                  // 800 * 360 * 2 = 562KB - the same
+                                                      // byte count the firmware allocated
+                                                      // before, so flush chunking is
+                                                      // unchanged; 240 was really 360 rows
+                                                      // once LVGL divided out the stride.
 #define DRAW_BUF_RAM_RESERVE     (128 * 1024)         // left for WiFi/TLS afterwards
   bufSize = screenWidth * DRAW_BUF_PSRAM_ROWS; // pixels
 #if DRAW_BUF_PREFER_INTERNAL
   {
-    const size_t want = (size_t)screenWidth * DRAW_BUF_INTERNAL_ROWS * sizeof(lv_color_t);
+    const size_t want = (size_t)screenWidth * DRAW_BUF_INTERNAL_ROWS * DRAW_BUF_BYTES_PER_PX;
     const size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     if (free_internal > want + DRAW_BUF_RAM_RESERVE) {
       lv_color_t *p = (lv_color_t *)heap_caps_malloc(want, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
@@ -359,10 +379,10 @@ void setup_display()
     }
   }
 #endif
-  size_t buffer_bytes = (size_t)bufSize * sizeof(lv_color_t); // sizeof(lv_color_t) == 2
+  size_t buffer_bytes = (size_t)bufSize * DRAW_BUF_BYTES_PER_PX;
   if (!disp_draw_buf) {
     bufSize = screenWidth * DRAW_BUF_PSRAM_ROWS;
-    buffer_bytes = (size_t)bufSize * sizeof(lv_color_t);
+    buffer_bytes = (size_t)bufSize * DRAW_BUF_BYTES_PER_PX;
     disp_draw_buf = (lv_color_t *)(psram_available ? heap_caps_malloc(buffer_bytes, MALLOC_CAP_SPIRAM) : heap_caps_malloc(buffer_bytes, MALLOC_CAP_8BIT));
     Serial.printf("Draw buffer: %uKB in %s (%d rows)\n", (unsigned)(buffer_bytes / 1024),
                   psram_available ? "PSRAM" : "SRAM", (int)(bufSize / screenWidth));
