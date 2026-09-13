@@ -60,11 +60,43 @@ uint32_t millis_cb(void)
 {
   return millis();
 }
+// Rolling framebuffer-copy statistics, reported every 5s when debug is on.
+static uint32_t      flush_stat_us = 0;      // total time spent in the copy
+static uint32_t      flush_stat_px = 0;      // pixels copied
+static uint32_t      flush_stat_count = 0;   // flushes
+static uint32_t      flush_stat_max_us = 0;  // worst single flush
+static unsigned long flush_stat_since = 0;   // window start
 void my_disp_flush(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
 {
   uint32_t w = lv_area_get_width(area);
   uint32_t h = lv_area_get_height(area);
+  // Every flush is a copy out of the LVGL draw buffer into the panel framebuffer,
+  // and because the panel's DMA reads PSRAM directly the driver then has to write
+  // that range back out of the CPU cache (auto_flush is true). So the flush is the
+  // one place where the panel's real cost shows up. Timed here, reported below,
+  // so a performance question can be answered with numbers instead of guesses.
+  const uint32_t t0 = micros();
   gfx.draw16bitRGBBitmap(area->x1, area->y1, (uint16_t *)px_map, w, h);
+  const uint32_t spent = micros() - t0;
+  flush_stat_us += spent;
+  flush_stat_px += w * h;
+  flush_stat_count++;
+  if (spent > flush_stat_max_us) flush_stat_max_us = spent;
+  if (debug == 1 && (millis() - flush_stat_since) >= 5000UL && flush_stat_count) {
+    const uint32_t ms = millis() - flush_stat_since;
+    // Throughput is the number that matters: if it is far below the ~30fps the
+    // 33ms refresh period asks for, the copy is the bottleneck.
+    const float kpx_s = (float)flush_stat_px / 1000.0f / ((float)ms / 1000.0f);
+    Serial.printf("[DRAW] %lu flushes in %lums: avg %.2fms, max %.2fms, %.0f kpx/s\n",
+                  (unsigned long)flush_stat_count, (unsigned long)ms,
+                  (float)flush_stat_us / 1000.0f / (float)flush_stat_count,
+                  (float)flush_stat_max_us / 1000.0f, kpx_s);
+    flush_stat_us = 0;
+    flush_stat_px = 0;
+    flush_stat_count = 0;
+    flush_stat_max_us = 0;
+    flush_stat_since = millis();
+  }
   lv_disp_flush_ready(disp);
 }
 // ---------------------------------------------------------------------------
@@ -264,10 +296,21 @@ void setup_display()
   lv_tick_set_cb(millis_cb);
   screenWidth = gfx.width();
   screenHeight = gfx.height();
-  bufSize = screenWidth * 120; // Increased from 40 to 120 for larger chunks, reducing flushes (adjust based on memory)
-  // Allocate LVGL buffers in PSRAM if available, else SRAM
-  // For double buffering: allocate for 2 buffers (2 * bufSize pixels * 2 bytes)
-  size_t buffer_bytes = 2 * bufSize * sizeof(lv_color_t); // sizeof(lv_color_t) == 2
+  // One draw buffer, 240 rows: 800 * 240 * 2 bytes = 384KB, exactly what the old
+  // pair of buffers cost. Two changes here, both free:
+  //
+  //  * lv_display_set_buffers() wants the size in BYTES - it computes the height
+  //    as buf_size / stride, with stride 800 * 2 = 1600 (see lv_display.c). The
+  //    old call passed bufSize, a pixel count, so LVGL took 96000 BYTES and got
+  //    96000 / 1600 = 60 rows out of a buffer that could hold 120. Half of each
+  //    allocation - 192KB in total - was never drawn into.
+  //  * The second buffer bought nothing. my_disp_flush() copies synchronously and
+  //    signals flush_ready before it returns, so there is never a flush in flight
+  //    for another buffer to overlap with - rendering and copying just alternate.
+  //    Giving the whole 384KB to a single buffer cuts a full-screen repaint from
+  //    eight flushes of 60 rows to two of 240, each one larger and cheaper.
+  bufSize = screenWidth * 240; // pixels
+  size_t buffer_bytes = (size_t)bufSize * sizeof(lv_color_t); // sizeof(lv_color_t) == 2
   disp_draw_buf = (lv_color_t *)(psram_available ? heap_caps_malloc(buffer_bytes, MALLOC_CAP_SPIRAM) : heap_caps_malloc(buffer_bytes, MALLOC_CAP_8BIT));
   if (!disp_draw_buf)
   {
@@ -279,9 +322,8 @@ void setup_display()
   Serial.printf("Free PSRAM after buffer: %d bytes\n", heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
   disp = lv_display_create(screenWidth, screenHeight);
   lv_display_set_flush_cb(disp, my_disp_flush);
-  // Use double buffering in partial mode: buf1 and buf2
-  lv_color_t *buf2 = disp_draw_buf + bufSize; // Second buffer starts after first
-  lv_display_set_buffers(disp, disp_draw_buf, buf2, bufSize, LV_DISPLAY_RENDER_MODE_PARTIAL); // Fixed size to bufSize (pixels per buffer)
+  // Single buffer, partial mode, size in bytes.
+  lv_display_set_buffers(disp, disp_draw_buf, NULL, buffer_bytes, LV_DISPLAY_RENDER_MODE_PARTIAL);
   Serial.println("LVGL display created");
   lv_indev_t *indev = lv_indev_create();
   lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);

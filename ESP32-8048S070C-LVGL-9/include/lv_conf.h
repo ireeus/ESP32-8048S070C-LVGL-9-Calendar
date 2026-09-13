@@ -216,7 +216,16 @@
         /** Allow buffering some shadow calculation.
          *  LV_DRAW_SW_SHADOW_CACHE_SIZE is the maximum shadow size to buffer, where shadow size is
          *  `shadow_width + radius`.  Caching has LV_DRAW_SW_SHADOW_CACHE_SIZE^2 RAM cost. */
-        #define LV_DRAW_SW_SHADOW_CACHE_SIZE 0
+        /* Was 0, which meant every shadow redrew its blurred corner from scratch.
+         * This app gives five objects a shadow (widths 20, 16, 10, 8, 8) and the
+         * corner is `shadow_width + radius`, so the largest is 20 + 6 = 26 and
+         * 26*26 = 676 bytes. 32 covers all of them for 1KB, and it pays off more
+         * than once per frame: a widget taller than the 120-row draw buffer is
+         * rendered in several chunks, and each chunk was recomputing the same
+         * corner. The cache is one entry keyed on (corner_size, radius), so the
+         * 26px weather shadow and the 22px calendar one evict each other - still a
+         * win, because each is reused across the chunks of its own widget. */
+        #define LV_DRAW_SW_SHADOW_CACHE_SIZE 32
 
         /** Set number of maximally-cached circle data.
          *  The circumference of 1/4 circle are saved for anti-aliasing.

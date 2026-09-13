@@ -6146,11 +6146,42 @@ static void bgApply(uint8_t *buf, size_t len) {
   if (bg_buffer && bg_buffer != buf) free(bg_buffer);
   bg_buffer = buf;
   memset(&bg_dsc, 0, sizeof(bg_dsc));
-  bg_dsc.header.cf = LV_COLOR_FORMAT_RGB888;
   bg_dsc.header.w = 800;
   bg_dsc.header.h = 480;
-  bg_dsc.data_size = len;
-  bg_dsc.data = buf;
+  // The file is 800x480x3 raw RGB888, and LVGL was handed it as RGB888. That
+  // meant converting three bytes to two for every pixel, on every blit - and the
+  // background is the hottest blit in the app, because LVGL repaints everything
+  // underneath any widget that redraws, so a clock tick in the taskbar re-blits
+  // part of it too. Converting once here (384k pixels, a few ms) halves the
+  // source traffic and removes the per-pixel conversion from every later frame.
+  //
+  // LVGL's RGB565 is little-endian, and writing a uint16 natively on this
+  // little-endian chip gives exactly that byte order. The RGB888 buffer is freed
+  // afterwards, so this also drops the retained background from 1.15MB to 768KB.
+  const size_t bg_pixels = (size_t)800 * 480;
+  uint16_t *packed = (uint16_t *)ps_malloc(bg_pixels * sizeof(uint16_t));
+  if (packed && len >= bg_pixels * 3) {
+    for (size_t i = 0; i < bg_pixels; i++) {
+      const uint8_t r = buf[i * 3 + 0];
+      const uint8_t g = buf[i * 3 + 1];
+      const uint8_t b = buf[i * 3 + 2];
+      packed[i] = (uint16_t)(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
+    }
+    free(buf);
+    bg_buffer = (uint8_t *)packed;
+    bg_dsc.header.cf = LV_COLOR_FORMAT_RGB565;
+    bg_dsc.data_size = bg_pixels * sizeof(uint16_t);
+    bg_dsc.data = (const uint8_t *)packed;
+    if (debug == 1) Serial.println("[APP] Background converted to RGB565");
+  } else {
+    // Out of PSRAM, or an unexpected length: keep the old, slower path rather
+    // than lose the background entirely.
+    if (packed) free(packed);
+    bg_dsc.header.cf = LV_COLOR_FORMAT_RGB888;
+    bg_dsc.data_size = len;
+    bg_dsc.data = buf;
+    if (debug == 1) Serial.println("[APP] RGB565 conversion unavailable, using RGB888");
+  }
   bg_img = lv_img_create(lv_scr_act());
   lv_img_set_src(bg_img, &bg_dsc);
   lv_obj_set_size(bg_img, LV_PCT(100), LV_PCT(100));
