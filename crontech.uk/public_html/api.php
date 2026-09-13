@@ -494,9 +494,78 @@ if (isset($_GET['code'])) {
             exit;
         }
     }
+/* Fetch or update the device theme
+ * URL request (update): api.php?theme={access_code}&scheme={name}&darkness={0-100}&auto={0|1}
+ * Description: Saves the theme the DEVICE is actually using, so the website's
+ *   Themes tab shows the same values on the next refresh. Until this existed the
+ *   theme only ever flowed one way - the device read it and never wrote it - so a
+ *   colour or brightness picked on the device was invisible on the site. Events,
+ *   the parcel box and the location already pushed through here; the theme did not.
+ */
+} elseif (isset($_GET['theme'])) {
+    $access_code = urldecode($_GET['theme']);
+    $scheme = trim(urldecode($_GET['scheme'] ?? ''));
+    $darkness = (int)($_GET['darkness'] ?? 0);
+    $auto = ((int)($_GET['auto'] ?? 0)) ? 1 : 0;
+    if (empty($access_code)) {
+        http_response_code(400);
+        echo json_encode(['error' => 'theme parameter is required']);
+        exit;
+    }
+    // Find user_id from access_code
+    $stmt = $db->prepare("SELECT user_id FROM users WHERE access_code = ?");
+    $stmt->execute([$access_code]);
+    $user = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$user) {
+        http_response_code(401);
+        echo json_encode(['error' => 'Invalid access code']);
+        exit;
+    }
+    $user_id = $user['user_id'];
+
+    // Clamp rather than reject: the device is the authority on what it is
+    // displaying, and a 400 would only make it retry forever.
+    if ($darkness < 0) $darkness = 0;
+    if ($darkness > 100) $darkness = 100;
+    if (strlen($scheme) > 32) $scheme = substr($scheme, 0, 32);
+
+    try {
+        // brightness_auto is added by settings.php's migration and may not exist on
+        // a site whose settings page has never been opened, so the statement is
+        // built for whichever columns are actually there.
+        $cols = $db->query("PRAGMA table_info(user_theme)")->fetchAll(PDO::FETCH_ASSOC);
+        $hasAuto = false;
+        foreach ($cols as $c) { if ($c['name'] === 'brightness_auto') $hasAuto = true; }
+
+        if ($scheme !== '') {
+            if ($hasAuto) {
+                $stmt = $db->prepare("INSERT OR REPLACE INTO user_theme (user_id, scheme, darkness, brightness_auto, updated) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)");
+                $stmt->execute([$user_id, $scheme, $darkness, $auto]);
+            } else {
+                $stmt = $db->prepare("INSERT OR REPLACE INTO user_theme (user_id, scheme, darkness, updated) VALUES (?, ?, ?, CURRENT_TIMESTAMP)");
+                $stmt->execute([$user_id, $scheme, $darkness]);
+            }
+        } else {
+            // No scheme supplied: move only the brightness fields, leaving the
+            // stored colours alone.
+            if ($hasAuto) {
+                $stmt = $db->prepare("UPDATE user_theme SET darkness = ?, brightness_auto = ?, updated = CURRENT_TIMESTAMP WHERE user_id = ?");
+                $stmt->execute([$darkness, $auto, $user_id]);
+            } else {
+                $stmt = $db->prepare("UPDATE user_theme SET darkness = ?, updated = CURRENT_TIMESTAMP WHERE user_id = ?");
+                $stmt->execute([$darkness, $user_id]);
+            }
+        }
+        header('Content-Type: application/json');
+        echo json_encode(['scheme' => $scheme, 'darkness' => $darkness, 'auto' => (bool)$auto]);
+    } catch (PDOException $e) {
+        http_response_code(500);
+        echo json_encode(['error' => 'Failed to save theme: ' . $e->getMessage()]);
+        exit;
+    }
 } else {
     http_response_code(400);
-    echo json_encode(['error' => 'Either code, unique_code, parcelBox, or weatherLocation parameter is required']);
+    echo json_encode(['error' => 'Either code, unique_code, parcelBox, weatherLocation or theme parameter is required']);
     exit;
 }
 ?>

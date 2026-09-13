@@ -105,6 +105,7 @@ static void brightness_steps_highlight(int active); // repaint the brightness ro
 static int  ui_brightness_active_button();      // 0 = Auto, 1..N = preset + 1
 static void updateAutoBrightness(bool force);   // recompute the level from the sun
 static void apply_ui_darkness_ex(int value, bool persist);
+static void pushThemeToServer();                // send a local theme choice to the site
 // Colour-scheme helpers. Defined next to apply_calendar_theme() further down, but
 // declared here because the settings popup (which sits above them) calls
 // apply_theme_accent() to keep the theme's light/dark flag in step.
@@ -309,6 +310,11 @@ static int  g_sunset_min  = -1;
 // changing only the colour scheme on the site does not look like a brightness
 // change and cancel Auto.
 static int  g_web_darkness = -1;
+// Set when the theme is changed ON THE DEVICE, and cleared once it has been sent
+// to the site. A value that arrived FROM the site is deliberately not sent back -
+// that would be a pointless round trip, and with two devices on one account it
+// could fight over who is authoritative.
+static bool themePushPending = false;
 // Set when show_settings_popup() builds the row, and cleared when that popup is
 // deleted - these point into it, so a stale entry would be a dangling pointer.
 static lv_obj_t *brightness_step_btns[UI_BRIGHTNESS_BUTTON_COUNT] =
@@ -4400,6 +4406,9 @@ void brightness_step_cb(lv_event_t *e) {
     apply_ui_darkness(ui_darkness_for_brightness(UI_BRIGHTNESS_STEPS[idx - 1]));
   }
   brightness_steps_highlight(ui_brightness_active_button());
+  // Let the website know, so its Themes tab agrees after a refresh. The request
+  // itself runs from loop() - see pushThemeToServer().
+  themePushPending = true;
 }
 // ---- Remote update policy --------------------------------------------------
 // The website publishes update/policy.json:
@@ -4544,6 +4553,63 @@ void fetchThemeConfig() {
   preferences.putString("theme_sig", themeSignature);
   preferences.end();
 }
+// Send a theme chosen on the DEVICE back to the site, so the Themes tab shows the
+// same thing after a refresh. This is the mirror of fetchThemeConfig(), which has
+// always gone the other way; api.php already carried events, the parcel box and
+// the location back, but nothing ever wrote user_theme.
+//
+// Runs from loop() rather than straight out of the button callback: it is a
+// blocking HTTPS request (a full TCP + TLS handshake, ~1s), and doing that inside
+// a tap would freeze the screen the user just touched.
+static void pushThemeToServer() {
+  if (!themePushPending) return;
+  if (WiFi.status() != WL_CONNECTED) return;   // stays pending; retried when up
+  if (apiCode.isEmpty()) return;
+  if (is_ota_updating) return;
+  // Same rule as the boot fetch queue: never start a second-long request while a
+  // finger is down.
+  lv_indev_t *indev = lv_indev_get_next(NULL);
+  if (indev && lv_indev_get_state(indev) == LV_INDEV_STATE_PRESSED) return;
+
+  // With Auto running, g_ui_darkness is today's computed level, not a choice. What
+  // the site wants is "auto is on, and the manual level underneath is X", so push
+  // the stored manual value instead of the transient one.
+  int darkness_to_push = g_ui_darkness;
+  if (g_brightness_auto) {
+    preferences.begin("ui", true);
+    darkness_to_push = preferences.getInt("ui_darkness", g_ui_darkness);
+    preferences.end();
+  }
+  const String scheme_name = color_schemes[g_ui_scheme].name;
+
+  themePushPending = false;
+  String url = "https://crontech.uk/api.php?theme=" + URLEncode(apiCode) +
+               "&scheme=" + URLEncode(scheme_name) +
+               "&darkness=" + String(darkness_to_push) +
+               "&auto=" + String(g_brightness_auto ? 1 : 0);
+  HTTPClient http;
+  http.begin(url);
+  const int httpCode = http.GET();
+  if (httpCode == HTTP_CODE_OK) {
+    // The site now holds exactly this, so record it as the last server value.
+    // Without that the next poll would see a "change" and re-apply it.
+    themeSignature = scheme_name + "|" + String(darkness_to_push) + "|" +
+                     (g_brightness_auto ? "1" : "0");
+    preferences.begin("ui", false);
+    preferences.putString("theme_sig", themeSignature);
+    preferences.putInt("ui_web_darkness", darkness_to_push);
+    preferences.end();
+    g_web_darkness = darkness_to_push;
+    if (debug == 1) {
+      Serial.println("[THEME] pushed to site: " + scheme_name + " darkness " +
+                     String(darkness_to_push) + (g_brightness_auto ? " auto" : ""));
+    }
+  } else {
+    themePushPending = true; // retry on a later pass
+    if (debug == 1) Serial.println("[THEME] push failed: HTTP " + String(httpCode));
+  }
+  http.end();
+}
 // Re-initialise the LVGL theme with the active scheme's accent. Cheap and safe
 // to call repeatedly: lv_theme_default_init() allocates its theme object once
 // (lv_theme_default_is_inited()) and returns early when nothing changed.
@@ -4626,6 +4692,8 @@ static void color_event_cb(lv_event_t *e) {
   preferences.begin("ui", false);
   preferences.putInt("ui_scheme", g_ui_scheme);
   preferences.end();
+  // Tell the site about it (from loop(), not here - see pushThemeToServer).
+  themePushPending = true;
   color_changer_toggle(); // collapse again once a choice is made
 }
 static void create_color_changer() {
@@ -5493,6 +5561,9 @@ void loop() {
   // Post-UI fetch queue: one blocking request per iteration, with LVGL drawing
   // in between, instead of the whole sequence in one go.
   serviceBootFetchQueue();
+  // A theme picked on the device, on its way to the site. Not done inside the tap
+  // callback because the request blocks for about a second.
+  pushThemeToServer();
   // WiFi wizard: finishes the async scan and the in-progress connection attempt.
   serviceWifiSetup();
 
