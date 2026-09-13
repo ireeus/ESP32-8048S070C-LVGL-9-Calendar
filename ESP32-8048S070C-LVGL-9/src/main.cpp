@@ -98,6 +98,7 @@ void updateFirmwareButton();
 unsigned long hashString(const String& str);
 void update_today_highlight(lv_obj_t *cal);
 void darkness_slider_cb(lv_event_t *e); // New callback for darkness slider
+void backlight_slider_cb(lv_event_t *e); // Screen backlight (panel LEDs, not theme)
 // Colour-scheme helpers. Defined next to apply_calendar_theme() further down, but
 // declared here because darkness_slider_cb() (which sits above them) calls
 // apply_theme_accent() to keep the theme's light/dark flag in step.
@@ -273,6 +274,13 @@ static lv_timer_t *notification_timer = NULL;
 static lv_timer_t *blink_timer = NULL;
 static lv_obj_t *bg_img = nullptr;  // Global for background image
 static int g_ui_darkness = 0; // Global darkness level (0: light, 100: dark)
+// Panel backlight level, 0-100. Sits next to ui_darkness in the "ui" preference
+// namespace but does something completely different: that one changes the greys
+// the UI paints, this one drives the panel's LEDs. The controls cap it at
+// BACKLIGHT_MIN; 0 is still honoured by backlight_set() because the OTA blackout
+// needs a genuine off.
+static int g_backlight = 100;
+#define BACKLIGHT_MIN 10
 
 // ---- Colour schemes --------------------------------------------------------
 // Ported from LVGL's Widgets demo, which swaps between the LV_PALETTE_* accents
@@ -2717,15 +2725,36 @@ void show_settings_popup() {
     lv_obj_t *username_ta = make_field(parcel_pair, "Username", "Username", username, 0, 0, 1);
     lv_obj_t *device_id_ta = make_field(parcel_pair, "Device ID", "Device ID", device_id, 0, 0, 1);
 
-    // UI Brightness now occupies the slot the "Temperature Adjustment" card used
-    // to hold, so both columns stay full-height instead of leaving a gap.
-    lv_obj_t *brightness_card = make_card(right_col, lv_color_hex(0x1e1e1e), lv_color_hex(0x1e1e1e));
-    make_card_title(brightness_card, "UI Brightness");
-    lv_obj_t *darkness_slider = lv_slider_create(brightness_card);
+    // The card holds TWO different things that both read as "brightness", so each
+    // slider gets its own label: one changes the greys the UI paints, the other
+    // drives the panel's backlight LEDs. The popup scrolls, so the extra label and
+    // slider cannot push anything out of reach.
+    lv_obj_t *display_card = make_card(right_col, lv_color_hex(0x1e1e1e), lv_color_hex(0x1e1e1e));
+    make_card_title(display_card, "Display");
+    auto add_slider_label = [](lv_obj_t *card, const char *text) {
+      lv_obj_t *lbl = lv_label_create(card);
+      lv_label_set_text(lbl, text);
+      lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
+      // White like make_card_title(): the card is a fixed dark panel, so a
+      // theme-coloured label would go dark-on-dark at low UI brightness.
+      lv_obj_set_style_text_color(lbl, lv_color_hex(0xFFFFFF), 0);
+      return lbl;
+    };
+    add_slider_label(display_card, "UI brightness (0 = light, 100 = dark)");
+    lv_obj_t *darkness_slider = lv_slider_create(display_card);
     lv_slider_set_range(darkness_slider, 0, 100);
     lv_slider_set_value(darkness_slider, g_ui_darkness, LV_ANIM_OFF);
     lv_obj_set_width(darkness_slider, LV_PCT(100));
     lv_obj_add_event_cb(darkness_slider, darkness_slider_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+    add_slider_label(display_card, "Screen backlight");
+    lv_obj_t *backlight_slider = lv_slider_create(display_card);
+    // Not 0: on a touch-only device a dark backlight leaves no visible control to
+    // bring it back, so the floor is BACKLIGHT_MIN.
+    lv_slider_set_range(backlight_slider, BACKLIGHT_MIN, 100);
+    lv_slider_set_value(backlight_slider, g_backlight, LV_ANIM_OFF);
+    lv_obj_set_width(backlight_slider, LV_PCT(100));
+    lv_obj_add_event_cb(backlight_slider, backlight_slider_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
     // Firmware version sits directly under the last card as a normal child of the
     // column, so it starts at the same left edge as that card rather than
@@ -3529,13 +3558,23 @@ static void ota_show_completed() {
   ota_set_status("Update completed.\nWe need to restart the Crontab", false);
   if (ota_status_lbl) lv_obj_set_style_text_color(ota_status_lbl, lv_color_hex(0x8BC34A), 0);
 }
-// TFT_BL is set up as an output by setup_display().
-static void ota_backlight(bool on) {
+// The single point of contact with the backlight. display.h attaches TFT_BL to
+// LEDC at boot; every level change (the settings slider, the web theme, the OTA
+// blackout) goes through here so there is exactly one place that writes a duty.
+// 0 really does mean off, which is what the OTA blackout relies on.
+static void backlight_set(int percent) {
+  if (percent < 0) percent = 0;
+  if (percent > 100) percent = 100;
 #ifdef TFT_BL
-  digitalWrite(TFT_BL, on ? HIGH : LOW);
+  ledcWrite(TFT_BL_LEDC_CHANNEL, (uint32_t)((uint32_t)percent * TFT_BL_PWM_MAX / 100));
 #else
-  (void)on;
+  (void)percent;
 #endif
+}
+// Used by the OTA screens. Restoring "on" restores the user's chosen level, not
+// full brightness, so an update does not silently undo a dimmed display.
+static void ota_backlight(bool on) {
+  backlight_set(on ? g_backlight : 0);
 }
 // Take the screen right down: backlight off AND a flat framebuffer.
 //
@@ -4175,6 +4214,16 @@ void darkness_slider_cb(lv_event_t *e) {
   lv_obj_t *slider = (lv_obj_t*)lv_event_get_target(e);
   apply_ui_darkness(lv_slider_get_value(slider));
 }
+// No equivalent of apply_ui_darkness() to route through: the backlight touches
+// the panel and nothing in the UI, so it is applied and stored here.
+void backlight_slider_cb(lv_event_t *e) {
+  lv_obj_t *slider = (lv_obj_t*)lv_event_get_target(e);
+  g_backlight = lv_slider_get_value(slider);
+  backlight_set(g_backlight);
+  preferences.begin("ui", false);
+  preferences.putInt("ui_backlight", g_backlight);
+  preferences.end();
+}
 // ---- Remote update policy --------------------------------------------------
 // The website publishes update/policy.json:
 //     { "revision": 1, "auto_firmware_update": false, "quiet_start": 2, "quiet_end": 5 }
@@ -4253,13 +4302,18 @@ void fetchThemeConfig() {
     return;
   }
   int darkness = doc["darkness"] | -1;
+  // Absent on an older device-theme.php, hence -1 rather than 100: a missing key
+  // must leave the backlight alone instead of forcing it to full.
+  int backlight = doc["backlight"] | -1;
   String scheme = doc["scheme"].as<String>();
   scheme.trim();
 
   // The endpoint is per-user, so the signature is just what the owner chose. The
   // 'updated' timestamp it returns is deliberately NOT part of this: re-saving
   // the same values on the site must not overwrite a colour picked on the device.
-  String sig = scheme + "|" + String(darkness);
+  // backlight is in here for the same reason - moving the slider on the device
+  // must survive the next poll, and only a real change on the site overrides it.
+  String sig = scheme + "|" + String(darkness) + "|" + String(backlight);
   if (sig == themeSignature) return; // unchanged: leave the local choice alone
 
   if (scheme.length()) {
@@ -4285,6 +4339,16 @@ void fetchThemeConfig() {
   if (darkness >= 0 && darkness <= 100 && darkness != g_ui_darkness) {
     apply_ui_darkness(darkness);
     if (debug == 1) Serial.println("[THEME] brightness set from server: " + String(darkness));
+  }
+  // The site's floor is the same BACKLIGHT_MIN the device slider uses, so a value
+  // below it is treated as absent rather than obeyed.
+  if (backlight >= BACKLIGHT_MIN && backlight <= 100 && backlight != g_backlight) {
+    g_backlight = backlight;
+    backlight_set(g_backlight);
+    preferences.begin("ui", false);
+    preferences.putInt("ui_backlight", g_backlight);
+    preferences.end();
+    if (debug == 1) Serial.println("[THEME] backlight set from server: " + String(backlight));
   }
   themeSignature = sig;
   preferences.begin("ui", false);
@@ -5122,6 +5186,9 @@ void setup() {
   preferences.end();
   preferences.begin("ui", false);
   g_ui_darkness = preferences.getInt("ui_darkness", 0);
+  // Defaults to full, so a device that has never been dimmed looks exactly as it
+  // did before this setting existed.
+  g_backlight = preferences.getInt("ui_backlight", 100);
   g_ui_scheme = preferences.getInt("ui_scheme", 0);
   themeSignature = preferences.getString("theme_sig", "");
   g_autoFirmwareUpdate = preferences.getBool("auto_upd", false);
@@ -5130,6 +5197,9 @@ void setup() {
   policySignature = preferences.getString("policy_sig", "");
   preferences.end();
   if (g_ui_scheme < 0 || g_ui_scheme >= COLOR_SCHEME_COUNT) g_ui_scheme = 0;
+  // display.h brought the backlight up at full so the splash is visible; drop it
+  // to the saved level now that preferences have been read.
+  backlight_set(g_backlight);
   preferences.begin("wifi", false);
   ssid = preferences.getString("ssid", "");
   password = preferences.getString("password", "");
