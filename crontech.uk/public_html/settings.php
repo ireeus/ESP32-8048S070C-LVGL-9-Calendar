@@ -99,6 +99,19 @@ $db->exec("CREATE TABLE IF NOT EXISTS persistent_sessions (
     if (!$hasRemindBefore) {
         $db->exec("ALTER TABLE events ADD COLUMN remind_before TEXT");
     }
+    // user_theme.brightness_auto: 1 when the device should follow daylight instead
+    // of a fixed level. Arrived after the table already existed on the live site, so
+    // it is added in place with the same PRAGMA-then-ALTER pattern as the events
+    // columns above. DEFAULT 0 = off, so nobody's device changes behaviour by
+    // itself. SQLite allows NOT NULL here only because a default is supplied.
+    $themeColumns = $db->query("PRAGMA table_info(user_theme)")->fetchAll(PDO::FETCH_ASSOC);
+    $hasBrightnessAutoColumn = false;
+    foreach ($themeColumns as $column) {
+        if ($column['name'] === 'brightness_auto') $hasBrightnessAutoColumn = true;
+    }
+    if (!$hasBrightnessAutoColumn) {
+        $db->exec("ALTER TABLE user_theme ADD COLUMN brightness_auto INTEGER NOT NULL DEFAULT 0");
+    }
 } catch (PDOException $e) {
     error_log("Database Error: " . $e->getMessage());
     die("Database Error: Unable to connect to the database.");
@@ -493,28 +506,63 @@ $is_admin = (strtolower($current_user) === 'ireeus@gmail.com');
 $theme_message = '';
 $theme_error_flag = false;
 if (isset($_POST['save_theme']) && isset($_SESSION['user_id'])) {
-    $scheme   = isset($_POST['scheme']) ? (string)$_POST['scheme'] : '';
-    $darkness = isset($_POST['darkness']) ? (int)$_POST['darkness'] : 0;
+    $scheme = isset($_POST['scheme']) ? (string)$_POST['scheme'] : '';
+    // One radio group, "brightness", whose values are "auto" or a percentage, so
+    // Auto and the presets are mutually exclusive in the browser without any JS.
+    // A page cached by the service worker may still post the older "darkness"
+    // field on its own, so that is accepted too - and if neither arrives, both
+    // stored values are left exactly as they are.
+    $brightness_raw = isset($_POST['brightness']) ? (string)$_POST['brightness'] : null;
+    $stored = null;
+    $stmtPrev = $db->prepare("SELECT darkness, brightness_auto FROM user_theme WHERE user_id = ?");
+    $stmtPrev->execute([$_SESSION['user_id']]);
+    $prev = $stmtPrev->fetch(PDO::FETCH_ASSOC);
+    if ($prev) { $stored = $prev; }
+
+    $brightness_auto = $stored ? (int)$stored['brightness_auto'] : 0;
+    $darkness = $stored ? (int)$stored['darkness'] : 0;
+    $brightness_error = '';
+
+    if ($brightness_raw !== null) {
+        if ($brightness_raw === 'auto') {
+            $brightness_auto = 1;   // darkness keeps whatever was last chosen by hand
+        } elseif (preg_match('/^\d+$/', $brightness_raw) && (int)$brightness_raw <= 100) {
+            $brightness_auto = 0;
+            $darkness = 100 - (int)$brightness_raw;   // shown as brightness, stored as darkness
+        } else {
+            $brightness_error = 'Unknown brightness option.';
+        }
+    } elseif (isset($_POST['darkness'])) {
+        $d = (int)$_POST['darkness'];
+        if ($d < 0 || $d > 100) {
+            $brightness_error = 'Brightness must be between 0 and 100.';
+        } else {
+            $brightness_auto = 0;
+            $darkness = $d;
+        }
+    }
+
     if (!array_key_exists($scheme, $THEME_SCHEMES)) {
         $theme_message = 'Unknown colour scheme.'; $theme_error_flag = true;
-    } elseif ($darkness < 0 || $darkness > 100) {
-        $theme_message = 'Brightness must be between 0 and 100.'; $theme_error_flag = true;
+    } elseif ($brightness_error !== '') {
+        $theme_message = $brightness_error; $theme_error_flag = true;
     } else {
-        $stmt = $db->prepare("INSERT OR REPLACE INTO user_theme (user_id, scheme, darkness, updated) VALUES (?, ?, ?, CURRENT_TIMESTAMP)");
-        $stmt->execute([$_SESSION['user_id'], $scheme, $darkness]);
+        $stmt = $db->prepare("INSERT OR REPLACE INTO user_theme (user_id, scheme, darkness, brightness_auto, updated) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)");
+        $stmt->execute([$_SESSION['user_id'], $scheme, $darkness, $brightness_auto]);
         $theme_message = 'Theme saved - it applies to your Cron-Tab device only.';
     }
 }
 
-$user_theme = ['scheme' => 'Blue', 'darkness' => 0];
+$user_theme = ['scheme' => 'Blue', 'darkness' => 0, 'brightness_auto' => 0];
 if (isset($_SESSION['user_id'])) {
-    $stmt = $db->prepare("SELECT scheme, darkness FROM user_theme WHERE user_id = ?");
+    $stmt = $db->prepare("SELECT scheme, darkness, brightness_auto FROM user_theme WHERE user_id = ?");
     $stmt->execute([$_SESSION['user_id']]);
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
     if ($row) { $user_theme = $row; }
 }
 if (!array_key_exists((string)$user_theme['scheme'], $THEME_SCHEMES)) { $user_theme['scheme'] = 'Blue'; }
 $user_theme['darkness'] = max(0, min(100, (int)$user_theme['darkness']));
+$user_theme['brightness_auto'] = ((int)$user_theme['brightness_auto']) ? 1 : 0;
 
 // Device fleet update policy. Everyone can SEE it; only the administrator can
 // change it, because one value drives every device.
@@ -929,6 +977,8 @@ if (!array_key_exists($active_tab, $TABS)) { $active_tab = 'calendar'; }
            is one autosave - no drag, so nothing fires mid-gesture. */
         .step-choices { display:flex; gap:.5rem; margin:.6rem 0 .25rem; }
         .step-choice { flex:1; position:relative; }
+        /* "Auto" needs more room than a two- or three-digit number. */
+        .step-choice-wide { flex:1.6; }
         .step-choice input { position:absolute; opacity:0; width:1px; height:1px; margin:0; }
         .step-choice-box { display:block; text-align:center; padding:.6rem 0; border-radius:8px;
             border:1px solid var(--border-light); background:var(--bg-card); color:var(--text-main);
@@ -1046,18 +1096,19 @@ if (!array_key_exists($active_tab, $TABS)) { $active_tab = 'calendar'; }
                                 <?php endforeach; ?>
                             </div>
                             <?php
-                            // Five presets, matching the device's own row. A slider
-                            // gives a value nobody needs to that precision, and on
-                            // the device itself a drag was unreliable; one click is
-                            // also one autosave instead of dozens mid-drag.
+                            // Six choices matching the device's own row: Auto, then
+                            // five presets. A slider gives a value nobody needs to
+                            // that precision, and on the device itself a drag was
+                            // unreliable; one click is also one autosave.
                             //
-                            // The buttons are BRIGHTNESS (100 = brightest, 0 =
-                            // darkest). The field and the user_theme column stay
-                            // "darkness" (0 = light) because the device reads that
-                            // and inverting the wire format would need a migration on
-                            // both sides at once - so only the value submitted is
-                            // flipped: 100 - brightness.
+                            // All six share ONE radio group (name="brightness") so
+                            // Auto and a preset cannot both look selected. The value
+                            // posted is the brightness the user sees ("auto" or a
+                            // percentage); the stored column stays "darkness"
+                            // (0 = light) because the device reads that, so only the
+                            // submitted number is flipped: 100 - brightness.
                             $brightness_steps = [0, 25, 50, 75, 100];
+                            $brightness_auto = (int)$user_theme['brightness_auto'] === 1;
                             $brightness_now = 100 - (int)$user_theme['darkness'];
                             $brightness_sel = $brightness_steps[0];
                             $brightness_best = PHP_INT_MAX;
@@ -1068,11 +1119,17 @@ if (!array_key_exists($active_tab, $TABS)) { $active_tab = 'calendar'; }
                             ?>
                             <label class="text-base">UI brightness (0 = dark, 100 = bright)</label>
                             <div class="step-choices">
+                                <label class="step-choice step-choice-wide" title="Follow daylight: brightest at midday, darkest at midnight">
+                                    <input type="radio" name="brightness" value="auto"
+                                           <?php echo $brightness_auto ? 'checked' : ''; ?>
+                                           onchange="ctAutosave(this);">
+                                    <span class="step-choice-box">Auto</span>
+                                </label>
                                 <?php foreach ($brightness_steps as $__step): ?>
                                     <label class="step-choice" title="<?php echo $__step; ?>%">
-                                        <input type="radio" name="darkness"
-                                               value="<?php echo 100 - $__step; ?>"
-                                               <?php echo $__step === $brightness_sel ? 'checked' : ''; ?>
+                                        <input type="radio" name="brightness"
+                                               value="<?php echo $__step; ?>"
+                                               <?php echo (!$brightness_auto && $__step === $brightness_sel) ? 'checked' : ''; ?>
                                                onchange="ctAutosave(this);">
                                         <span class="step-choice-box"><?php echo $__step; ?></span>
                                     </label>
