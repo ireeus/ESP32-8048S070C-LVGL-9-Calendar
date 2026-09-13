@@ -41,13 +41,28 @@ try {
 
     $theme = null;
     try {
-        $stmt = $db->prepare("SELECT scheme, darkness FROM user_theme WHERE user_id = ?");
-        $stmt->execute([$user_id]);
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        // brightness_auto arrived after the table existed, and its column is added
+        // by settings.php. Until the owner opens that page once the column may not
+        // exist, so fall back to the two-column select instead of letting the
+        // PDOException reach the outer catch - that would report "no theme" and
+        // silently reset the device to the legacy default scheme.
+        $row = null;
+        try {
+            $stmt = $db->prepare("SELECT scheme, darkness, brightness_auto FROM user_theme WHERE user_id = ?");
+            $stmt->execute([$user_id]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        } catch (PDOException $e) {
+            $stmt = $db->prepare("SELECT scheme, darkness FROM user_theme WHERE user_id = ?");
+            $stmt->execute([$user_id]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        }
         if ($row) {
             $theme = [
                 'scheme'   => (string)$row['scheme'],
                 'darkness' => (int)$row['darkness'],
+                // True when the owner asked the device to follow daylight instead of
+                // a fixed level. Absent column means off.
+                'auto'     => isset($row['brightness_auto']) && (int)$row['brightness_auto'] === 1,
                 'source'   => 'user',
             ];
         }
@@ -64,6 +79,7 @@ try {
         $theme = [
             'scheme'   => (is_array($legacy) && !empty($legacy['scheme'])) ? (string)$legacy['scheme'] : 'Blue',
             'darkness' => (is_array($legacy) && isset($legacy['darkness'])) ? (int)$legacy['darkness'] : 0,
+            'auto'     => false,
             'source'   => 'default',
         ];
     }
