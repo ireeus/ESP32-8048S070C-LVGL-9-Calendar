@@ -100,9 +100,11 @@ void next_month_cb(lv_event_t *e);
 void updateFirmwareButton();
 unsigned long hashString(const String& str);
 void update_today_highlight(lv_obj_t *cal);
-void brightness_step_cb(lv_event_t *e);           // UI brightness preset tapped
-static void brightness_steps_highlight(int selected); // repaint the preset row
-static int  ui_brightness_nearest_step();         // which preset is active now
+void brightness_step_cb(lv_event_t *e);           // UI brightness button tapped
+static void brightness_steps_highlight(int active); // repaint the brightness row
+static int  ui_brightness_active_button();      // 0 = Auto, 1..N = preset + 1
+static void updateAutoBrightness(bool force);   // recompute the level from the sun
+static void apply_ui_darkness_ex(int value, bool persist);
 // Colour-scheme helpers. Defined next to apply_calendar_theme() further down, but
 // declared here because the settings popup (which sits above them) calls
 // apply_theme_accent() to keep the theme's light/dark flag in step.
@@ -289,13 +291,28 @@ static int g_ui_darkness = 0; // Global darkness level (0: light, 100: dark)
 // device-theme feed all mean - inverting those would need a coordinated migration
 // of all three and would silently invert somebody's screen if one side lagged.
 // So the flip lives here and in the two tiny helpers below, and nowhere else.
-#define UI_BRIGHTNESS_STEP_COUNT 5
-static const int UI_BRIGHTNESS_STEPS[UI_BRIGHTNESS_STEP_COUNT] = {0, 25, 50, 75, 100};
+#define UI_BRIGHTNESS_PRESET_COUNT 5
+static const int UI_BRIGHTNESS_STEPS[UI_BRIGHTNESS_PRESET_COUNT] = {0, 25, 50, 75, 100};
+// Auto sits in front of them, so the row has one more button than it has presets
+// and button 0 is always Auto. The presets are offset by one from their index.
+#define UI_BRIGHTNESS_BUTTON_COUNT (UI_BRIGHTNESS_PRESET_COUNT + 1)
 static int ui_brightness() { return 100 - g_ui_darkness; }
 static int ui_darkness_for_brightness(int brightness) { return 100 - brightness; }
+// Auto brightness follows the sun: 100% at solar noon, 0% at solar midnight, a
+// cosine between the two. Nothing is scheduled by clock time - solar noon is the
+// midpoint of today's sunrise and sunset, which the weather fetch supplies, so it
+// tracks the seasons and the actual location without a table.
+static bool g_brightness_auto = false;
+static int  g_sunrise_min = -1;   // minutes after local midnight, -1 = not known yet
+static int  g_sunset_min  = -1;
+// The last darkness the website sent. Kept separately from g_ui_darkness so that
+// changing only the colour scheme on the site does not look like a brightness
+// change and cancel Auto.
+static int  g_web_darkness = -1;
 // Set when show_settings_popup() builds the row, and cleared when that popup is
 // deleted - these point into it, so a stale entry would be a dangling pointer.
-static lv_obj_t *brightness_step_btns[UI_BRIGHTNESS_STEP_COUNT] = {nullptr, nullptr, nullptr, nullptr, nullptr};
+static lv_obj_t *brightness_step_btns[UI_BRIGHTNESS_BUTTON_COUNT] =
+    {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
 // There is deliberately no backlight level global any more. TFT_BL turned out to
 // be an enable pin, so PWM on it blacks the panel out below ~60% (see the note in
 // display.h) - there is nothing between full on and off to store.
@@ -449,6 +466,8 @@ static unsigned long lastWeatherUpdate = 0;
 const unsigned long weatherUpdateInterval = 900000; // Update every 15min
 // Timer for firmware check
 static unsigned long lastFirmwareCheck = 0;
+// Auto brightness is a slow-moving value, so it gets its own tick.
+static unsigned long lastAutoBrightnessCheck = 0;
 // New: Timer for notification check
 static unsigned long lastNotificationCheck = 0;
 // 10s -> 60s. A parcel arriving is not time-critical, and this one poll was the
@@ -882,6 +901,19 @@ void notification_toggle_cb(lv_timer_t *timer) {
     lv_timer_set_period(timer, 2000);
   }
 }
+// "2026-09-13T06:32" -> minutes after local midnight, or -1 if it does not look
+// like a timestamp. Used for sunrise/sunset, which Auto brightness depends on.
+static int parseHHMM(const char *iso) {
+  if (!iso) return -1;
+  const char *t = strchr(iso, 'T');
+  if (!t || strlen(t) < 6) return -1;
+  if (t[1] < '0' || t[1] > '9' || t[2] < '0' || t[2] > '9') return -1;
+  if (t[3] != ':' || t[4] < '0' || t[4] > '9' || t[5] < '0' || t[5] > '9') return -1;
+  const int hh = (t[1] - '0') * 10 + (t[2] - '0');
+  const int mm = (t[4] - '0') * 10 + (t[5] - '0');
+  if (hh > 23 || mm > 59) return -1;
+  return hh * 60 + mm;
+}
 void fetchWeather() {
   if (debug == 1) Serial.println("[APP] Fetching weather...");
   if (WiFi.status() != WL_CONNECTED) {
@@ -922,7 +954,7 @@ HTTPClient http;
 String url = "https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lon + 
              "&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m,wind_direction_10m,surface_pressure" +  // UPDATED: Added surface_pressure
              "&minutely_15=temperature_2m,relative_humidity_2m,weather_code,precipitation,wind_speed_10m" +  // NEW: 15-min data for ~half-hour forecast
-             "&daily=weather_code,temperature_2m_max,temperature_2m_min,apparent_temperature_max,precipitation_sum,wind_speed_10m_max,relative_humidity_2m_mean" +  // UPDATED: Added temperature_2m_min
+             "&daily=weather_code,temperature_2m_max,temperature_2m_min,apparent_temperature_max,precipitation_sum,wind_speed_10m_max,relative_humidity_2m_mean,sunrise,sunset" +  // sunrise/sunset drive Auto brightness
              "&forecast_minutely_15=96" +  // NEW: 96 timesteps = 24 hours of 15-min data
              "&timezone=auto&forecast_days=14";  // UPDATED: forecast_days=14 for consistency
 http.begin(url);
@@ -999,6 +1031,33 @@ if (httpCode == HTTP_CODE_OK) {
       forecast[i].precip_sum = precip_sum[i].as<float>();
       forecast[i].wind_max = wind_max[i].as<float>();
       forecast[i].humidity_mean = humidity_mean[i].as<float>();
+    }
+    // Today's sunrise and sunset, for Auto brightness. Open-Meteo returns them as
+    // local-time ISO strings ("2026-09-13T06:32") because the request asks for
+    // timezone=auto, so only the HH:MM has to be pulled out. Solar noon is then
+    // their midpoint, which is what Auto actually uses.
+    //
+    // These are local to the WEATHER LOCATION, while the device clock runs on the
+    // UK timezone (see initTime()), so the two agree only while the configured city
+    // is in the UK. A city elsewhere would shift solar noon by the offset; the
+    // response's utc_offset_seconds would fix that, and it is not needed while the
+    // location is Rochdale.
+    const char *sunrise_iso = daily["sunrise"][0].as<const char *>();
+    const char *sunset_iso  = daily["sunset"][0].as<const char *>();
+    const int sunrise_min = parseHHMM(sunrise_iso);
+    const int sunset_min  = parseHHMM(sunset_iso);
+    if (sunrise_min >= 0 && sunset_min > sunrise_min) {
+      g_sunrise_min = sunrise_min;
+      g_sunset_min  = sunset_min;
+      if (debug == 1) {
+        Serial.printf("[APP] Sunrise %02d:%02d, sunset %02d:%02d\n",
+                      sunrise_min / 60, sunrise_min % 60, sunset_min / 60, sunset_min % 60);
+      }
+      // Daylight data just arrived or changed, so re-evaluate Auto now instead of
+      // waiting for the next tick.
+      updateAutoBrightness(false);
+    } else if (debug == 1) {
+      Serial.println("[APP] No usable sunrise/sunset in the forecast response");
     }
     if (debug == 1) Serial.println("[APP] Fetched 14-day forecast with min/max temps"); // Updated log message
   } else {
@@ -2532,10 +2591,10 @@ static void settings_popup_deleted_cb(lv_event_t *e) {
   settings_ram_val = nullptr;
   settings_psram_bar = nullptr;
   settings_psram_val = nullptr;
-  // The brightness presets are children of this popup, so they died with it.
+  // The brightness buttons are children of this popup, so they died with it.
   // Leaving the pointers would leave brightness_steps_highlight() writing through
   // freed memory the next time it ran.
-  for (int i = 0; i < UI_BRIGHTNESS_STEP_COUNT; i++) brightness_step_btns[i] = nullptr;
+  for (int i = 0; i < UI_BRIGHTNESS_BUTTON_COUNT; i++) brightness_step_btns[i] = nullptr;
 }
 // Internal RAM is the scarce resource on this board - 320KB shared with the WiFi
 // and TLS stacks - while the LVGL draw buffers and the panel framebuffer live in
@@ -2728,6 +2787,13 @@ void show_settings_popup() {
     lv_label_set_text(qr_hint, "Scan to open the web app");
     lv_obj_set_style_text_font(qr_hint, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(qr_hint, lv_color_hex(0xFFFFFF), 0);
+    // The firmware version lives under the QR code. It used to sit in the right
+    // column between the brightness card and the memory meters, where it read as
+    // though it belonged to whichever of the two was nearest.
+    lv_obj_t *version_settings_label = lv_label_create(qr_card);
+    lv_label_set_text(version_settings_label, ("Firmware: " + currentFirmwareVersion).c_str());
+    lv_obj_set_style_text_font(version_settings_label, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(version_settings_label, lv_color_hex(0xBBBBBB), 0);
 
     // Right column: weather location, ParcelBox, brightness.
     lv_obj_t *weather_cont = make_card(right_col, scheme_accent(), scheme_accent_dark());
@@ -2750,27 +2816,33 @@ void show_settings_popup() {
     // UI Brightness now occupies the slot the "Temperature Adjustment" card used
     // to hold, so both columns stay full-height instead of leaving a gap.
     //
-    // Five tappable presets rather than a slider. The slider was a 1px-wide grab
-    // target on a 7" panel, it wrote to flash for every intermediate value while
-    // being dragged, and it gave a number nobody needs to that precision. A tap is
-    // unambiguous. Ordered 0 (darkest) to 100 (brightest), like the website.
+    // Six buttons rather than a slider: Auto, then five presets. The slider was a
+    // 1px-wide grab target on a 7" panel, it wrote to flash for every intermediate
+    // value while being dragged, and it gave a number nobody needs to that
+    // precision. A tap is unambiguous.
+    //   button 0      = Auto (follows daylight)
+    //   buttons 1..5  = 0, 25, 50, 75, 100 % brightness, darkest to brightest
     lv_obj_t *brightness_card = make_card(right_col, lv_color_hex(0x1e1e1e), lv_color_hex(0x1e1e1e));
     make_card_title(brightness_card, "UI Brightness  (0 = dark, 100 = bright)");
     lv_obj_t *step_row = make_panel(brightness_card);
     lv_obj_set_width(step_row, LV_PCT(100));
     lv_obj_set_height(step_row, LV_SIZE_CONTENT);
-    lv_obj_set_style_pad_column(step_row, 6, 0);
+    lv_obj_set_style_pad_column(step_row, 4, 0); // six buttons, so a tighter gap
     lv_obj_set_flex_flow(step_row, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(step_row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER,
                           LV_FLEX_ALIGN_CENTER);
-    for (int i = 0; i < UI_BRIGHTNESS_STEP_COUNT; i++) {
+    for (int i = 0; i < UI_BRIGHTNESS_BUTTON_COUNT; i++) {
       lv_obj_t *step_btn = lv_button_create(step_row);
       lv_obj_set_width(step_btn, 0);
       lv_obj_set_height(step_btn, 42);
-      lv_obj_set_flex_grow(step_btn, 1);   // the five share the row evenly
+      lv_obj_set_flex_grow(step_btn, 1);   // the six share the row evenly
       lv_obj_set_style_radius(step_btn, UI_RADIUS, 0);
       lv_obj_t *step_lbl = lv_label_create(step_btn);
-      lv_label_set_text_fmt(step_lbl, "%d", UI_BRIGHTNESS_STEPS[i]);
+      if (i == 0) {
+        lv_label_set_text(step_lbl, "Auto");
+      } else {
+        lv_label_set_text_fmt(step_lbl, "%d", UI_BRIGHTNESS_STEPS[i - 1]);
+      }
       lv_obj_center(step_lbl);
       lv_obj_set_style_text_font(step_lbl, &lv_font_montserrat_14, 0);
       // CLICKED, not PRESSED: a press that turns into a scroll must not change
@@ -2778,15 +2850,8 @@ void show_settings_popup() {
       lv_obj_add_event_cb(step_btn, brightness_step_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
       brightness_step_btns[i] = step_btn;
     }
-    brightness_steps_highlight(ui_brightness_nearest_step());
+    brightness_steps_highlight(ui_brightness_active_button());
 
-    // Firmware version sits directly under the last card as a normal child of the
-    // column, so it starts at the same left edge as that card rather than
-    // floating in a corner.
-    lv_obj_t *version_settings_label = lv_label_create(right_col);
-    lv_label_set_text(version_settings_label, ("Firmware: " + currentFirmwareVersion).c_str());
-    lv_obj_set_style_text_font(version_settings_label, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(version_settings_label, lv_color_hex(0xDDDDDD), 0);
 
     // ---- memory meters, side by side --------------------------------------
     lv_obj_t *mem_row = lv_obj_create(right_col);
@@ -4212,7 +4277,10 @@ void apply_calendar_theme(lv_obj_t *cal) {
   lv_obj_set_style_border_color(cal, scheme_accent(), LV_PART_ITEMS | LV_STATE_CHECKED);
 }
 // Split out of the slider callback so the remote theme can drive the same path.
-void apply_ui_darkness(int value) {
+// `persist` is false when the value came from Auto: the auto level is a
+// consequence of the clock, not a choice, and writing it over the preference
+// would destroy the manual value the user last picked by hand.
+void apply_ui_darkness_ex(int value, bool persist) {
   if (value < 0) value = 0;
   if (value > 100) value = 100;
   g_ui_darkness = value;
@@ -4233,31 +4301,78 @@ void apply_ui_darkness(int value) {
   // Redraw weather and events to apply changes
   updateWeatherDisplay();
   updateEventDisplay(calendar);
-  // Save to preferences
-  preferences.begin("ui", false);
-  preferences.putInt("ui_darkness", g_ui_darkness);
-  preferences.end();
+  if (persist) {
+    preferences.begin("ui", false);
+    preferences.putInt("ui_darkness", g_ui_darkness);
+    preferences.end();
+  }
 }
-// The preset closest to the current brightness. The device can also be given an
-// arbitrary value by the website's theme, so this cannot assume an exact match.
-static int ui_brightness_nearest_step() {
+void apply_ui_darkness(int value) { apply_ui_darkness_ex(value, true); }
+// ---- Auto brightness --------------------------------------------------------
+// Brightness from the sun rather than the clock: 100% at solar noon, 0% at solar
+// midnight, and a cosine in between, so it spends most of its time near one end
+// and moves fastest around sunrise and sunset.
+//
+// Solar noon is the midpoint of today's sunrise and sunset rather than 12:00, and
+// those two come from the weather fetch (Open-Meteo returns them per day for the
+// configured location). That makes it track the seasons and the latitude for
+// free. Until the first weather fetch lands, a 07:00-19:00 placeholder is used.
+static int daylight_brightness() {
+  struct tm t;
+  if (!getLocalTime(&t, 100)) return -1;   // no clock yet: leave the level alone
+  int sunrise = g_sunrise_min;
+  int sunset  = g_sunset_min;
+  if (sunrise < 0 || sunset <= sunrise) { sunrise = 7 * 60; sunset = 19 * 60; }
+  const int noon = (sunrise + sunset) / 2;
+  int delta = (t.tm_hour * 60 + t.tm_min) - noon;    // minutes from solar noon
+  if (delta < -720) delta += 1440;                   // wrap to -720..+720
+  if (delta >  720) delta -= 1440;
+  const float phase = (float)delta / 720.0f;         // -1 at midnight, +1 at noon
+  const float b = 50.0f * (1.0f + cosf(phase * (float)M_PI));
+  return (int)lroundf(b);
+}
+// Quantised to 5% steps on purpose: apply_ui_darkness_ex() rebuilds the weather,
+// events and calendar widgets, and the raw value only moves about 0.4% a minute,
+// so stepping keeps it to a handful of repaints a day instead of one a minute.
+#define AUTO_BRIGHTNESS_STEP 5
+static void updateAutoBrightness(bool force) {
+  if (!g_brightness_auto) return;
+  const int brightness = daylight_brightness();
+  if (brightness < 0) return;
+  const int quantised = ((brightness + AUTO_BRIGHTNESS_STEP / 2) / AUTO_BRIGHTNESS_STEP) * AUTO_BRIGHTNESS_STEP;
+  const int darkness = ui_darkness_for_brightness(quantised);
+  if (!force && darkness == g_ui_darkness) return;
+  if (debug == 1) {
+    Serial.printf("[AUTO] sunrise %02d:%02d sunset %02d:%02d -> %d%% bright (darkness %d)\n",
+                  (g_sunrise_min < 0 ? 7 : g_sunrise_min) / 60, (g_sunrise_min < 0 ? 0 : g_sunrise_min) % 60,
+                  (g_sunset_min < 0 ? 19 : g_sunset_min) / 60, (g_sunset_min < 0 ? 0 : g_sunset_min) % 60,
+                  quantised, darkness);
+  }
+  apply_ui_darkness_ex(darkness, false);
+}
+// Which button should look selected: 0 = Auto, 1..N = preset index + 1. The
+// device can also be handed an arbitrary value by the website's theme, so a
+// manual value is matched to the nearest preset rather than an exact one.
+static int ui_brightness_active_button() {
+  if (g_brightness_auto) return 0;
+  const int brightness = ui_brightness();
   int best = 0;
   int best_dist = 1000;
-  const int brightness = ui_brightness();
-  for (int i = 0; i < UI_BRIGHTNESS_STEP_COUNT; i++) {
+  for (int i = 0; i < UI_BRIGHTNESS_PRESET_COUNT; i++) {
     int dist = brightness - UI_BRIGHTNESS_STEPS[i];
     if (dist < 0) dist = -dist;
     if (dist < best_dist) { best_dist = dist; best = i; }
   }
-  return best;
+  return best + 1;
 }
-// Repaint the five presets: the active one takes the scheme accent with a white
-// ring, the rest stay neutral. Called when the row is built and after every tap.
-static void brightness_steps_highlight(int selected) {
-  for (int i = 0; i < UI_BRIGHTNESS_STEP_COUNT; i++) {
+// Repaint the brightness row: the active button takes the scheme accent with a
+// white ring, the rest stay neutral. Called when the row is built and after every
+// tap. `active` is a button index - 0 is Auto.
+static void brightness_steps_highlight(int active) {
+  for (int i = 0; i < UI_BRIGHTNESS_BUTTON_COUNT; i++) {
     lv_obj_t *btn = brightness_step_btns[i];
     if (!btn) continue;
-    const bool on = (i == selected);
+    const bool on = (i == active);
     lv_obj_set_style_bg_color(btn, on ? scheme_accent() : lv_color_hex(0x3A3A3A), 0);
     lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(btn, on ? 2 : 1, 0);
@@ -4266,12 +4381,25 @@ static void brightness_steps_highlight(int selected) {
 }
 void brightness_step_cb(lv_event_t *e) {
   const intptr_t idx = (intptr_t)lv_event_get_user_data(e);
-  if (idx < 0 || idx >= UI_BRIGHTNESS_STEP_COUNT) return;
-  // The label the user tapped is a brightness, so convert it to the darkness the
-  // rest of the firmware stores. apply_ui_darkness() also persists the value, so
-  // one tap is one flash write rather than the dozens a drag produced.
-  apply_ui_darkness(ui_darkness_for_brightness(UI_BRIGHTNESS_STEPS[idx]));
-  brightness_steps_highlight((int)idx);
+  if (idx < 0 || idx >= UI_BRIGHTNESS_BUTTON_COUNT) return;
+  preferences.begin("ui", false);
+  if (idx == 0) {
+    // Auto: the level now comes from the clock, so apply it immediately rather
+    // than waiting for the next tick.
+    g_brightness_auto = true;
+    preferences.putBool("ui_brightness_auto", true);
+    preferences.end();
+    updateAutoBrightness(true);
+  } else {
+    g_brightness_auto = false;
+    preferences.putBool("ui_brightness_auto", false);
+    preferences.end();
+    // The button label is a brightness; convert it to the darkness the rest of
+    // the firmware stores. apply_ui_darkness() persists it, so one tap is one
+    // flash write rather than the dozens a drag produced.
+    apply_ui_darkness(ui_darkness_for_brightness(UI_BRIGHTNESS_STEPS[idx - 1]));
+  }
+  brightness_steps_highlight(ui_brightness_active_button());
 }
 // ---- Remote update policy --------------------------------------------------
 // The website publishes update/policy.json:
@@ -4382,7 +4510,19 @@ void fetchThemeConfig() {
       if (debug == 1) Serial.println("[THEME] scheme set from server: " + scheme);
     }
   }
-  if (darkness >= 0 && darkness <= 100 && darkness != g_ui_darkness) {
+  // Compare against the last value the SITE sent, not against the current
+  // darkness. While Auto is running the current darkness changes with the clock,
+  // so comparing to it would make every scheme change on the site look like a
+  // brightness change - it would cancel Auto and snap the screen to the site's
+  // stored level. Only a real change of the site's own value counts, and that is
+  // an explicit choice, so it wins over Auto.
+  if (darkness >= 0 && darkness <= 100 && darkness != g_web_darkness) {
+    g_web_darkness = darkness;
+    g_brightness_auto = false;
+    preferences.begin("ui", false);
+    preferences.putInt("ui_web_darkness", g_web_darkness);
+    preferences.putBool("ui_brightness_auto", false);
+    preferences.end();
     apply_ui_darkness(darkness);
     if (debug == 1) Serial.println("[THEME] brightness set from server: " + String(darkness));
   }
@@ -5227,6 +5367,12 @@ void setup() {
   // would come back black on every boot. There is no such setting any more.
   if (preferences.isKey("ui_backlight")) preferences.remove("ui_backlight");
   g_ui_scheme = preferences.getInt("ui_scheme", 0);
+  // Auto brightness is a mode, stored separately from the level, so the manual
+  // value survives underneath it for when Auto is switched off again.
+  g_brightness_auto = preferences.getBool("ui_brightness_auto", false);
+  // -1 means "the website has never sent one", so the first value it does send is
+  // treated as a change.
+  g_web_darkness = preferences.getInt("ui_web_darkness", -1);
   themeSignature = preferences.getString("theme_sig", "");
   g_autoFirmwareUpdate = preferences.getBool("auto_upd", false);
   g_quietStartHour = preferences.getInt("quiet_start", 2);
@@ -5367,6 +5513,13 @@ void loop() {
       WiFi.status() == WL_CONNECTED) {
     lastOfferCheck = currentTime;
     offerFirmwareUpdate();
+  }
+  // Auto brightness: the value moves about 0.4% a minute, and updateAutoBrightness
+  // only repaints when the quantised level actually changes, so a slow tick is
+  // enough. It needs no network - the clock and the last known sunrise/sunset do.
+  if (currentTime - lastAutoBrightnessCheck >= 30000UL) {
+    lastAutoBrightnessCheck = currentTime;
+    updateAutoBrightness(false);
   }
   if (currentTime - lastNotificationCheck >= notificationInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
     fetchNotifications();
