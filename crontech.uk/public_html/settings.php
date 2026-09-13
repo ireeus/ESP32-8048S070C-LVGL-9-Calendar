@@ -598,9 +598,12 @@ if (isset($_POST['save_update_policy']) && isset($_SESSION['user_id'])) {
 
 // Which tab is showing. Carried through POSTs and via ?tab=, so a redirect from
 // the old theme.php lands in the right place.
-$TABS = ['calendar' => 'Calendar', 'themes' => 'Themes', 'other' => 'Other'];
-$active_tab = isset($_POST['tab']) ? (string)$_POST['tab'] : (isset($_GET['tab']) ? (string)$_GET['tab'] : 'calendar');
-if (!array_key_exists($active_tab, $TABS)) { $active_tab = 'calendar'; }
+// Themes first: it is where the device is actually configured, and it is the tab
+// people come here for. The page also OPENS on it - a tab strip whose first entry
+// is not the selected one reads as a bug.
+$TABS = ['themes' => 'Themes', 'calendar' => 'Calendar', 'other' => 'Other'];
+$active_tab = isset($_POST['tab']) ? (string)$_POST['tab'] : (isset($_GET['tab']) ? (string)$_GET['tab'] : 'themes');
+if (!array_key_exists($active_tab, $TABS)) { $active_tab = 'themes'; }
 
 ?><!DOCTYPE html>
 <html lang="en">
@@ -618,25 +621,32 @@ if (!array_key_exists($active_tab, $TABS)) { $active_tab = 'calendar'; }
     <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="app.css">
 <?php
-    // Mirror the theme the DEVICE is using: same scheme, same brightness curve.
-    // The firmware builds its background as a grey ramp and flips to light text
-    // past 50, so this computes the identical thing - which makes the picker
-    // below a true preview of the Cron-Tab rather than a detached setting.
-    $__gray    = 255 - (int)round(((int)$user_theme['darkness']) * 255 / 100);
-    $__is_dark = ((int)$user_theme['darkness'] > 50);
-    $__scheme  = (string)$user_theme['scheme'];
+    // Only the ACCENT follows the device's scheme.
+    //
+    // The page's text and neutral colours used to be derived from the brightness
+    // setting as well - the same grey ramp the firmware paints, with the text
+    // flipping from dark to light past the halfway mark. That made every label on
+    // the page change colour as the brightness moved, and around the middle of the
+    // range the body was mid-grey with pure white or near-black cards beside it,
+    // which is the part that read badly (about 4.4:1 for body text at 50%).
+    //
+    // This page is where the brightness is CHOSEN, so it now keeps one legible
+    // appearance at every value: the selected preset is the feedback, not the
+    // page's own contrast. Nothing here affects the device - the Cron-Tab still
+    // paints the full ramp, and calendar.php is untouched.
+    $__scheme = (string)$user_theme['scheme'];
 ?>
 <style>
-    /* Must come after app.css: same specificity, so the later declaration wins. */
+    /* Must come after app.css: same specificity, so the later declaration wins.
+       Everything not listed here keeps app.css's own readable palette. */
     :root {
         --primary:       <?php echo $THEME_SCHEMES[$__scheme][0]; ?>;
         --primary-hover: <?php echo $THEME_SCHEMES[$__scheme][1]; ?>;
-        --bg-body:       rgb(<?php echo $__gray; ?>, <?php echo $__gray; ?>, <?php echo $__gray; ?>);
-        --bg-card:       <?php echo $__is_dark ? '#1b1b1b' : '#ffffff'; ?>;
-        --text-main:     <?php echo $__is_dark ? '#ECEFF1' : '#111827'; ?>;
-        --text-muted:    <?php echo $__is_dark ? '#9aa4ad' : '#4b5563'; ?>;
-        --border-light:  <?php echo $__is_dark ? '#333333' : '#e5e7eb'; ?>;
-        --footer-bg:     <?php echo $__is_dark ? '#1b1b1b' : '#111827'; ?>;
+        /* app.css defines no footer colours at all, so these two have to live
+           somewhere. They are the light-mode values the page used before, now
+           fixed: without them the footer rule below resolves to nothing and the
+           footer loses its bar entirely. */
+        --footer-bg:     #111827;
         --footer-text:   #9ca3af;
     }
 </style>

@@ -19,7 +19,7 @@ extern const lv_font_t lv_font_montserrat_14_bold;
 // Must be HIGHER than whatever update/version.json currently advertises, or the
 // device will keep offering (and auto-installing) a build that is not actually
 // newer. The site was on 2.2.6 when this was written.
-const String build_version = "2.2.7";
+const String build_version = "2.2.8";
 int debug =0; // Change to 1 to enable serial prints
 // Firmware check interval variable
 // Was 100000UL, which is 100 SECONDS, not the 5 minutes the comment claimed - so
@@ -105,7 +105,7 @@ static void brightness_steps_highlight(int active); // repaint the brightness ro
 static int  ui_brightness_active_button();      // 0 = Auto, 1..N = preset + 1
 static void updateAutoBrightness(bool force);   // recompute the level from the sun
 static void apply_ui_darkness_ex(int value, bool persist);
-static void pushThemeToServer();                // send a local theme choice to the site
+static bool pushThemeToServer();                // send a local theme choice to the site
 // Colour-scheme helpers. Defined next to apply_calendar_theme() further down, but
 // declared here because the settings popup (which sits above them) calls
 // apply_theme_accent() to keep the theme's light/dark flag in step.
@@ -114,7 +114,8 @@ static void apply_color_scheme();
 static void create_color_changer();
 void rearrange_calendar_parts(lv_obj_t *cal);
 void fetchNotifications(); // New function for fetching notifications and displaying image
-void save_settings_cb(lv_event_t *e); // Renamed and modified from location_submit_cb
+void sync_settings_cb(lv_event_t *e); // the settings popup's Sync button
+static void serviceSyncQueue();       // push-then-pull, one request per loop pass
 void notification_click_cb(lv_event_t *e);
 void blink_animation_cb(void * var, int32_t v);
 void snooze_reminder_cb(lv_event_t *e);
@@ -453,7 +454,7 @@ String last_ignored_notification = "";
 String current_notification_text = "";
 String backgroundFilename = ""; // New: Store the background image filename
 // OTA variables
-String currentFirmwareVersion = "2.2.7"; // replaced by build_version in setup()
+String currentFirmwareVersion = "2.2.8"; // replaced by build_version in setup()
 String latestFirmwareVersion = "";
 String firmwareUrl = "";
 WiFiClientSecure client;
@@ -2924,7 +2925,7 @@ void show_settings_popup() {
     lv_obj_add_event_cb(api_logout_btn, api_logout_cb, LV_EVENT_PRESSED, NULL);
     lv_obj_t *factory_reset_btn = make_button(settings_footer, "Factory Reset", 0x8e0000, 130);
     lv_obj_add_event_cb(factory_reset_btn, factory_reset_cb, LV_EVENT_PRESSED, NULL);
-    lv_obj_t *submit_btn = make_button(settings_footer, "Save", 0x007aff, 110);
+    lv_obj_t *submit_btn = make_button(settings_footer, "Sync", 0x007aff, 110);
     lv_obj_t *close_btn = make_button(settings_footer, "Close", 0xff0000, 110);
     lv_obj_add_event_cb(close_btn, close_settings_cb, LV_EVENT_PRESSED, NULL);
 
@@ -2932,7 +2933,7 @@ void show_settings_popup() {
     sui->location_ta = location_ta;
     sui->username_ta = username_ta;
     sui->device_id_ta = device_id_ta;
-    lv_obj_add_event_cb(submit_btn, save_settings_cb, LV_EVENT_PRESSED, sui);
+    lv_obj_add_event_cb(submit_btn, sync_settings_cb, LV_EVENT_PRESSED, sui);
 
     // Keyboard setup (shared across screens, hidden until a field is focused).
     if (!keyboard) {
@@ -4561,15 +4562,20 @@ void fetchThemeConfig() {
 // Runs from loop() rather than straight out of the button callback: it is a
 // blocking HTTPS request (a full TCP + TLS handshake, ~1s), and doing that inside
 // a tap would freeze the screen the user just touched.
-static void pushThemeToServer() {
-  if (!themePushPending) return;
-  if (WiFi.status() != WL_CONNECTED) return;   // stays pending; retried when up
-  if (apiCode.isEmpty()) return;
-  if (is_ota_updating) return;
+//
+// Returns true when there is nothing left to push - either it was never pending or
+// it went through. The caller is the Sync queue, which must not start pulling the
+// theme back down before the local choice has gone up: fetchThemeConfig() would
+// see the site's older value as a change and undo what the user just picked.
+static bool pushThemeToServer() {
+  if (!themePushPending) return true;
+  if (WiFi.status() != WL_CONNECTED) return false;   // stays pending; retried when up
+  if (apiCode.isEmpty()) return false;
+  if (is_ota_updating) return false;
   // Same rule as the boot fetch queue: never start a second-long request while a
   // finger is down.
   lv_indev_t *indev = lv_indev_get_next(NULL);
-  if (indev && lv_indev_get_state(indev) == LV_INDEV_STATE_PRESSED) return;
+  if (indev && lv_indev_get_state(indev) == LV_INDEV_STATE_PRESSED) return false;
 
   // With Auto running, g_ui_darkness is today's computed level, not a choice. What
   // the site wants is "auto is on, and the manual level underneath is X", so push
@@ -4609,6 +4615,51 @@ static void pushThemeToServer() {
     if (debug == 1) Serial.println("[THEME] push failed: HTTP " + String(httpCode));
   }
   http.end();
+  return !themePushPending;
+}
+// ---- Sync from the settings popup -------------------------------------------
+// The Sync button pushes whatever changed to the site, then pulls the same three
+// things back, so the device and the site agree either way. Driven from loop()
+// rather than from the button callback: each request is a blocking TLS call of
+// about a second and a tap must not freeze the screen.
+//
+// Order matters. The theme goes up FIRST (step 1), because fetchThemeConfig()
+// compares what the site sends against the last value the site sent, and a local
+// choice that has not been pushed yet looks exactly like a site-side change - the
+// pull would silently revert the brightness the user just picked.
+//
+//   0 idle, 1 push theme, 2 fetch theme, 3 fetch parcel box, 4 fetch weather location
+static uint8_t syncStep = 0;
+static unsigned long lastSyncStep = 0;
+// Its own gap rather than the boot queue's: that macro is defined much further
+// down the file, next to the queue that uses it.
+#define SYNC_STEP_GAP_MS 150
+void armSettingsSync() { syncStep = 1; lastSyncStep = 0; }
+static void serviceSyncQueue() {
+  if (syncStep == 0) return;
+  if (is_ota_updating) return;
+  if (WiFi.status() != WL_CONNECTED) return;
+  if (millis() - lastSyncStep < SYNC_STEP_GAP_MS) return;
+  lv_indev_t *indev = lv_indev_get_next(NULL);
+  if (indev && lv_indev_get_state(indev) == LV_INDEV_STATE_PRESSED) {
+    lastSyncStep = millis();
+    return;
+  }
+  bool advance = true;
+  switch (syncStep) {
+    case 1:
+      advance = pushThemeToServer(); // false = still pending or busy, stay here
+      break;
+    case 2: fetchThemeConfig();           break;
+    case 3: fetchParcelBoxCredentials();  break;
+    case 4: fetchWeatherLocation();       break;
+    default: syncStep = 0; return;
+  }
+  if (advance) {
+    syncStep = (syncStep >= 4) ? 0 : syncStep + 1;
+    if (syncStep == 0 && debug == 1) Serial.println("[SYNC] done");
+  }
+  lastSyncStep = millis();
 }
 // Re-initialise the LVGL theme with the active scheme's accent. Cheap and safe
 // to call repeatedly: lv_theme_default_init() allocates its theme object once
@@ -5564,6 +5615,9 @@ void loop() {
   // A theme picked on the device, on its way to the site. Not done inside the tap
   // callback because the request blocks for about a second.
   pushThemeToServer();
+  // A manual Sync from the settings popup: push the theme, then pull theme, parcel
+  // box and location back. One request per pass, for the same reason.
+  serviceSyncQueue();
   // WiFi wizard: finishes the async scan and the in-progress connection attempt.
   serviceWifiSetup();
 
@@ -6153,18 +6207,32 @@ void show_event_details_cb(lv_event_t *e) {
   int index = (intptr_t)lv_obj_get_user_data(target);
   show_event_details(index, false);
 }
-void save_settings_cb(lv_event_t *e) {
-  if (debug == 1) Serial.println("[APP] Settings save button clicked");
+// The settings popup's Sync button.
+//
+// It used to be "Save" and pushed the parcel box and the location on every press,
+// whether or not the fields had been touched - two blocking HTTPS requests each
+// time. Now it compares first and only sends what actually changed, then hands over
+// to the sync queue to push the theme (if that changed) and pull all three back so
+// the device and the site agree either way. See serviceSyncQueue().
+void sync_settings_cb(lv_event_t *e) {
+  if (debug == 1) Serial.println("[SYNC] Sync button pressed");
   SettingsUI *sui = (SettingsUI*)lv_event_get_user_data(e);
   if (!sui) {
     if (debug == 1) Serial.println("[APP] Error: SettingsUI structure is null");
     return;
   }
-  String new_location = String(lv_textarea_get_text(sui->location_ta));
-  username = String(lv_textarea_get_text(sui->username_ta));
-  device_id = String(lv_textarea_get_text(sui->device_id_ta));
-  // Save parcelBox credentials
-  if (!username.isEmpty() && !device_id.isEmpty()) {
+  const String new_location = fontSafe(String(lv_textarea_get_text(sui->location_ta)));
+  const String new_username = String(lv_textarea_get_text(sui->username_ta));
+  const String new_device_id = String(lv_textarea_get_text(sui->device_id_ta));
+  const bool parcel_changed = (new_username != username) || (new_device_id != device_id);
+  const bool location_changed = (new_location != location);
+
+  username = new_username;
+  device_id = new_device_id;
+
+  // Save parcelBox credentials, but only when they are different - and only when
+  // both fields are filled, because the endpoint stores the pair together.
+  if (parcel_changed && !username.isEmpty() && !device_id.isEmpty()) {
     HTTPClient http;
     String url = "https://crontech.uk/api.php?parcelBox=" + URLEncode(apiCode) + "&parcel_box_username=" + URLEncode(username) + "&parcel_box_id=" + URLEncode(device_id);
     http.begin(url);
@@ -6188,9 +6256,12 @@ void save_settings_cb(lv_event_t *e) {
       if (debug == 1) Serial.println("[APP] ParcelBox update failed: " + String(httpCode));
     }
     http.end();
+  } else if (parcel_changed && debug == 1) {
+    Serial.println("[SYNC] parcel box not pushed - one of the two fields is empty");
   }
-  // Save weather location
-  if (!new_location.isEmpty()) {
+
+  // Save weather location, again only when it actually changed.
+  if (location_changed && !new_location.isEmpty()) {
     HTTPClient http;
     String url = "https://crontech.uk/api.php?weatherLocation=" + URLEncode(apiCode) + "&city_name=" + URLEncode(new_location);
     http.begin(url);
@@ -6217,11 +6288,24 @@ void save_settings_cb(lv_event_t *e) {
     }
     http.end();
   }
+  if (debug == 1) {
+    Serial.println(String("[SYNC] changed: parcel=") + (parcel_changed ? "yes" : "no") +
+                   " location=" + (location_changed ? "yes" : "no") +
+                   " theme=" + (themePushPending ? "pending" : "no"));
+  }
+
   preferences.begin("location", false);
   preferences.putInt("temp_adjust", temp_adjust);
   preferences.end();
   fetchWeather();
   updateWeatherDisplay();
+
+  // Whatever this screen can change now gets pushed and pulled back in the
+  // background: the theme up first, then theme, parcel box and location down. A
+  // flag rather than a direct call, because each of those blocks for about a
+  // second. Only worth doing if we are online.
+  armSettingsSync();
+
   if (settings_popup) {
     lv_obj_add_flag(settings_popup, LV_OBJ_FLAG_HIDDEN);
     lv_obj_del(settings_popup);
