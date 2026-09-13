@@ -1050,8 +1050,15 @@ if (!array_key_exists($active_tab, $TABS)) { $active_tab = 'calendar'; }
                             // gives a value nobody needs to that precision, and on
                             // the device itself a drag was unreliable; one click is
                             // also one autosave instead of dozens mid-drag.
+                            //
+                            // The buttons are BRIGHTNESS (100 = brightest, 0 =
+                            // darkest). The field and the user_theme column stay
+                            // "darkness" (0 = light) because the device reads that
+                            // and inverting the wire format would need a migration on
+                            // both sides at once - so only the value submitted is
+                            // flipped: 100 - brightness.
                             $brightness_steps = [0, 25, 50, 75, 100];
-                            $brightness_now = (int)$user_theme['darkness'];
+                            $brightness_now = 100 - (int)$user_theme['darkness'];
                             $brightness_sel = $brightness_steps[0];
                             $brightness_best = PHP_INT_MAX;
                             foreach ($brightness_steps as $__step) {
@@ -1059,12 +1066,12 @@ if (!array_key_exists($active_tab, $TABS)) { $active_tab = 'calendar'; }
                                 if ($__d < $brightness_best) { $brightness_best = $__d; $brightness_sel = $__step; }
                             }
                             ?>
-                            <label class="text-base">UI brightness (0 = light, 100 = dark)</label>
+                            <label class="text-base">UI brightness (0 = dark, 100 = bright)</label>
                             <div class="step-choices">
                                 <?php foreach ($brightness_steps as $__step): ?>
-                                    <label class="step-choice" title="<?php echo $__step; ?>">
+                                    <label class="step-choice" title="<?php echo $__step; ?>%">
                                         <input type="radio" name="darkness"
-                                               value="<?php echo $__step; ?>"
+                                               value="<?php echo 100 - $__step; ?>"
                                                <?php echo $__step === $brightness_sel ? 'checked' : ''; ?>
                                                onchange="ctAutosave(this);">
                                         <span class="step-choice-box"><?php echo $__step; ?></span>

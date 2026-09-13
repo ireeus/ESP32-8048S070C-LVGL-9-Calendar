@@ -100,9 +100,9 @@ void next_month_cb(lv_event_t *e);
 void updateFirmwareButton();
 unsigned long hashString(const String& str);
 void update_today_highlight(lv_obj_t *cal);
-void darkness_step_cb(lv_event_t *e);           // UI brightness preset tapped
-static void darkness_steps_highlight(int selected); // repaint the preset row
-static int  ui_darkness_nearest_step();         // which preset is active now
+void brightness_step_cb(lv_event_t *e);           // UI brightness preset tapped
+static void brightness_steps_highlight(int selected); // repaint the preset row
+static int  ui_brightness_nearest_step();         // which preset is active now
 // Colour-scheme helpers. Defined next to apply_calendar_theme() further down, but
 // declared here because the settings popup (which sits above them) calls
 // apply_theme_accent() to keep the theme's light/dark flag in step.
@@ -281,12 +281,21 @@ static int g_ui_darkness = 0; // Global darkness level (0: light, 100: dark)
 // UI brightness is five presets, not a slider. Nobody needs this value
 // continuously, and on this panel a tap is far more reliable than a drag: the
 // slider was a 1px-wide grab target that also wrote to flash on every
-// intermediate value. See darkness_steps_highlight() for the selected styling.
-#define UI_DARKNESS_STEP_COUNT 5
-static const int UI_DARKNESS_STEPS[UI_DARKNESS_STEP_COUNT] = {0, 25, 50, 75, 100};
+// intermediate value. See brightness_steps_highlight() for the selected styling.
+//
+// The presets are BRIGHTNESS: 100 is the brightest screen and 0 the darkest. The
+// value actually stored and sent to the website is still "darkness" (0 = light),
+// because that is what the preference key, the user_theme column and the
+// device-theme feed all mean - inverting those would need a coordinated migration
+// of all three and would silently invert somebody's screen if one side lagged.
+// So the flip lives here and in the two tiny helpers below, and nowhere else.
+#define UI_BRIGHTNESS_STEP_COUNT 5
+static const int UI_BRIGHTNESS_STEPS[UI_BRIGHTNESS_STEP_COUNT] = {0, 25, 50, 75, 100};
+static int ui_brightness() { return 100 - g_ui_darkness; }
+static int ui_darkness_for_brightness(int brightness) { return 100 - brightness; }
 // Set when show_settings_popup() builds the row, and cleared when that popup is
 // deleted - these point into it, so a stale entry would be a dangling pointer.
-static lv_obj_t *darkness_step_btns[UI_DARKNESS_STEP_COUNT] = {nullptr, nullptr, nullptr, nullptr, nullptr};
+static lv_obj_t *brightness_step_btns[UI_BRIGHTNESS_STEP_COUNT] = {nullptr, nullptr, nullptr, nullptr, nullptr};
 // There is deliberately no backlight level global any more. TFT_BL turned out to
 // be an enable pin, so PWM on it blacks the panel out below ~60% (see the note in
 // display.h) - there is nothing between full on and off to store.
@@ -2524,9 +2533,9 @@ static void settings_popup_deleted_cb(lv_event_t *e) {
   settings_psram_bar = nullptr;
   settings_psram_val = nullptr;
   // The brightness presets are children of this popup, so they died with it.
-  // Leaving the pointers would leave darkness_steps_highlight() writing through
+  // Leaving the pointers would leave brightness_steps_highlight() writing through
   // freed memory the next time it ran.
-  for (int i = 0; i < UI_DARKNESS_STEP_COUNT; i++) darkness_step_btns[i] = nullptr;
+  for (int i = 0; i < UI_BRIGHTNESS_STEP_COUNT; i++) brightness_step_btns[i] = nullptr;
 }
 // Internal RAM is the scarce resource on this board - 320KB shared with the WiFi
 // and TLS stacks - while the LVGL draw buffers and the panel framebuffer live in
@@ -2742,11 +2751,11 @@ void show_settings_popup() {
     // to hold, so both columns stay full-height instead of leaving a gap.
     //
     // Five tappable presets rather than a slider. The slider was a 1px-wide grab
-    // target on a 7" resistive-ish panel, it wrote to flash for every
-    // intermediate value while being dragged, and it gave a number nobody needs
-    // to that precision. A tap is unambiguous.
+    // target on a 7" panel, it wrote to flash for every intermediate value while
+    // being dragged, and it gave a number nobody needs to that precision. A tap is
+    // unambiguous. Ordered 0 (darkest) to 100 (brightest), like the website.
     lv_obj_t *brightness_card = make_card(right_col, lv_color_hex(0x1e1e1e), lv_color_hex(0x1e1e1e));
-    make_card_title(brightness_card, "UI Brightness  (0 = light, 100 = dark)");
+    make_card_title(brightness_card, "UI Brightness  (0 = dark, 100 = bright)");
     lv_obj_t *step_row = make_panel(brightness_card);
     lv_obj_set_width(step_row, LV_PCT(100));
     lv_obj_set_height(step_row, LV_SIZE_CONTENT);
@@ -2754,22 +2763,22 @@ void show_settings_popup() {
     lv_obj_set_flex_flow(step_row, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(step_row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER,
                           LV_FLEX_ALIGN_CENTER);
-    for (int i = 0; i < UI_DARKNESS_STEP_COUNT; i++) {
+    for (int i = 0; i < UI_BRIGHTNESS_STEP_COUNT; i++) {
       lv_obj_t *step_btn = lv_button_create(step_row);
       lv_obj_set_width(step_btn, 0);
       lv_obj_set_height(step_btn, 42);
       lv_obj_set_flex_grow(step_btn, 1);   // the five share the row evenly
       lv_obj_set_style_radius(step_btn, UI_RADIUS, 0);
       lv_obj_t *step_lbl = lv_label_create(step_btn);
-      lv_label_set_text_fmt(step_lbl, "%d", UI_DARKNESS_STEPS[i]);
+      lv_label_set_text_fmt(step_lbl, "%d", UI_BRIGHTNESS_STEPS[i]);
       lv_obj_center(step_lbl);
       lv_obj_set_style_text_font(step_lbl, &lv_font_montserrat_14, 0);
       // CLICKED, not PRESSED: a press that turns into a scroll must not change
       // the setting.
-      lv_obj_add_event_cb(step_btn, darkness_step_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
-      darkness_step_btns[i] = step_btn;
+      lv_obj_add_event_cb(step_btn, brightness_step_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+      brightness_step_btns[i] = step_btn;
     }
-    darkness_steps_highlight(ui_darkness_nearest_step());
+    brightness_steps_highlight(ui_brightness_nearest_step());
 
     // Firmware version sits directly under the last card as a normal child of the
     // column, so it starts at the same left edge as that card rather than
@@ -4229,13 +4238,14 @@ void apply_ui_darkness(int value) {
   preferences.putInt("ui_darkness", g_ui_darkness);
   preferences.end();
 }
-// The preset closest to the current value. The device can also be given an
+// The preset closest to the current brightness. The device can also be given an
 // arbitrary value by the website's theme, so this cannot assume an exact match.
-static int ui_darkness_nearest_step() {
+static int ui_brightness_nearest_step() {
   int best = 0;
   int best_dist = 1000;
-  for (int i = 0; i < UI_DARKNESS_STEP_COUNT; i++) {
-    int dist = g_ui_darkness - UI_DARKNESS_STEPS[i];
+  const int brightness = ui_brightness();
+  for (int i = 0; i < UI_BRIGHTNESS_STEP_COUNT; i++) {
+    int dist = brightness - UI_BRIGHTNESS_STEPS[i];
     if (dist < 0) dist = -dist;
     if (dist < best_dist) { best_dist = dist; best = i; }
   }
@@ -4243,9 +4253,9 @@ static int ui_darkness_nearest_step() {
 }
 // Repaint the five presets: the active one takes the scheme accent with a white
 // ring, the rest stay neutral. Called when the row is built and after every tap.
-static void darkness_steps_highlight(int selected) {
-  for (int i = 0; i < UI_DARKNESS_STEP_COUNT; i++) {
-    lv_obj_t *btn = darkness_step_btns[i];
+static void brightness_steps_highlight(int selected) {
+  for (int i = 0; i < UI_BRIGHTNESS_STEP_COUNT; i++) {
+    lv_obj_t *btn = brightness_step_btns[i];
     if (!btn) continue;
     const bool on = (i == selected);
     lv_obj_set_style_bg_color(btn, on ? scheme_accent() : lv_color_hex(0x3A3A3A), 0);
@@ -4254,13 +4264,14 @@ static void darkness_steps_highlight(int selected) {
     lv_obj_set_style_border_color(btn, on ? lv_color_hex(0xFFFFFF) : lv_color_hex(0x555555), 0);
   }
 }
-void darkness_step_cb(lv_event_t *e) {
+void brightness_step_cb(lv_event_t *e) {
   const intptr_t idx = (intptr_t)lv_event_get_user_data(e);
-  if (idx < 0 || idx >= UI_DARKNESS_STEP_COUNT) return;
-  // apply_ui_darkness() also persists the value, so one tap is one flash write
-  // rather than the dozens a drag produced.
-  apply_ui_darkness(UI_DARKNESS_STEPS[idx]);
-  darkness_steps_highlight((int)idx);
+  if (idx < 0 || idx >= UI_BRIGHTNESS_STEP_COUNT) return;
+  // The label the user tapped is a brightness, so convert it to the darkness the
+  // rest of the firmware stores. apply_ui_darkness() also persists the value, so
+  // one tap is one flash write rather than the dozens a drag produced.
+  apply_ui_darkness(ui_darkness_for_brightness(UI_BRIGHTNESS_STEPS[idx]));
+  brightness_steps_highlight((int)idx);
 }
 // ---- Remote update policy --------------------------------------------------
 // The website publishes update/policy.json:
