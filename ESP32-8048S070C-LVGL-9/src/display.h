@@ -6,15 +6,13 @@
 #include <esp_heap_caps.h> // For PSRAM allocation
 // Configuration for Display and Touch
 #define TFT_BL 2
-// Backlight dimming. GPIO 2 drives the panel's backlight and is otherwise unused
-// on this board, so it can carry PWM. 5 kHz keeps it above the audible range (a
-// slower PWM makes the backlight converter whine) and 10 bits gives far finer
-// steps than the 0-100 the UI exposes. Channel 0 is free: nothing else in this
-// firmware uses LEDC.
-#define TFT_BL_LEDC_CHANNEL 0
-#define TFT_BL_PWM_FREQ 5000
-#define TFT_BL_PWM_BITS 10
-#define TFT_BL_PWM_MAX ((1 << TFT_BL_PWM_BITS) - 1)
+// TFT_BL is an ENABLE pin, not a dimming input. It was briefly driven from a
+// 5 kHz LEDC channel to give the backlight a brightness slider, and the panel
+// went black at about 60%: 60% of 3.3 V is ~2.0 V, right where a logic input
+// stops reading as high. So the pin is level-sensitive, not duty-sensitive -
+// anything short of full on reads as off. It must only ever be driven HIGH/LOW.
+// Please do not put PWM back on it: dimming has to be done by drawing (a
+// translucent overlay, or the existing UI darkness setting), not by this pin.
 #define TOUCH_GT911_SCL 20
 #define TOUCH_GT911_SDA 19
 #define TOUCH_GT911_INT -1
@@ -120,14 +118,9 @@ void setup_display()
   gfx.fillScreen(0xFFFF); // White background
   Serial.println("Screen filled white");
 #ifdef TFT_BL
-  // PWM instead of a plain on/off output, so the backlight can be dimmed. Starts
-  // at full: the saved level is applied by setup() once preferences are readable.
-  // Everything else must go through backlight_set() in main.cpp - mixing a
-  // digitalWrite() with a pin that LEDC has attached gives undefined duty.
-  ledcSetup(TFT_BL_LEDC_CHANNEL, TFT_BL_PWM_FREQ, TFT_BL_PWM_BITS);
-  ledcAttachPin(TFT_BL, TFT_BL_LEDC_CHANNEL);
-  ledcWrite(TFT_BL_LEDC_CHANNEL, TFT_BL_PWM_MAX);
-  Serial.println("Backlight PWM initialised at full");
+  pinMode(TFT_BL, OUTPUT);
+  digitalWrite(TFT_BL, HIGH);
+  Serial.println("Backlight set HIGH");
 #endif
   ts.begin();
   ts.setRotation(1);

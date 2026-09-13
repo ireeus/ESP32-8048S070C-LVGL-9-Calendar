@@ -41,29 +41,14 @@ try {
 
     $theme = null;
     try {
-        // backlight arrives with the screen-dimming feature, and its column is
-        // added by settings.php. Until the owner opens that page once the column
-        // may not exist, so fall back to the two-column select instead of letting
-        // the PDOException reach the outer catch - that would report "no theme"
-        // and silently reset the device to the legacy default scheme.
-        $row = null;
-        try {
-            $stmt = $db->prepare("SELECT scheme, darkness, backlight FROM user_theme WHERE user_id = ?");
-            $stmt->execute([$user_id]);
-            $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        } catch (PDOException $e) {
-            $stmt = $db->prepare("SELECT scheme, darkness FROM user_theme WHERE user_id = ?");
-            $stmt->execute([$user_id]);
-            $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        }
+        $stmt = $db->prepare("SELECT scheme, darkness FROM user_theme WHERE user_id = ?");
+        $stmt->execute([$user_id]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($row) {
             $theme = [
-                'scheme'    => (string)$row['scheme'],
-                'darkness'  => (int)$row['darkness'],
-                // 100 = full brightness, matching the firmware's default, so an
-                // install without the column does not dim anybody.
-                'backlight' => isset($row['backlight']) ? (int)$row['backlight'] : 100,
-                'source'    => 'user',
+                'scheme'   => (string)$row['scheme'],
+                'darkness' => (int)$row['darkness'],
+                'source'   => 'user',
             ];
         }
     } catch (PDOException $e) {
@@ -77,10 +62,9 @@ try {
         // until their owner chooses one.
         $legacy = @json_decode((string)@file_get_contents('update/theme.json'), true);
         $theme = [
-            'scheme'    => (is_array($legacy) && !empty($legacy['scheme'])) ? (string)$legacy['scheme'] : 'Blue',
-            'darkness'  => (is_array($legacy) && isset($legacy['darkness'])) ? (int)$legacy['darkness'] : 0,
-            'backlight' => (is_array($legacy) && isset($legacy['backlight'])) ? (int)$legacy['backlight'] : 100,
-            'source'    => 'default',
+            'scheme'   => (is_array($legacy) && !empty($legacy['scheme'])) ? (string)$legacy['scheme'] : 'Blue',
+            'darkness' => (is_array($legacy) && isset($legacy['darkness'])) ? (int)$legacy['darkness'] : 0,
+            'source'   => 'default',
         ];
     }
 

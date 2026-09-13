@@ -61,7 +61,6 @@ try {
     user_id INTEGER PRIMARY KEY,
     scheme TEXT NOT NULL DEFAULT 'Blue',
     darkness INTEGER NOT NULL DEFAULT 0,
-    backlight INTEGER NOT NULL DEFAULT 100,
     updated DATETIME DEFAULT CURRENT_TIMESTAMP
 )");
 $db->exec("CREATE TABLE IF NOT EXISTS persistent_sessions (
@@ -99,19 +98,6 @@ $db->exec("CREATE TABLE IF NOT EXISTS persistent_sessions (
     }
     if (!$hasRemindBefore) {
         $db->exec("ALTER TABLE events ADD COLUMN remind_before TEXT");
-    }
-    // user_theme.backlight (screen dimming) arrived after the table already
-    // existed on the live site, so the column has to be added in place. Same
-    // PRAGMA-then-ALTER pattern as the events columns above. DEFAULT 100 matches
-    // the firmware's default, so nobody's screen changes until they move the
-    // slider. SQLite allows NOT NULL here only because a default is supplied.
-    $themeColumns = $db->query("PRAGMA table_info(user_theme)")->fetchAll(PDO::FETCH_ASSOC);
-    $hasBacklightColumn = false;
-    foreach ($themeColumns as $column) {
-        if ($column['name'] === 'backlight') $hasBacklightColumn = true;
-    }
-    if (!$hasBacklightColumn) {
-        $db->exec("ALTER TABLE user_theme ADD COLUMN backlight INTEGER NOT NULL DEFAULT 100");
     }
 } catch (PDOException $e) {
     error_log("Database Error: " . $e->getMessage());
@@ -506,46 +492,29 @@ $is_admin = (strtolower($current_user) === 'ireeus@gmail.com');
 
 $theme_message = '';
 $theme_error_flag = false;
-// Must match BACKLIGHT_MIN in the firmware (src/main.cpp). 0 would leave a black
-// screen with no visible control to undo it on a touch-only device, so neither
-// side allows it.
-const BACKLIGHT_MIN = 10;
 if (isset($_POST['save_theme']) && isset($_SESSION['user_id'])) {
     $scheme   = isset($_POST['scheme']) ? (string)$_POST['scheme'] : '';
     $darkness = isset($_POST['darkness']) ? (int)$_POST['darkness'] : 0;
-    // Optional in the POST: a settings page cached by the service worker may
-    // predate the backlight slider, and a missing field must not silently reset
-    // the screen to full. Absent therefore means "keep whatever is stored".
-    $backlight = isset($_POST['backlight']) ? (int)$_POST['backlight'] : null;
-    if ($backlight === null) {
-        $stmtPrev = $db->prepare("SELECT backlight FROM user_theme WHERE user_id = ?");
-        $stmtPrev->execute([$_SESSION['user_id']]);
-        $prevBacklight = $stmtPrev->fetchColumn();
-        $backlight = ($prevBacklight === false) ? 100 : (int)$prevBacklight;
-    }
     if (!array_key_exists($scheme, $THEME_SCHEMES)) {
         $theme_message = 'Unknown colour scheme.'; $theme_error_flag = true;
     } elseif ($darkness < 0 || $darkness > 100) {
         $theme_message = 'Brightness must be between 0 and 100.'; $theme_error_flag = true;
-    } elseif ($backlight < BACKLIGHT_MIN || $backlight > 100) {
-        $theme_message = 'Backlight must be between ' . BACKLIGHT_MIN . ' and 100.'; $theme_error_flag = true;
     } else {
-        $stmt = $db->prepare("INSERT OR REPLACE INTO user_theme (user_id, scheme, darkness, backlight, updated) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)");
-        $stmt->execute([$_SESSION['user_id'], $scheme, $darkness, $backlight]);
+        $stmt = $db->prepare("INSERT OR REPLACE INTO user_theme (user_id, scheme, darkness, updated) VALUES (?, ?, ?, CURRENT_TIMESTAMP)");
+        $stmt->execute([$_SESSION['user_id'], $scheme, $darkness]);
         $theme_message = 'Theme saved - it applies to your Cron-Tab device only.';
     }
 }
 
-$user_theme = ['scheme' => 'Blue', 'darkness' => 0, 'backlight' => 100];
+$user_theme = ['scheme' => 'Blue', 'darkness' => 0];
 if (isset($_SESSION['user_id'])) {
-    $stmt = $db->prepare("SELECT scheme, darkness, backlight FROM user_theme WHERE user_id = ?");
+    $stmt = $db->prepare("SELECT scheme, darkness FROM user_theme WHERE user_id = ?");
     $stmt->execute([$_SESSION['user_id']]);
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
     if ($row) { $user_theme = $row; }
 }
 if (!array_key_exists((string)$user_theme['scheme'], $THEME_SCHEMES)) { $user_theme['scheme'] = 'Blue'; }
 $user_theme['darkness'] = max(0, min(100, (int)$user_theme['darkness']));
-$user_theme['backlight'] = max(BACKLIGHT_MIN, min(100, (int)$user_theme['backlight']));
 
 // Device fleet update policy. Everyone can SEE it; only the administrator can
 // change it, because one value drives every device.
@@ -1060,27 +1029,14 @@ if (!array_key_exists($active_tab, $TABS)) { $active_tab = 'calendar'; }
                                     </label>
                                 <?php endforeach; ?>
                             </div>
-                            <label for="themeDarkness" class="text-base">UI brightness (0 = light, 100 = dark)</label>
+                            <label for="themeDarkness" class="text-base">Brightness (0 = light, 100 = dark)</label>
                             <input type="range" name="darkness" id="themeDarkness" min="0" max="100"
                                    value="<?php echo (int)$user_theme['darkness']; ?>"
                                    oninput="document.getElementById('themeDarknessValue').textContent=this.value;"
                                    onchange="ctAutosave(this);">
                             <div class="flex items-center justify-center gap-3">
-                                <span>UI brightness</span>
+                                <span>Brightness</span>
                                 <span id="themeDarknessValue" class="font-mono"><?php echo (int)$user_theme['darkness']; ?></span>
-                            </div>
-                            <!-- Drives the panel's backlight LEDs, which is a different
-                                 thing from the greys above. Floor of BACKLIGHT_MIN
-                                 because a screen at 0 leaves no visible control to
-                                 bring it back on a touch-only device. -->
-                            <label for="themeBacklight" class="text-base">Screen backlight (<?php echo BACKLIGHT_MIN; ?> = dim, 100 = full)</label>
-                            <input type="range" name="backlight" id="themeBacklight" min="<?php echo BACKLIGHT_MIN; ?>" max="100"
-                                   value="<?php echo (int)$user_theme['backlight']; ?>"
-                                   oninput="document.getElementById('themeBacklightValue').textContent=this.value;"
-                                   onchange="ctAutosave(this);">
-                            <div class="flex items-center justify-center gap-3">
-                                <span>Backlight</span>
-                                <span id="themeBacklightValue" class="font-mono"><?php echo (int)$user_theme['backlight']; ?></span>
                             </div>
                             <p class="autosave-hint">Saves automatically.</p>
                         </form>
