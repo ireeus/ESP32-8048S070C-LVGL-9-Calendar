@@ -16,7 +16,7 @@ extern const lv_font_t technology_98;
 // embolden the event titles.
 extern const lv_font_t lv_font_montserrat_14_bold;
 // Build version
-const String build_version = "2.2.0";
+const String build_version = "2.2.2";
 int debug =0; // Change to 1 to enable serial prints
 // Firmware check interval variable
 // Was 100000UL, which is 100 SECONDS, not the 5 minutes the comment claimed - so
@@ -122,6 +122,11 @@ void notification_hide();
 // both sit above it) use them.
 static void notification_popup_close();
 static bool show_notification_popup(const char *title, const char *message);
+// "Update available" offer dialog. Declared here because update_btn_cb() (which
+// sits above the definition) has to take it down before raising the progress
+// dialog, and updateFirmwareButton() has to be able to raise it.
+static void close_update_offer_popup();
+static bool offerFirmwareUpdate();
 // The large fallback clock shown when there are no events. blink_time_update_cb
 // used to locate it by CHILD INDEX of eventContainer (0 = hours, 1 = colon,
 // 2 = minutes). That assumption died the moment anything else was added to the
@@ -208,6 +213,12 @@ static lv_obj_t *update_btn = nullptr;
 static lv_obj_t *version_label = nullptr;
 static lv_obj_t *update_popup = nullptr;
 static lv_obj_t *update_status_label = nullptr;
+// "A new firmware is available" notice. Deliberately a separate object from
+// update_popup: this one is raised by the version check, while update_popup is
+// the progress dialog the user (or maybeAutoUpdate()) opens from it. Sharing one
+// pointer would mean the offer dialog and the download dialog fight over it.
+static lv_obj_t *update_offer_popup = nullptr;
+static String update_offer_shown_for = ""; // one offer per advertised version
 static lv_obj_t *event_details_popup = nullptr;
 static lv_obj_t *day_events_popup = nullptr; // Day preview (events on a tapped day)
 static lv_calendar_date_t day_preview_date = {0, 0, 0}; // Date shown by the day preview
@@ -230,6 +241,16 @@ static lv_obj_t *taskbar = nullptr; // front-page status strip
 #define UI_RADIUS 6
 static lv_color_t taskbar_bg()   { return lv_color_hex(0x14181D); }
 static lv_color_t taskbar_text() { return lv_color_hex(0xF2F4F7); }
+// The weather panel keeps a FIXED dark surface. It is deliberately NOT derived
+// from g_ui_darkness the way the page background and the calendar are: the
+// Meteocons artwork is white and pale blue, so against the light panel that
+// darkness 0 produces (the default) 79% of its pixels fell below 3:1 contrast
+// and the icons washed out, against near-black only 5% did. Holding the panel
+// dark keeps them legible at every brightness setting rather than only at the
+// dark end. Change the value here to restyle the whole panel in one place.
+static lv_color_t weather_panel_bg()   { return lv_color_hex(0x14181D); } // same dark as the taskbar
+static lv_color_t weather_panel_text() { return lv_color_hex(0xCFD8DC); } // condition + forecast labels
+static lv_color_t weather_panel_temp() { return lv_color_hex(0xFFFFFF); } // the large temperature
 static lv_obj_t *prev_btn_obj = nullptr;   // recoloured on scheme change
 static lv_obj_t *next_btn_obj = nullptr;   // recoloured on scheme change
 static lv_obj_t *color_cont = nullptr;     // floating scheme-swatch strip
@@ -383,7 +404,7 @@ String last_ignored_notification = "";
 String current_notification_text = "";
 String backgroundFilename = ""; // New: Store the background image filename
 // OTA variables
-String currentFirmwareVersion = "2.2.0"; // replaced by build_version in setup()
+String currentFirmwareVersion = "2.2.2"; // replaced by build_version in setup()
 String latestFirmwareVersion = "";
 String firmwareUrl = "";
 WiFiClientSecure client;
@@ -985,7 +1006,11 @@ void updateWeatherDisplay() {
     weatherContainer = lv_obj_create(lv_scr_act());
     lv_obj_set_size(weatherContainer, 400, 235);
     lv_obj_align(weatherContainer, LV_ALIGN_BOTTOM_RIGHT, -10, -13);
-    lv_obj_set_style_bg_opa(weatherContainer, LV_OPA_90, 0);
+    // Fully opaque, not the 90% it used to be: at 90% the brightness-driven page
+    // background showed through and tinted the panel, so the surface still moved
+    // with the brightness slider. The events panel above is opaque too, so this
+    // also stops the panel looking like a washed-out sibling of it.
+    lv_obj_set_style_bg_opa(weatherContainer, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(weatherContainer, 0, 0);
     lv_obj_set_style_radius(weatherContainer, UI_RADIUS, 0);
     lv_obj_set_style_shadow_color(weatherContainer, lv_color_hex(0x000000), 0);
@@ -1002,12 +1027,14 @@ void updateWeatherDisplay() {
   // and a symmetric padding does not move a CENTER, so dropping it leaves both
   // exactly where they were.
   lv_obj_set_style_pad_all(weatherContainer, 0, 0);
-  // Calculate grayscale based on darkness
-  uint8_t gray = 255 - (g_ui_darkness * 255 / 100);
-  lv_color_t weather_bg_color = lv_color_make(gray, gray, gray);
-  lv_obj_set_style_bg_color(weatherContainer, weather_bg_color, 0);
-  lv_color_t main_text_color = (g_ui_darkness > 50) ? lv_color_hex(0xFFFFFF) : lv_color_hex(0x636e72);
-  lv_color_t temp_text_color = (g_ui_darkness > 50) ? lv_color_hex(0xFFFFFF) : lv_color_hex(0x2d3436);
+  // Fixed dark surface - see weather_panel_bg(). The greyscale ramp that used to
+  // be computed here made the panel white at the default brightness (darkness 0),
+  // which is exactly where the white icons disappeared. The two text colours are
+  // fixed with it: the old pair flipped to dark grey below darkness 50, which on
+  // a permanently dark panel would have been unreadable.
+  lv_obj_set_style_bg_color(weatherContainer, weather_panel_bg(), 0);
+  lv_color_t main_text_color = weather_panel_text();
+  lv_color_t temp_text_color = weather_panel_temp();
   // ---- title bar: city left, AQI right --------------------------------------
   // Runs the full width of the panel, which is why the panel's own padding is
   // cleared above. The city uses the bold face so the bar reads as a heading
@@ -2171,7 +2198,7 @@ static bool show_notification_popup(const char *title, const char *message) {
   // Never stack on top of a dialog the user already has open. The caller leaves
   // its "already shown" flag unset, so it retries on the next poll.
   if (new_event_popup || event_details_popup || day_events_popup || settings_popup ||
-      update_popup || confirm_popup) return false;
+      update_popup || update_offer_popup || confirm_popup) return false;
 
   // Bound the height: the popup is content-sized, and a very long parcel message
   // would otherwise grow it past the bottom of the screen. lv_label_set_text()
@@ -3722,6 +3749,9 @@ void update_btn_cb(lv_event_t *e) {
   (void)e;
   if (debug == 1) Serial.println("[OTA] Update button clicked");
   if (update_popup) return;
+  // Nothing may leave the offer dialog sitting behind the progress dialog: the
+  // unattended path (maybeAutoUpdate) reaches this function directly.
+  close_update_offer_popup();
   // NOTE: the old code hid firmware_update_btn here and only ever unhid it on
   // success - and success reboots - so a failed update left the user with no
   // button and no explanation. The popup covers it, so it is left alone.
@@ -3946,12 +3976,135 @@ void updateFirmwareButton() {
       lv_obj_set_size(firmware_update_btn, 40, 40);
       lv_obj_move_to_index(firmware_update_btn, 1); // Insert after settings button
     }
+    // Ask once per advertised version. This dials out of a function that also
+    // runs at boot, so the first sight of a pending update is a message rather
+    // than a bare icon appearing in the button bar.
+    offerFirmwareUpdate();
   } else {
     if (firmware_update_btn) {
       lv_obj_del(firmware_update_btn);
       firmware_update_btn = nullptr;
     }
   }
+}
+// ---------------------------------------------------------------------------
+// "Update available" notice
+//
+// Deliberately built to match the SmartParcelBox notification dialog: same 600px
+// width, content-sized height, 0x1A1A1A panel, scheme-accent border, 24px accent
+// title and a two-button row. A firmware notice is the same class of event as a
+// parcel arriving, so it should not look like a different kind of message.
+//
+// It only offers - it never installs. "Install now" just opens the existing
+// progress dialog via update_btn_cb(), so there is still exactly one code path
+// that flashes the device.
+// ---------------------------------------------------------------------------
+static void close_update_offer_popup() {
+  if (update_offer_popup) {
+    lv_obj_del(update_offer_popup);
+    update_offer_popup = nullptr;
+  }
+}
+static void update_offer_later_cb(lv_event_t *e) {
+  (void)e;
+  // Dismissed, not forgotten: update_offer_shown_for still holds this version, so
+  // the version check will not raise it again. The download button stays in the
+  // button bar, which is how it can be started later.
+  close_update_offer_popup();
+}
+static void update_offer_install_cb(lv_event_t *e) {
+  (void)e;
+  close_update_offer_popup();
+  update_btn_cb(NULL);
+}
+static bool offerFirmwareUpdate() {
+  if (!versionIsNewer(latestFirmwareVersion, currentFirmwareVersion)) return false;
+  if (is_ota_updating) return false;
+  if (update_offer_shown_for == latestFirmwareVersion) return false; // once per version
+  if (update_offer_popup) return false;
+  // If the site has switched unattended updates on and the quiet window is
+  // already open, maybeAutoUpdate() installs within seconds of this call. Asking
+  // first would only flash a dialog on screen for a moment.
+  if (g_autoFirmwareUpdate && inQuietWindow()) return false;
+  // Never stack on a dialog the user already has open. Note the shown-for flag is
+  // left unset here, so the next check retries instead of the offer being lost.
+  if (new_event_popup || event_details_popup || day_events_popup || settings_popup ||
+      update_popup || confirm_popup || notification_popup || message_popup) return false;
+
+  update_offer_popup = lv_obj_create(lv_scr_act());
+  lv_obj_set_width(update_offer_popup, 600);
+  lv_obj_set_height(update_offer_popup, LV_SIZE_CONTENT);
+  lv_obj_align(update_offer_popup, LV_ALIGN_CENTER, 0, 0);
+  lv_obj_set_style_bg_color(update_offer_popup, lv_color_hex(0x1A1A1A), 0);
+  lv_obj_set_style_border_color(update_offer_popup, scheme_accent(), 0);
+  lv_obj_set_style_border_width(update_offer_popup, 3, 0);
+  lv_obj_set_style_radius(update_offer_popup, UI_RADIUS, 0);
+  lv_obj_set_style_pad_all(update_offer_popup, 14, 0);
+  lv_obj_set_style_pad_row(update_offer_popup, 8, 0);
+  lv_obj_set_flex_flow(update_offer_popup, LV_FLEX_FLOW_COLUMN);
+  lv_obj_set_flex_align(update_offer_popup, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+                        LV_FLEX_ALIGN_CENTER);
+  lv_obj_clear_flag(update_offer_popup, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scrollbar_mode(update_offer_popup, LV_SCROLLBAR_MODE_OFF);
+
+  lv_obj_t *title_lbl = lv_label_create(update_offer_popup);
+  lv_label_set_text(title_lbl, LV_SYMBOL_DOWNLOAD "  Firmware update");
+  lv_obj_set_style_text_font(title_lbl, &lv_font_montserrat_24, 0);
+  lv_obj_set_style_text_color(title_lbl, scheme_accent(), 0);
+  lv_obj_set_width(title_lbl, LV_PCT(100));
+  lv_obj_set_style_text_align(title_lbl, LV_TEXT_ALIGN_CENTER, 0);
+  lv_label_set_long_mode(title_lbl, LV_LABEL_LONG_WRAP);
+
+  // Plain ASCII only: the built-in montserrat faces carry 0x20-0x7F plus the
+  // LV_SYMBOL_* range, so an arrow or an em dash would render as a box.
+  lv_obj_t *msg_lbl = lv_label_create(update_offer_popup);
+  lv_label_set_text_fmt(msg_lbl,
+                        "A new version is ready to install.\nInstalled: %s\nNew: %s",
+                        currentFirmwareVersion.c_str(), latestFirmwareVersion.c_str());
+  lv_obj_set_style_text_font(msg_lbl, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(msg_lbl, lv_color_hex(0xFFFFFF), 0);
+  lv_obj_set_width(msg_lbl, LV_PCT(100));
+  lv_obj_set_style_text_align(msg_lbl, LV_TEXT_ALIGN_CENTER, 0);
+  lv_label_set_long_mode(msg_lbl, LV_LABEL_LONG_WRAP);
+
+  lv_obj_t *btn_row = lv_obj_create(update_offer_popup);
+  lv_obj_set_width(btn_row, LV_PCT(100));
+  lv_obj_set_height(btn_row, LV_SIZE_CONTENT);
+  lv_obj_set_style_bg_opa(btn_row, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(btn_row, 0, 0);
+  lv_obj_set_style_pad_all(btn_row, 0, 0);
+  lv_obj_set_style_pad_column(btn_row, 16, 0);
+  lv_obj_set_flex_flow(btn_row, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(btn_row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+                        LV_FLEX_ALIGN_CENTER);
+  lv_obj_clear_flag(btn_row, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scrollbar_mode(btn_row, LV_SCROLLBAR_MODE_OFF);
+
+  lv_obj_t *later_btn = lv_button_create(btn_row);
+  lv_obj_set_size(later_btn, 150, 46);
+  lv_obj_set_style_bg_color(later_btn, lv_color_hex(0x555555), 0);
+  lv_obj_set_style_radius(later_btn, UI_RADIUS, 0);
+  lv_obj_add_event_cb(later_btn, update_offer_later_cb, LV_EVENT_PRESSED, NULL);
+  lv_obj_t *later_lbl = lv_label_create(later_btn);
+  lv_label_set_text(later_lbl, "Later");
+  lv_obj_center(later_lbl);
+  lv_obj_set_style_text_font(later_lbl, &lv_font_montserrat_14, 0);
+
+  lv_obj_t *now_btn = lv_button_create(btn_row);
+  lv_obj_set_size(now_btn, 220, 46);
+  lv_obj_set_style_bg_color(now_btn, scheme_accent(), 0);
+  lv_obj_set_style_bg_color(now_btn, scheme_accent_dark(), LV_STATE_PRESSED);
+  lv_obj_set_style_radius(now_btn, UI_RADIUS, 0);
+  lv_obj_add_event_cb(now_btn, update_offer_install_cb, LV_EVENT_PRESSED, NULL);
+  lv_obj_t *now_lbl = lv_label_create(now_btn);
+  lv_label_set_text(now_lbl, "Install now");
+  lv_obj_center(now_lbl);
+  lv_obj_set_style_text_font(now_lbl, &lv_font_montserrat_14, 0);
+
+  // Set last: everything above can still fail early, and only reaching here means
+  // the user has actually been shown this version.
+  update_offer_shown_for = latestFirmwareVersion;
+  return true;
 }
 // Colours for the calendar grid, derived from the UI brightness setting so the
 // calendar stays readable in both light and dark modes. Called at setup and
