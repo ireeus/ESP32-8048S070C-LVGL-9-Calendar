@@ -19,7 +19,7 @@ extern const lv_font_t lv_font_montserrat_14_bold;
 // Must be HIGHER than whatever update/version.json currently advertises, or the
 // device will keep offering (and auto-installing) a build that is not actually
 // newer. The site was on 2.2.6 when this was written.
-const String build_version = "2.2.9";
+const String build_version = "2.2.10";
 int debug =0; // Change to 1 to enable serial prints
 // Firmware check interval variable
 // Was 100000UL, which is 100 SECONDS, not the 5 minutes the comment claimed - so
@@ -454,7 +454,7 @@ String last_ignored_notification = "";
 String current_notification_text = "";
 String backgroundFilename = ""; // New: Store the background image filename
 // OTA variables
-String currentFirmwareVersion = "2.2.9"; // replaced by build_version in setup()
+String currentFirmwareVersion = "2.2.10"; // replaced by build_version in setup()
 String latestFirmwareVersion = "";
 String firmwareUrl = "";
 WiFiClientSecure client;
@@ -4567,7 +4567,14 @@ void fetchThemeConfig() {
 // it went through. The caller is the Sync queue, which must not start pulling the
 // theme back down before the local choice has gone up: fetchThemeConfig() would
 // see the site's older value as a change and undo what the user just picked.
-static bool pushThemeToServer() {
+// A failed push must not be retried on the very next loop() pass. Without this
+// wait, one non-200 reply from the site turns loop() into a request-per-pass
+// hammer - each attempt blocking the UI for about a second, forever, until a push
+// finally succeeds, and silently unless debug is on. A manual Sync bypasses the
+// wait (the user asked for it right now) but still refreshes it.
+#define THEME_PUSH_RETRY_MS 5000
+static unsigned long lastThemePushAttempt = 0;
+static bool pushThemeToServer(bool fromSync = false) {
   if (!themePushPending) return true;
   if (WiFi.status() != WL_CONNECTED) return false;   // stays pending; retried when up
   if (apiCode.isEmpty()) return false;
@@ -4576,6 +4583,9 @@ static bool pushThemeToServer() {
   // finger is down.
   lv_indev_t *indev = lv_indev_get_next(NULL);
   if (indev && lv_indev_get_state(indev) == LV_INDEV_STATE_PRESSED) return false;
+  if (!fromSync && lastThemePushAttempt != 0 &&
+      millis() - lastThemePushAttempt < THEME_PUSH_RETRY_MS) return false;
+  lastThemePushAttempt = millis();
 
   // With Auto running, g_ui_darkness is today's computed level, not a choice. What
   // the site wants is "auto is on, and the manual level underneath is X", so push
@@ -4618,23 +4628,150 @@ static bool pushThemeToServer() {
   return !themePushPending;
 }
 // ---- Sync from the settings popup -------------------------------------------
-// The Sync button pushes whatever changed to the site, then pulls the same three
-// things back, so the device and the site agree either way. Driven from loop()
-// rather than from the button callback: each request is a blocking TLS call of
-// about a second and a tap must not freeze the screen.
+// The Sync button pushes whatever changed to the site, then pulls EVERYTHING the
+// device displays back, so one press leaves the device and the site agreeing.
+// Driven from loop() rather than from the button callback: each request is a
+// blocking TLS call of about a second and a tap must not freeze the screen.
 //
-// Order matters. The theme goes up FIRST (step 1), because fetchThemeConfig()
-// compares what the site sends against the last value the site sent, and a local
-// choice that has not been pushed yet looks exactly like a site-side change - the
-// pull would silently revert the brightness the user just picked.
+// Push side - only what actually changed, and nothing at all if nothing did:
+// pushThemeToServer() returns immediately unless themePushPending is set, which
+// only happens when the theme or brightness was changed on the device, and the
+// parcel box / location pushes are skipped unless the button found the on-screen
+// fields different from the values already held.
 //
-//   0 idle, 1 push theme, 2 fetch theme, 3 fetch parcel box, 4 fetch weather location
+// Order matters twice over. The theme goes up FIRST (step 1), because
+// fetchThemeConfig() compares what the site sends against the last value the site
+// sent, and a local choice that has not been pushed yet looks exactly like a
+// site-side change - the pull would silently revert the brightness the user just
+// picked. And the location is pulled (step 8) BEFORE the weather (step 9), so the
+// forecast is fetched with the coordinates that were just downloaded.
+//
+// Step 10 costs nothing when the background has not changed: bgLoadFromCache()
+// compares the cached file name against the one the server just returned, and the
+// 1.1MB blob is only re-downloaded when they differ.
+//
+// Step 6 deliberately does NOT call maybeAutoUpdate(): fetching the update
+// information is what a sync is for, but installing it reboots the device, and
+// that must stay on its own 5-minute timer rather than fire mid-sync.
+//
+//   1 push theme       2 push parcel box   3 push location
+//   4 pull styles      5 pull calendar     6 pull updates    7 pull parcel box
+//   8 pull location    9 pull weather     10 pull background 11 pull notifications
+//  12 pull bank holidays
+#define SYNC_STEP_LAST 12
 static uint8_t syncStep = 0;
 static unsigned long lastSyncStep = 0;
+// Captured by the Sync button, which is the only place that can know the
+// on-screen fields differ from what we hold. Cleared once the push has run.
+static bool syncPushParcel = false;
+static bool syncPushLocation = false;
+static String syncParcelUser, syncParcelId, syncLocationCity;
+// Bounded retry for step 1. The theme must go up before it is pulled, or the pull
+// reverts the local choice (see above) - but a push that cannot succeed must not
+// wedge the queue either. After three tries the styles PULL is skipped instead,
+// and the push stays pending for loop() to finish later.
+static uint8_t syncThemeTries = 0;
+static bool syncSkipThemePull = false;
+// The step banner prints when the step CHANGES, so a step stalled on a retry does
+// not repeat itself every 250ms.
+static uint8_t syncPrintedStep = 0;
 // Its own gap rather than the boot queue's: that macro is defined much further
-// down the file, next to the queue that uses it.
-#define SYNC_STEP_GAP_MS 150
-void armSettingsSync() { syncStep = 1; lastSyncStep = 0; }
+// down the file, next to the queue that uses it. Wider than the boot queue's
+// 50ms because a manual sync is a dozen requests back to back, and this gap is
+// the only breathing space the UI gets between two blocking TLS calls.
+#define SYNC_STEP_GAP_MS 250
+static const char *syncStepName(uint8_t s) {
+  switch (s) {
+    case 1:  return "push theme";
+    case 2:  return "push parcel box";
+    case 3:  return "push location";
+    case 4:  return "pull styles";
+    case 5:  return "pull calendar";
+    case 6:  return "pull updates";
+    case 7:  return "pull parcel box";
+    case 8:  return "pull location";
+    case 9:  return "pull weather";
+    case 10: return "pull background";
+    case 11: return "pull notifications";
+    case 12: return "pull bank holidays";
+    default: return "?";
+  }
+}
+void armSettingsSync() {
+  syncStep = 1;
+  lastSyncStep = 0;
+  syncThemeTries = 0;
+  syncSkipThemePull = false;
+  syncPrintedStep = 0;
+}
+// Push the parcel box credentials the Sync button captured, if they changed. The
+// endpoint stores the pair together, so both fields must be non-empty. No retry:
+// a failure leaves device and site disagreeing until the next press, which beats
+// a queue that can never finish.
+static void pushParcelBoxToServer() {
+  if (!syncPushParcel) return;
+  syncPushParcel = false;
+  if (syncParcelUser.isEmpty() || syncParcelId.isEmpty()) {
+    Serial.println("[SYNC] parcel box not pushed - one of the two fields is empty");
+    return;
+  }
+  HTTPClient http;
+  String url = "https://crontech.uk/api.php?parcelBox=" + URLEncode(apiCode) +
+               "&parcel_box_username=" + URLEncode(syncParcelUser) +
+               "&parcel_box_id=" + URLEncode(syncParcelId);
+  http.begin(url);
+  int httpCode = http.GET();
+  if (httpCode == HTTP_CODE_OK) {
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, http.getString());
+    if (!error) {
+      username = doc["username"].as<String>();
+      device_id = doc["parcel_box_id"].as<String>();
+      preferences.begin("cloudapps", false);
+      preferences.putString("username", username);
+      preferences.putString("device_id", device_id);
+      preferences.end();
+      Serial.println("[SYNC] parcel box pushed");
+    } else {
+      Serial.println("[SYNC] parcel box reply not JSON: " + String(error.c_str()));
+    }
+  } else {
+    Serial.println("[SYNC] parcel box push failed: HTTP " + String(httpCode));
+  }
+  http.end();
+}
+// The same for the weather location. Its reply carries the resolved coordinates,
+// so they are stored here instead of being looked up a second time.
+static void pushWeatherLocationToServer() {
+  if (!syncPushLocation) return;
+  syncPushLocation = false;
+  if (syncLocationCity.isEmpty()) return;
+  HTTPClient http;
+  String url = "https://crontech.uk/api.php?weatherLocation=" + URLEncode(apiCode) +
+               "&city_name=" + URLEncode(syncLocationCity);
+  http.begin(url);
+  int httpCode = http.GET();
+  if (httpCode == HTTP_CODE_OK) {
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, http.getString());
+    if (!error) {
+      location = fontSafe(doc["city_name"].as<String>());
+      lat = String(doc["latitude"].as<float>(), 6);
+      lon = String(doc["longitude"].as<float>(), 6);
+      preferences.begin("location", false);
+      preferences.putString("location", location);
+      preferences.putString("lat", lat);
+      preferences.putString("lon", lon);
+      preferences.end();
+      Serial.println("[SYNC] location pushed: " + location);
+    } else {
+      Serial.println("[SYNC] location reply not JSON: " + String(error.c_str()));
+    }
+  } else {
+    Serial.println("[SYNC] location push failed: HTTP " + String(httpCode));
+  }
+  http.end();
+}
 static void serviceSyncQueue() {
   if (syncStep == 0) return;
   if (is_ota_updating) return;
@@ -4645,19 +4782,72 @@ static void serviceSyncQueue() {
     lastSyncStep = millis();
     return;
   }
+  // Unconditional, so a Sync press is followable in the serial log: twelve lines
+  // that show exactly what was pushed and what was pulled. On a change of step
+  // only, so a stalled step does not repeat itself.
+  if (syncStep != syncPrintedStep) {
+    syncPrintedStep = syncStep;
+    Serial.printf("[SYNC] %2u/%u %s\n", (unsigned)syncStep, (unsigned)SYNC_STEP_LAST,
+                  syncStepName(syncStep));
+  }
   bool advance = true;
   switch (syncStep) {
     case 1:
-      advance = pushThemeToServer(); // false = still pending or busy, stay here
+      // fromSync=true: skip the retry backoff, the user asked for this right now.
+      advance = pushThemeToServer(true);
+      if (!advance && ++syncThemeTries >= 3) {
+        Serial.println("[SYNC] theme push failed 3x - skipping the styles pull so the "
+                       "unpushed local theme is not reverted");
+        syncSkipThemePull = true;
+        advance = true; // never wedge the queue; loop() keeps retrying the push
+      }
       break;
-    case 2: fetchThemeConfig();           break;
-    case 3: fetchParcelBoxCredentials();  break;
-    case 4: fetchWeatherLocation();       break;
+    case 2:  pushParcelBoxToServer();    break; // no-op unless the fields changed
+    case 3:  pushWeatherLocationToServer(); break; // no-op unless it changed
+    case 4:
+      if (syncSkipThemePull) break; // see step 1: do not revert an unpushed theme
+      fetchThemeConfig();
+      lastThemeCheck = millis();
+      break;
+    case 5:
+      fetchEvents();
+      // The popup this was pressed from is already gone, so the calendar behind it
+      // can be rebuilt immediately.
+      if (calendar) {
+        updateEventDisplay(calendar);
+        updateMonthLabel(calendar);
+      }
+      lastRefreshTime = millis(); // do not let the 60s timer fire straight after
+      break;
+    case 6:
+      checkFirmwareUpdate();
+      fetchUpdatePolicy();
+      updateFirmwareButton();
+      lastFirmwareCheck = millis();
+      break;
+    case 7:  fetchParcelBoxCredentials(); lastCredentialsCheck = millis();     break;
+    case 8:  fetchWeatherLocation();      lastWeatherLocationCheck = millis(); break;
+    case 9:
+      fetchWeather();
+      updateWeatherDisplay();
+      lastWeatherUpdate = millis();
+      break;
+    case 10:
+      fetchBackgroundFilename();
+      fetchAndSetBackgroundImage(); // cached: only downloads if the name changed
+      lastBackgroundUpdate = millis();
+      break;
+    case 11: fetchNotifications();        lastNotificationCheck = millis();    break;
+    case 12:
+      fetchBankHolidays();
+      updateHolidayLabel();
+      lastHolidayUpdate = millis();
+      break;
     default: syncStep = 0; return;
   }
   if (advance) {
-    syncStep = (syncStep >= 4) ? 0 : syncStep + 1;
-    if (syncStep == 0 && debug == 1) Serial.println("[SYNC] done");
+    syncStep = (syncStep >= SYNC_STEP_LAST) ? 0 : syncStep + 1;
+    if (syncStep == 0) Serial.println("[SYNC] done - pushed changes, pulled everything");
   }
   lastSyncStep = millis();
 }
@@ -6247,9 +6437,13 @@ void show_event_details_cb(lv_event_t *e) {
 //
 // It used to be "Save" and pushed the parcel box and the location on every press,
 // whether or not the fields had been touched - two blocking HTTPS requests each
-// time. Now it compares first and only sends what actually changed, then hands over
-// to the sync queue to push the theme (if that changed) and pull all three back so
-// the device and the site agree either way. See serviceSyncQueue().
+// time, from inside the tap callback, before the popup had even closed. It then
+// pulled back only three things, so a calendar that had changed server-side stayed
+// stale until the 60s timer came round.
+//
+// Now it only RECORDS what changed and hands the whole job to the sync queue,
+// which does one request per loop pass: the values that differ go up, then
+// everything the device displays is pulled back down. See serviceSyncQueue().
 void sync_settings_cb(lv_event_t *e) {
   if (debug == 1) Serial.println("[SYNC] Sync button pressed");
   SettingsUI *sui = (SettingsUI*)lv_event_get_user_data(e);
@@ -6260,86 +6454,31 @@ void sync_settings_cb(lv_event_t *e) {
   const String new_location = fontSafe(String(lv_textarea_get_text(sui->location_ta)));
   const String new_username = String(lv_textarea_get_text(sui->username_ta));
   const String new_device_id = String(lv_textarea_get_text(sui->device_id_ta));
-  const bool parcel_changed = (new_username != username) || (new_device_id != device_id);
-  const bool location_changed = (new_location != location);
+
+  // Compare BEFORE adopting the new values, and capture only the fields that
+  // differ. The queue pushes exactly those, and sends nothing for the rest.
+  syncPushParcel = (new_username != username) || (new_device_id != device_id);
+  syncPushLocation = (new_location != location);
+  syncParcelUser = new_username;
+  syncParcelId = new_device_id;
+  syncLocationCity = new_location;
 
   username = new_username;
   device_id = new_device_id;
 
-  // Save parcelBox credentials, but only when they are different - and only when
-  // both fields are filled, because the endpoint stores the pair together.
-  if (parcel_changed && !username.isEmpty() && !device_id.isEmpty()) {
-    HTTPClient http;
-    String url = "https://crontech.uk/api.php?parcelBox=" + URLEncode(apiCode) + "&parcel_box_username=" + URLEncode(username) + "&parcel_box_id=" + URLEncode(device_id);
-    http.begin(url);
-    int httpCode = http.GET();
-    if (httpCode == HTTP_CODE_OK) {
-      String payload = http.getString();
-      JsonDocument doc;
-      DeserializationError error = deserializeJson(doc, payload);
-      if (!error) {
-        username = doc["username"].as<String>();
-        device_id = doc["parcel_box_id"].as<String>();
-        preferences.begin("cloudapps", false);
-        preferences.putString("username", username);
-        preferences.putString("device_id", device_id);
-        preferences.end();
-        if (debug == 1) Serial.println("[APP] ParcelBox credentials saved: Username=" + username + ", Device ID=" + device_id);
-      } else {
-        if (debug == 1) Serial.println("[APP] ParcelBox JSON parsing failed: " + String(error.c_str()));
-      }
-    } else {
-      if (debug == 1) Serial.println("[APP] ParcelBox update failed: " + String(httpCode));
-    }
-    http.end();
-  } else if (parcel_changed && debug == 1) {
-    Serial.println("[SYNC] parcel box not pushed - one of the two fields is empty");
-  }
-
-  // Save weather location, again only when it actually changed.
-  if (location_changed && !new_location.isEmpty()) {
-    HTTPClient http;
-    String url = "https://crontech.uk/api.php?weatherLocation=" + URLEncode(apiCode) + "&city_name=" + URLEncode(new_location);
-    http.begin(url);
-    int httpCode = http.GET();
-    if (httpCode == HTTP_CODE_OK) {
-      String payload = http.getString();
-      JsonDocument doc;
-      DeserializationError error = deserializeJson(doc, payload);
-      if (!error) {
-        location = fontSafe(doc["city_name"].as<String>());
-        lat = String(doc["latitude"].as<float>(), 6);
-        lon = String(doc["longitude"].as<float>(), 6);
-        preferences.begin("location", false);
-        preferences.putString("location", location);
-        preferences.putString("lat", lat);
-        preferences.putString("lon", lon);
-        preferences.end();
-        if (debug == 1) Serial.println("[APP] Weather location saved: " + location + ", lat: " + lat + ", lon: " + lon);
-      } else {
-        if (debug == 1) Serial.println("[APP] Weather location JSON parsing failed: " + String(error.c_str()));
-      }
-    } else {
-      if (debug == 1) Serial.println("[APP] Weather location update failed: " + String(httpCode));
-    }
-    http.end();
-  }
   if (debug == 1) {
-    Serial.println(String("[SYNC] changed: parcel=") + (parcel_changed ? "yes" : "no") +
-                   " location=" + (location_changed ? "yes" : "no") +
+    Serial.println(String("[SYNC] changed: parcel=") + (syncPushParcel ? "yes" : "no") +
+                   " location=" + (syncPushLocation ? "yes" : "no") +
                    " theme=" + (themePushPending ? "pending" : "no"));
   }
 
+  // Local preference only, no network: safe to write straight from the callback.
   preferences.begin("location", false);
   preferences.putInt("temp_adjust", temp_adjust);
   preferences.end();
-  fetchWeather();
-  updateWeatherDisplay();
 
-  // Whatever this screen can change now gets pushed and pulled back in the
-  // background: the theme up first, then theme, parcel box and location down. A
-  // flag rather than a direct call, because each of those blocks for about a
-  // second. Only worth doing if we are online.
+  // Push the changes up, then pull everything back down. A flag rather than a
+  // direct call, because each of those requests blocks for about a second.
   armSettingsSync();
 
   if (settings_popup) {
