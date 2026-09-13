@@ -923,6 +923,22 @@ if (!array_key_exists($active_tab, $TABS)) { $active_tab = 'calendar'; }
             outline:2px solid var(--primary); outline-offset:3px; }
         .theme-swatch-name { font-size:.72rem; color:var(--text-muted); }
         .theme-swatch input:checked ~ .theme-swatch-name { color:var(--text-main); font-weight:700; }
+        /* ---- five-step choices (UI brightness) ---- */
+        /* Same trick as .theme-swatch: the radio itself is visually hidden but
+           still focusable, so keyboard and screen readers keep working. One click
+           is one autosave - no drag, so nothing fires mid-gesture. */
+        .step-choices { display:flex; gap:.5rem; margin:.6rem 0 .25rem; }
+        .step-choice { flex:1; position:relative; }
+        .step-choice input { position:absolute; opacity:0; width:1px; height:1px; margin:0; }
+        .step-choice-box { display:block; text-align:center; padding:.6rem 0; border-radius:8px;
+            border:1px solid var(--border-light); background:var(--bg-card); color:var(--text-main);
+            font-weight:700; cursor:pointer;
+            transition:background-color .15s ease, border-color .15s ease, color .15s ease; }
+        .step-choice:hover .step-choice-box { border-color:var(--primary); }
+        .step-choice input:checked + .step-choice-box {
+            background:var(--primary); border-color:var(--primary); color:#111; }
+        .step-choice input:focus-visible + .step-choice-box {
+            outline:2px solid var(--primary); outline-offset:2px; }
         /* Controls on these two panels save themselves, so the hint replaces the old button. */
         .autosave-hint { font-size:.82rem; color:var(--text-muted); text-align:center; margin:.9rem 0 .2rem; }
 </style>
@@ -1029,14 +1045,31 @@ if (!array_key_exists($active_tab, $TABS)) { $active_tab = 'calendar'; }
                                     </label>
                                 <?php endforeach; ?>
                             </div>
-                            <label for="themeDarkness" class="text-base">Brightness (0 = light, 100 = dark)</label>
-                            <input type="range" name="darkness" id="themeDarkness" min="0" max="100"
-                                   value="<?php echo (int)$user_theme['darkness']; ?>"
-                                   oninput="document.getElementById('themeDarknessValue').textContent=this.value;"
-                                   onchange="ctAutosave(this);">
-                            <div class="flex items-center justify-center gap-3">
-                                <span>Brightness</span>
-                                <span id="themeDarknessValue" class="font-mono"><?php echo (int)$user_theme['darkness']; ?></span>
+                            <?php
+                            // Five presets, matching the device's own row. A slider
+                            // gives a value nobody needs to that precision, and on
+                            // the device itself a drag was unreliable; one click is
+                            // also one autosave instead of dozens mid-drag.
+                            $brightness_steps = [0, 25, 50, 75, 100];
+                            $brightness_now = (int)$user_theme['darkness'];
+                            $brightness_sel = $brightness_steps[0];
+                            $brightness_best = PHP_INT_MAX;
+                            foreach ($brightness_steps as $__step) {
+                                $__d = abs($brightness_now - $__step);
+                                if ($__d < $brightness_best) { $brightness_best = $__d; $brightness_sel = $__step; }
+                            }
+                            ?>
+                            <label class="text-base">UI brightness (0 = light, 100 = dark)</label>
+                            <div class="step-choices">
+                                <?php foreach ($brightness_steps as $__step): ?>
+                                    <label class="step-choice" title="<?php echo $__step; ?>">
+                                        <input type="radio" name="darkness"
+                                               value="<?php echo $__step; ?>"
+                                               <?php echo $__step === $brightness_sel ? 'checked' : ''; ?>
+                                               onchange="ctAutosave(this);">
+                                        <span class="step-choice-box"><?php echo $__step; ?></span>
+                                    </label>
+                                <?php endforeach; ?>
                             </div>
                             <p class="autosave-hint">Saves automatically.</p>
                         </form>

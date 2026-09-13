@@ -16,7 +16,10 @@ extern const lv_font_t technology_98;
 // embolden the event titles.
 extern const lv_font_t lv_font_montserrat_14_bold;
 // Build version
-const String build_version = "2.2.3";
+// Must be HIGHER than whatever update/version.json currently advertises, or the
+// device will keep offering (and auto-installing) a build that is not actually
+// newer. The site was on 2.2.5 when this was written.
+const String build_version = "2.2.6";
 int debug =0; // Change to 1 to enable serial prints
 // Firmware check interval variable
 // Was 100000UL, which is 100 SECONDS, not the 5 minutes the comment claimed - so
@@ -97,9 +100,11 @@ void next_month_cb(lv_event_t *e);
 void updateFirmwareButton();
 unsigned long hashString(const String& str);
 void update_today_highlight(lv_obj_t *cal);
-void darkness_slider_cb(lv_event_t *e); // New callback for darkness slider
+void darkness_step_cb(lv_event_t *e);           // UI brightness preset tapped
+static void darkness_steps_highlight(int selected); // repaint the preset row
+static int  ui_darkness_nearest_step();         // which preset is active now
 // Colour-scheme helpers. Defined next to apply_calendar_theme() further down, but
-// declared here because darkness_slider_cb() (which sits above them) calls
+// declared here because the settings popup (which sits above them) calls
 // apply_theme_accent() to keep the theme's light/dark flag in step.
 static void apply_theme_accent();
 static void apply_color_scheme();
@@ -273,6 +278,15 @@ static lv_timer_t *notification_timer = NULL;
 static lv_timer_t *blink_timer = NULL;
 static lv_obj_t *bg_img = nullptr;  // Global for background image
 static int g_ui_darkness = 0; // Global darkness level (0: light, 100: dark)
+// UI brightness is five presets, not a slider. Nobody needs this value
+// continuously, and on this panel a tap is far more reliable than a drag: the
+// slider was a 1px-wide grab target that also wrote to flash on every
+// intermediate value. See darkness_steps_highlight() for the selected styling.
+#define UI_DARKNESS_STEP_COUNT 5
+static const int UI_DARKNESS_STEPS[UI_DARKNESS_STEP_COUNT] = {0, 25, 50, 75, 100};
+// Set when show_settings_popup() builds the row, and cleared when that popup is
+// deleted - these point into it, so a stale entry would be a dangling pointer.
+static lv_obj_t *darkness_step_btns[UI_DARKNESS_STEP_COUNT] = {nullptr, nullptr, nullptr, nullptr, nullptr};
 // There is deliberately no backlight level global any more. TFT_BL turned out to
 // be an enable pin, so PWM on it blacks the panel out below ~60% (see the note in
 // display.h) - there is nothing between full on and off to store.
@@ -407,7 +421,7 @@ String last_ignored_notification = "";
 String current_notification_text = "";
 String backgroundFilename = ""; // New: Store the background image filename
 // OTA variables
-String currentFirmwareVersion = "2.2.3"; // replaced by build_version in setup()
+String currentFirmwareVersion = "2.2.6"; // replaced by build_version in setup()
 String latestFirmwareVersion = "";
 String firmwareUrl = "";
 WiFiClientSecure client;
@@ -2509,6 +2523,10 @@ static void settings_popup_deleted_cb(lv_event_t *e) {
   settings_ram_val = nullptr;
   settings_psram_bar = nullptr;
   settings_psram_val = nullptr;
+  // The brightness presets are children of this popup, so they died with it.
+  // Leaving the pointers would leave darkness_steps_highlight() writing through
+  // freed memory the next time it ran.
+  for (int i = 0; i < UI_DARKNESS_STEP_COUNT; i++) darkness_step_btns[i] = nullptr;
 }
 // Internal RAM is the scarce resource on this board - 320KB shared with the WiFi
 // and TLS stacks - while the LVGL draw buffers and the panel framebuffer live in
@@ -2721,16 +2739,37 @@ void show_settings_popup() {
     lv_obj_t *device_id_ta = make_field(parcel_pair, "Device ID", "Device ID", device_id, 0, 0, 1);
 
     // UI Brightness now occupies the slot the "Temperature Adjustment" card used
-    // to hold, so both columns stay full-height instead of leaving a gap. There is
-    // no second slider here: the panel's backlight cannot be dimmed (see
-    // display.h), so this one control is the whole story.
+    // to hold, so both columns stay full-height instead of leaving a gap.
+    //
+    // Five tappable presets rather than a slider. The slider was a 1px-wide grab
+    // target on a 7" resistive-ish panel, it wrote to flash for every
+    // intermediate value while being dragged, and it gave a number nobody needs
+    // to that precision. A tap is unambiguous.
     lv_obj_t *brightness_card = make_card(right_col, lv_color_hex(0x1e1e1e), lv_color_hex(0x1e1e1e));
-    make_card_title(brightness_card, "UI Brightness");
-    lv_obj_t *darkness_slider = lv_slider_create(brightness_card);
-    lv_slider_set_range(darkness_slider, 0, 100);
-    lv_slider_set_value(darkness_slider, g_ui_darkness, LV_ANIM_OFF);
-    lv_obj_set_width(darkness_slider, LV_PCT(100));
-    lv_obj_add_event_cb(darkness_slider, darkness_slider_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    make_card_title(brightness_card, "UI Brightness  (0 = light, 100 = dark)");
+    lv_obj_t *step_row = make_panel(brightness_card);
+    lv_obj_set_width(step_row, LV_PCT(100));
+    lv_obj_set_height(step_row, LV_SIZE_CONTENT);
+    lv_obj_set_style_pad_column(step_row, 6, 0);
+    lv_obj_set_flex_flow(step_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(step_row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    for (int i = 0; i < UI_DARKNESS_STEP_COUNT; i++) {
+      lv_obj_t *step_btn = lv_button_create(step_row);
+      lv_obj_set_width(step_btn, 0);
+      lv_obj_set_height(step_btn, 42);
+      lv_obj_set_flex_grow(step_btn, 1);   // the five share the row evenly
+      lv_obj_set_style_radius(step_btn, UI_RADIUS, 0);
+      lv_obj_t *step_lbl = lv_label_create(step_btn);
+      lv_label_set_text_fmt(step_lbl, "%d", UI_DARKNESS_STEPS[i]);
+      lv_obj_center(step_lbl);
+      lv_obj_set_style_text_font(step_lbl, &lv_font_montserrat_14, 0);
+      // CLICKED, not PRESSED: a press that turns into a scroll must not change
+      // the setting.
+      lv_obj_add_event_cb(step_btn, darkness_step_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+      darkness_step_btns[i] = step_btn;
+    }
+    darkness_steps_highlight(ui_darkness_nearest_step());
 
     // Firmware version sits directly under the last card as a normal child of the
     // column, so it starts at the same left edge as that card rather than
@@ -4032,11 +4071,23 @@ static bool offerFirmwareUpdate() {
   // If the site has switched unattended updates on and the quiet window is
   // already open, maybeAutoUpdate() installs within seconds of this call. Asking
   // first would only flash a dialog on screen for a moment.
-  if (g_autoFirmwareUpdate && inQuietWindow()) return false;
+  if (g_autoFirmwareUpdate && inQuietWindow()) {
+    static unsigned long lastQuietLog = 0;
+    if (debug == 1 && millis() - lastQuietLog > 60000UL) {
+      lastQuietLog = millis();
+      Serial.println("[OTA] quiet window is open - auto-update installs by itself, not offering");
+    }
+    return false;
+  }
   // Never stack on a dialog the user already has open. Note the shown-for flag is
   // left unset here, so the next check retries instead of the offer being lost.
   if (new_event_popup || event_details_popup || day_events_popup || settings_popup ||
       update_popup || confirm_popup || notification_popup || message_popup) return false;
+
+  if (debug == 1) {
+    Serial.println("[OTA] offering " + latestFirmwareVersion + " (running " +
+                   currentFirmwareVersion + ")");
+  }
 
   update_offer_popup = lv_obj_create(lv_scr_act());
   lv_obj_set_width(update_offer_popup, 600);
@@ -4178,9 +4229,38 @@ void apply_ui_darkness(int value) {
   preferences.putInt("ui_darkness", g_ui_darkness);
   preferences.end();
 }
-void darkness_slider_cb(lv_event_t *e) {
-  lv_obj_t *slider = (lv_obj_t*)lv_event_get_target(e);
-  apply_ui_darkness(lv_slider_get_value(slider));
+// The preset closest to the current value. The device can also be given an
+// arbitrary value by the website's theme, so this cannot assume an exact match.
+static int ui_darkness_nearest_step() {
+  int best = 0;
+  int best_dist = 1000;
+  for (int i = 0; i < UI_DARKNESS_STEP_COUNT; i++) {
+    int dist = g_ui_darkness - UI_DARKNESS_STEPS[i];
+    if (dist < 0) dist = -dist;
+    if (dist < best_dist) { best_dist = dist; best = i; }
+  }
+  return best;
+}
+// Repaint the five presets: the active one takes the scheme accent with a white
+// ring, the rest stay neutral. Called when the row is built and after every tap.
+static void darkness_steps_highlight(int selected) {
+  for (int i = 0; i < UI_DARKNESS_STEP_COUNT; i++) {
+    lv_obj_t *btn = darkness_step_btns[i];
+    if (!btn) continue;
+    const bool on = (i == selected);
+    lv_obj_set_style_bg_color(btn, on ? scheme_accent() : lv_color_hex(0x3A3A3A), 0);
+    lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(btn, on ? 2 : 1, 0);
+    lv_obj_set_style_border_color(btn, on ? lv_color_hex(0xFFFFFF) : lv_color_hex(0x555555), 0);
+  }
+}
+void darkness_step_cb(lv_event_t *e) {
+  const intptr_t idx = (intptr_t)lv_event_get_user_data(e);
+  if (idx < 0 || idx >= UI_DARKNESS_STEP_COUNT) return;
+  // apply_ui_darkness() also persists the value, so one tap is one flash write
+  // rather than the dozens a drag produced.
+  apply_ui_darkness(UI_DARKNESS_STEPS[idx]);
+  darkness_steps_highlight((int)idx);
 }
 // ---- Remote update policy --------------------------------------------------
 // The website publishes update/policy.json:
@@ -4311,7 +4391,7 @@ static void apply_theme_accent() {
                         &lv_font_montserrat_14);
 }
 // Push the active scheme through every object this app colours explicitly.
-// Mirrors the refresh darkness_slider_cb() already does for the light/dark
+// Mirrors the refresh apply_ui_darkness() already does for the light/dark
 // switch. Both displays rebuild their widgets, so both need a re-render.
 static void apply_color_scheme() {
   apply_theme_accent();
@@ -5263,6 +5343,19 @@ void loop() {
     updateFirmwareButton();
     maybeAutoUpdate();
     lastFirmwareCheck = currentTime;
+  }
+  // Offer a pending update on its own schedule, not only when the version is
+  // re-checked. offerFirmwareUpdate() refuses while any other dialog is up and
+  // leaves its "already offered" flag unset, so the 5-minute check alone meant a
+  // user who happened to be in Settings (or looking at an event) at that moment
+  // would not see the offer until the next check - five minutes later, and easy
+  // to miss again. Retrying every few seconds raises it as soon as the screen is
+  // free. The call is a version comparison plus a handful of null checks.
+  static unsigned long lastOfferCheck = 0;
+  if (currentTime - lastOfferCheck >= 5000UL && !is_ota_updating &&
+      WiFi.status() == WL_CONNECTED) {
+    lastOfferCheck = currentTime;
+    offerFirmwareUpdate();
   }
   if (currentTime - lastNotificationCheck >= notificationInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
     fetchNotifications();
