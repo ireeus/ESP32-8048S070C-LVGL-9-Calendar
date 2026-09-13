@@ -60,12 +60,22 @@ uint32_t millis_cb(void)
 {
   return millis();
 }
-// Rolling framebuffer-copy statistics, reported every 5s when debug is on.
-static uint32_t      flush_stat_us = 0;      // total time spent in the copy
-static uint32_t      flush_stat_px = 0;      // pixels copied
-static uint32_t      flush_stat_count = 0;   // flushes
-static uint32_t      flush_stat_max_us = 0;  // worst single flush
-static unsigned long flush_stat_since = 0;   // window start
+// Rolling draw statistics, reported every 5s when debug is on. Two windows are
+// kept on purpose, because they answer different questions:
+//   flush   = the copy out of the draw buffer into the panel framebuffer
+//   handler = the whole lv_task_handler() call, which contains the render AND the
+//             flush. If handler time is close to flush time the copy dominates and
+//             moving the buffer would not help much; if handler is much larger, the
+//             render does, and where the draw buffer lives is what matters.
+static uint32_t      flush_stat_us = 0;       // total time spent in the copy
+static uint32_t      flush_stat_px = 0;       // pixels copied
+static uint32_t      flush_stat_count = 0;    // flushes
+static uint32_t      flush_stat_max_us = 0;   // worst single flush
+static uint32_t      handler_stat_us = 0;     // total time inside lv_task_handler
+static uint32_t      handler_stat_max_us = 0; // worst single call
+static uint32_t      handler_stat_count = 0;
+static uint32_t      handler_stat_slow = 0;   // calls over a 33ms frame budget
+static unsigned long draw_stat_since = 0;     // window start
 void my_disp_flush(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
 {
   uint32_t w = lv_area_get_width(area);
@@ -73,8 +83,7 @@ void my_disp_flush(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
   // Every flush is a copy out of the LVGL draw buffer into the panel framebuffer,
   // and because the panel's DMA reads PSRAM directly the driver then has to write
   // that range back out of the CPU cache (auto_flush is true). So the flush is the
-  // one place where the panel's real cost shows up. Timed here, reported below,
-  // so a performance question can be answered with numbers instead of guesses.
+  // one place where the panel's real cost shows up.
   const uint32_t t0 = micros();
   gfx.draw16bitRGBBitmap(area->x1, area->y1, (uint16_t *)px_map, w, h);
   const uint32_t spent = micros() - t0;
@@ -82,22 +91,27 @@ void my_disp_flush(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
   flush_stat_px += w * h;
   flush_stat_count++;
   if (spent > flush_stat_max_us) flush_stat_max_us = spent;
-  if (debug == 1 && (millis() - flush_stat_since) >= 5000UL && flush_stat_count) {
-    const uint32_t ms = millis() - flush_stat_since;
-    // Throughput is the number that matters: if it is far below the ~30fps the
-    // 33ms refresh period asks for, the copy is the bottleneck.
-    const float kpx_s = (float)flush_stat_px / 1000.0f / ((float)ms / 1000.0f);
-    Serial.printf("[DRAW] %lu flushes in %lums: avg %.2fms, max %.2fms, %.0f kpx/s\n",
-                  (unsigned long)flush_stat_count, (unsigned long)ms,
-                  (float)flush_stat_us / 1000.0f / (float)flush_stat_count,
-                  (float)flush_stat_max_us / 1000.0f, kpx_s);
-    flush_stat_us = 0;
-    flush_stat_px = 0;
-    flush_stat_count = 0;
-    flush_stat_max_us = 0;
-    flush_stat_since = millis();
-  }
   lv_disp_flush_ready(disp);
+}
+static void reportDrawStats() {
+  if (debug != 1) return;
+  const unsigned long now = millis();
+  if (draw_stat_since == 0) { draw_stat_since = now; return; }
+  if (now - draw_stat_since < 5000UL) return;
+  const uint32_t ms = now - draw_stat_since;
+  if (!handler_stat_count) { draw_stat_since = now; return; }
+  const float kpx_s = (float)flush_stat_px / 1000.0f / ((float)ms / 1000.0f);
+  Serial.printf("[DRAW] %lums: handler avg %.2fms max %.2fms (%lu over 33ms) | "
+                "flush %lu x avg %.2fms max %.2fms %.0f kpx/s\n",
+                (unsigned long)ms,
+                (float)handler_stat_us / 1000.0f / (float)handler_stat_count,
+                (float)handler_stat_max_us / 1000.0f, (unsigned long)handler_stat_slow,
+                (unsigned long)flush_stat_count,
+                flush_stat_count ? (float)flush_stat_us / 1000.0f / (float)flush_stat_count : 0.0f,
+                (float)flush_stat_max_us / 1000.0f, kpx_s);
+  flush_stat_us = 0; flush_stat_px = 0; flush_stat_count = 0; flush_stat_max_us = 0;
+  handler_stat_us = 0; handler_stat_max_us = 0; handler_stat_count = 0; handler_stat_slow = 0;
+  draw_stat_since = now;
 }
 // ---------------------------------------------------------------------------
 // Touch: read the GT911 directly instead of through TAMC_GT911::read()
@@ -296,22 +310,63 @@ void setup_display()
   lv_tick_set_cb(millis_cb);
   screenWidth = gfx.width();
   screenHeight = gfx.height();
-  // One draw buffer, 240 rows: 800 * 240 * 2 bytes = 384KB, exactly what the old
-  // pair of buffers cost. Two changes here, both free:
+  // ---- draw buffer: where it lives matters more than how big it is ----------
+  // Rendering touches each pixel several times (the background image blit, then
+  // every widget drawn on top, and every alpha blend reads the destination back to
+  // mix it). In PSRAM all of that goes through the cache and competes with the RGB
+  // panel's DMA, which is reading 768KB per frame out of the same memory the whole
+  // time. Internal SRAM has none of that contention.
   //
-  //  * lv_display_set_buffers() wants the size in BYTES - it computes the height
-  //    as buf_size / stride, with stride 800 * 2 = 1600 (see lv_display.c). The
-  //    old call passed bufSize, a pixel count, so LVGL took 96000 BYTES and got
-  //    96000 / 1600 = 60 rows out of a buffer that could hold 120. Half of each
-  //    allocation - 192KB in total - was never drawn into.
-  //  * The second buffer bought nothing. my_disp_flush() copies synchronously and
-  //    signals flush_ready before it returns, so there is never a flush in flight
-  //    for another buffer to overlap with - rendering and copying just alternate.
-  //    Giving the whole 384KB to a single buffer cuts a full-screen repaint from
-  //    eight flushes of 60 rows to two of 240, each one larger and cheaper.
-  bufSize = screenWidth * 240; // pixels
+  // There is not room for 384KB of SRAM: the Settings meter reports roughly 173KB
+  // free of the 320KB internal pool once WiFi and TLS are up, and LVGL's own 128KB
+  // pool is a static array that does not even appear in that meter. So the SRAM
+  // option is a SMALLER buffer - 48 rows is 76.8KB - which trades more flushes
+  // (ten per full screen instead of two) for a much faster render. The bytes the
+  // flush copies are the same either way, so what is lost is only per-flush
+  // overhead and what is gained is every render pass.
+  //
+  //  * lv_display_set_buffers() wants the size in BYTES - it gets the height from
+  //    buf_size / stride (see lv_display.c). An earlier version passed a pixel
+  //    count, so LVGL used 60 rows of a 120-row buffer and half of it was dead.
+  //  * One buffer, not two: my_disp_flush() copies synchronously and signals
+  //    flush_ready before returning, so there is never a flush in flight for a
+  //    second buffer to overlap with.
+#define DRAW_BUF_PREFER_INTERNAL 1                    // 0 = always the big PSRAM buffer
+#define DRAW_BUF_INTERNAL_ROWS   48                   // 800 * 48 * 2  = 76.8KB
+#define DRAW_BUF_PSRAM_ROWS      240                  // 800 * 240 * 2 = 384KB
+#define DRAW_BUF_RAM_RESERVE     (128 * 1024)         // left for WiFi/TLS afterwards
+  bufSize = screenWidth * DRAW_BUF_PSRAM_ROWS; // pixels
+#if DRAW_BUF_PREFER_INTERNAL
+  {
+    const size_t want = (size_t)screenWidth * DRAW_BUF_INTERNAL_ROWS * sizeof(lv_color_t);
+    const size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (free_internal > want + DRAW_BUF_RAM_RESERVE) {
+      lv_color_t *p = (lv_color_t *)heap_caps_malloc(want, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+      if (p) {
+        disp_draw_buf = p;
+        bufSize = screenWidth * DRAW_BUF_INTERNAL_ROWS;
+        Serial.printf("Draw buffer: %uKB in INTERNAL SRAM (%d rows) - %uKB was free, %uKB left\n",
+                      (unsigned)(want / 1024), DRAW_BUF_INTERNAL_ROWS,
+                      (unsigned)(free_internal / 1024),
+                      (unsigned)((free_internal - want) / 1024));
+      } else {
+        Serial.println("Draw buffer: internal SRAM allocation failed, falling back to PSRAM");
+      }
+    } else {
+      Serial.printf("Draw buffer: internal SRAM skipped - %uKB free, need %uKB + %uKB reserve\n",
+                    (unsigned)(free_internal / 1024), (unsigned)(want / 1024),
+                    (unsigned)(DRAW_BUF_RAM_RESERVE / 1024));
+    }
+  }
+#endif
   size_t buffer_bytes = (size_t)bufSize * sizeof(lv_color_t); // sizeof(lv_color_t) == 2
-  disp_draw_buf = (lv_color_t *)(psram_available ? heap_caps_malloc(buffer_bytes, MALLOC_CAP_SPIRAM) : heap_caps_malloc(buffer_bytes, MALLOC_CAP_8BIT));
+  if (!disp_draw_buf) {
+    bufSize = screenWidth * DRAW_BUF_PSRAM_ROWS;
+    buffer_bytes = (size_t)bufSize * sizeof(lv_color_t);
+    disp_draw_buf = (lv_color_t *)(psram_available ? heap_caps_malloc(buffer_bytes, MALLOC_CAP_SPIRAM) : heap_caps_malloc(buffer_bytes, MALLOC_CAP_8BIT));
+    Serial.printf("Draw buffer: %uKB in %s (%d rows)\n", (unsigned)(buffer_bytes / 1024),
+                  psram_available ? "PSRAM" : "SRAM", (int)(bufSize / screenWidth));
+  }
   if (!disp_draw_buf)
   {
     Serial.println("Failed to allocate LVGL display buffer! Halting...");
@@ -319,6 +374,7 @@ void setup_display()
   }
   Serial.println("LVGL display buffer allocated");
   Serial.printf("Free heap after buffer: %d bytes\n", heap_caps_get_free_size(MALLOC_CAP_8BIT));
+  Serial.printf("Free internal heap: %d bytes\n", heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
   Serial.printf("Free PSRAM after buffer: %d bytes\n", heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
   disp = lv_display_create(screenWidth, screenHeight);
   lv_display_set_flush_cb(disp, my_disp_flush);
@@ -333,7 +389,15 @@ void setup_display()
 }
 void loop_display()
 {
+  const uint32_t t0 = micros();
   lv_task_handler();
+  const uint32_t spent = micros() - t0;
+  handler_stat_us += spent;
+  handler_stat_count++;
+  if (spent > handler_stat_max_us) handler_stat_max_us = spent;
+  // LVGL's refresh period is 33ms, so anything past that is a dropped frame.
+  if (spent > 33000UL) handler_stat_slow++;
+  reportDrawStats();
   delay(5);
 }
 #endif // DISPLAY_H

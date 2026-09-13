@@ -18,8 +18,8 @@ extern const lv_font_t lv_font_montserrat_14_bold;
 // Build version
 // Must be HIGHER than whatever update/version.json currently advertises, or the
 // device will keep offering (and auto-installing) a build that is not actually
-// newer. The site was on 2.2.5 when this was written.
-const String build_version = "2.2.6";
+// newer. The site was on 2.2.6 when this was written.
+const String build_version = "2.2.7";
 int debug =0; // Change to 1 to enable serial prints
 // Firmware check interval variable
 // Was 100000UL, which is 100 SECONDS, not the 5 minutes the comment claimed - so
@@ -447,7 +447,7 @@ String last_ignored_notification = "";
 String current_notification_text = "";
 String backgroundFilename = ""; // New: Store the background image filename
 // OTA variables
-String currentFirmwareVersion = "2.2.6"; // replaced by build_version in setup()
+String currentFirmwareVersion = "2.2.7"; // replaced by build_version in setup()
 String latestFirmwareVersion = "";
 String firmwareUrl = "";
 WiFiClientSecure client;
@@ -4479,6 +4479,9 @@ void fetchThemeConfig() {
     return;
   }
   int darkness = doc["darkness"] | -1;
+  // Whether the website asked for Auto brightness. Absent (an older
+  // device-theme.php) reads as false, which leaves the device's own choice alone.
+  const bool web_auto = doc["auto"] | false;
   String scheme = doc["scheme"].as<String>();
   scheme.trim();
 
@@ -4487,7 +4490,7 @@ void fetchThemeConfig() {
   // the same values on the site must not overwrite a colour picked on the device.
   // A "backlight" key may still be present in the response; it is ignored on
   // purpose, because the panel cannot be dimmed (see display.h).
-  String sig = scheme + "|" + String(darkness);
+  String sig = scheme + "|" + String(darkness) + "|" + (web_auto ? "1" : "0");
   if (sig == themeSignature) return; // unchanged: leave the local choice alone
 
   if (scheme.length()) {
@@ -4510,13 +4513,23 @@ void fetchThemeConfig() {
       if (debug == 1) Serial.println("[THEME] scheme set from server: " + scheme);
     }
   }
-  // Compare against the last value the SITE sent, not against the current
-  // darkness. While Auto is running the current darkness changes with the clock,
-  // so comparing to it would make every scheme change on the site look like a
+  // Brightness, as chosen on the website.
+  //
+  // These compare against the last value the SITE sent, not against the current
+  // darkness. While Auto is running the current darkness moves with the clock, so
+  // comparing to it would make every scheme change on the site look like a
   // brightness change - it would cancel Auto and snap the screen to the site's
-  // stored level. Only a real change of the site's own value counts, and that is
-  // an explicit choice, so it wins over Auto.
-  if (darkness >= 0 && darkness <= 100 && darkness != g_web_darkness) {
+  // stored level. Only a real change of the site's own setting counts.
+  if (web_auto) {
+    if (!g_brightness_auto) {
+      g_brightness_auto = true;
+      preferences.begin("ui", false);
+      preferences.putBool("ui_brightness_auto", true);
+      preferences.end();
+      updateAutoBrightness(true);
+      if (debug == 1) Serial.println("[THEME] Auto brightness enabled from server");
+    }
+  } else if (darkness >= 0 && darkness <= 100 && darkness != g_web_darkness) {
     g_web_darkness = darkness;
     g_brightness_auto = false;
     preferences.begin("ui", false);
