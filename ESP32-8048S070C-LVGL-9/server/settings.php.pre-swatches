@@ -502,7 +502,7 @@ if (isset($_POST['save_theme']) && isset($_SESSION['user_id'])) {
     } else {
         $stmt = $db->prepare("INSERT OR REPLACE INTO user_theme (user_id, scheme, darkness, updated) VALUES (?, ?, ?, CURRENT_TIMESTAMP)");
         $stmt->execute([$_SESSION['user_id'], $scheme, $darkness]);
-        $theme_message = 'Theme saved - it applies to your Cron-Tab device only.';
+        $theme_message = 'Theme saved - it applies to your calendar only.';
     }
 }
 
@@ -901,30 +901,9 @@ if (!array_key_exists($active_tab, $TABS)) { $active_tab = 'calendar'; }
         .settings-tab { appearance:none; border:0; background:transparent; padding:.7rem 1.25rem; font-family:inherit;
             font-size:1rem; font-weight:700; color:var(--text-muted); cursor:pointer; border-bottom:3px solid transparent;
             margin-bottom:-2px; border-radius:8px 8px 0 0; transition:color .2s, background-color .2s, border-color .2s; }
-        .settings-tab:hover { color:var(--text-main); background:rgba(128,128,128,.15); }
+        .settings-tab:hover { color:var(--text-main); background:#f3f4f6; }
         .settings-tab.active { color:var(--text-main); border-bottom-color:var(--primary); }
         .settings-panel[hidden] { display:none; }
-
-        /* ---- colour scheme swatches ---- */
-        .theme-swatches { display:flex; flex-wrap:wrap; gap:.9rem; margin:.5rem 0 1.25rem; }
-        .theme-swatch { position:relative; display:flex; flex-direction:column; align-items:center;
-            gap:.35rem; cursor:pointer; }
-        /* Visually hidden but still focusable, so keyboard and screen readers work. */
-        .theme-swatch input { position:absolute; opacity:0; width:1px; height:1px; margin:0; }
-        .theme-swatch-dot { display:block; width:2.6rem; height:2.6rem; border-radius:9999px;
-            box-shadow:0 0 0 2px var(--border-light);
-            transition:transform .15s ease, box-shadow .15s ease; }
-        .theme-swatch:hover .theme-swatch-dot { transform:scale(1.08); }
-        /* Ring in the card colour, then an outer ring in the text colour, so the
-           selected dot reads against both a light and a dark page. */
-        .theme-swatch input:checked + .theme-swatch-dot {
-            box-shadow:0 0 0 2px var(--bg-card), 0 0 0 5px var(--text-main); }
-        .theme-swatch input:focus-visible + .theme-swatch-dot {
-            outline:2px solid var(--primary); outline-offset:3px; }
-        .theme-swatch-name { font-size:.72rem; color:var(--text-muted); }
-        .theme-swatch input:checked ~ .theme-swatch-name { color:var(--text-main); font-weight:700; }
-        /* Controls on these two panels save themselves, so the hint replaces the old button. */
-        .autosave-hint { font-size:.82rem; color:var(--text-muted); text-align:center; margin:.9rem 0 .2rem; }
 </style>
 </head>
 <body>
@@ -1013,32 +992,25 @@ if (!array_key_exists($active_tab, $TABS)) { $active_tab = 'calendar'; }
                         <form method="POST" class="form">
                             <input type="hidden" name="tab" value="themes">
                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf_token']); ?>">
-                            <!-- form.submit() omits the clicked button's name, so the controls below
-                                 need this to reach the save_theme handler at all. -->
-                            <input type="hidden" name="save_theme" value="1">
-                            <label class="text-base">Colour scheme</label>
-                            <div class="theme-swatches">
+                            <label for="themeScheme" class="text-base">Colour scheme</label>
+                            <select name="scheme" id="themeScheme" class="form-select">
                                 <?php foreach ($THEME_SCHEMES as $name => $cols): ?>
-                                    <label class="theme-swatch" title="<?php echo htmlspecialchars($name); ?>">
-                                        <input type="radio" name="scheme"
-                                               value="<?php echo htmlspecialchars($name); ?>"
-                                               <?php echo $name === (string)$user_theme['scheme'] ? 'checked' : ''; ?>
-                                               onchange="ctAutosave(this);">
-                                        <span class="theme-swatch-dot" style="background:<?php echo $cols[0]; ?>;"></span>
-                                        <span class="theme-swatch-name"><?php echo htmlspecialchars($name); ?></span>
-                                    </label>
+                                    <option value="<?php echo htmlspecialchars($name); ?>"
+                                        <?php echo $name === (string)$user_theme['scheme'] ? 'selected' : ''; ?>>
+                                        <?php echo htmlspecialchars($name); ?>
+                                    </option>
                                 <?php endforeach; ?>
-                            </div>
+                            </select>
                             <label for="themeDarkness" class="text-base">Brightness (0 = light, 100 = dark)</label>
                             <input type="range" name="darkness" id="themeDarkness" min="0" max="100"
                                    value="<?php echo (int)$user_theme['darkness']; ?>"
-                                   oninput="document.getElementById('themeDarknessValue').textContent=this.value;"
-                                   onchange="ctAutosave(this);">
+                                   oninput="document.getElementById('themeDarknessValue').textContent=this.value;">
                             <div class="flex items-center justify-center gap-3">
-                                <span>Brightness</span>
+                                <span style="display:inline-block;width:2rem;height:2rem;border-radius:9999px;background:<?php echo $THEME_SCHEMES[(string)$user_theme['scheme']][0]; ?>;"></span>
+                                <span>Accent preview</span>
                                 <span id="themeDarknessValue" class="font-mono"><?php echo (int)$user_theme['darkness']; ?></span>
                             </div>
-                            <p class="autosave-hint">Saves automatically.</p>
+                            <button type="submit" name="save_theme" class="cta-btn">Save my theme</button>
                         </form>
                     </div>
 
@@ -1051,33 +1023,28 @@ if (!array_key_exists($active_tab, $TABS)) { $active_tab = 'calendar'; }
                         <form method="POST" class="form">
                             <input type="hidden" name="tab" value="themes">
                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf_token']); ?>">
-                            <?php if ($is_admin): ?>
-                                <!-- form.submit() omits the clicked button's name, so the controls below
-                                     need this to reach the save_update_policy handler at all. -->
-                                <input type="hidden" name="save_update_policy" value="1">
-                            <?php endif; ?>
                             <div class="flex items-center justify-center">
                                 <input type="checkbox" name="auto_firmware_update" id="autoUpd" value="1" class="mr-2 h-5 w-5"
                                        <?php echo $policy['auto_firmware_update'] ? 'checked' : ''; ?>
-                                       <?php echo $is_admin ? 'onchange="ctAutosave(this);"' : 'disabled'; ?>>
+                                       <?php echo $is_admin ? '' : 'disabled'; ?>>
                                 <label for="autoUpd" class="text-base">Install firmware updates automatically</label>
                             </div>
                             <label class="text-base">Quiet window</label>
                             <div class="flex items-center justify-center gap-3">
-                                <select name="quiet_start" class="form-select" <?php echo $is_admin ? 'onchange="ctAutosave(this);"' : 'disabled'; ?>>
+                                <select name="quiet_start" class="form-select" <?php echo $is_admin ? '' : 'disabled'; ?>>
                                     <?php for ($h = 0; $h < 24; $h++): ?>
                                         <option value="<?php echo $h; ?>" <?php echo (int)$policy['quiet_start'] === $h ? 'selected' : ''; ?>><?php printf('%02d:00', $h); ?></option>
                                     <?php endfor; ?>
                                 </select>
                                 <span>to</span>
-                                <select name="quiet_end" class="form-select" <?php echo $is_admin ? 'onchange="ctAutosave(this);"' : 'disabled'; ?>>
+                                <select name="quiet_end" class="form-select" <?php echo $is_admin ? '' : 'disabled'; ?>>
                                     <?php for ($h = 0; $h < 24; $h++): ?>
                                         <option value="<?php echo $h; ?>" <?php echo (int)$policy['quiet_end'] === $h ? 'selected' : ''; ?>><?php printf('%02d:00', $h); ?></option>
                                     <?php endfor; ?>
                                 </select>
                             </div>
                             <?php if ($is_admin): ?>
-                                <p class="autosave-hint">Saves automatically.</p>
+                                <button type="submit" name="save_update_policy" class="cta-btn">Save update policy</button>
                                 <a href="firmware.php" class="cta-btn" style="background:#111827;">Upload firmware</a>
                             <?php else: ?>
                                 <p class="text-base">Only the administrator can change these.</p>
@@ -1158,15 +1125,6 @@ if (!array_key_exists($active_tab, $TABS)) { $active_tab = 'calendar'; }
                         console.error('Service Worker registration failed:', error);
                     });
             });
-        }
-        // Theme and update-policy controls save on change, so the pages have no Save
-        // button. Debounced so dragging the brightness slider posts once, not per pixel.
-        let ctAutosaveTimer = null;
-        function ctAutosave(el) {
-            if (!el || !el.form) return;
-            const form = el.form;
-            clearTimeout(ctAutosaveTimer);
-            ctAutosaveTimer = setTimeout(() => form.submit(), 250);
         }
         function toggleCityInput() {
             const locationType = document.getElementById('locationType').value;
