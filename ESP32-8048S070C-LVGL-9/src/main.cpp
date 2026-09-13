@@ -19,7 +19,7 @@ extern const lv_font_t lv_font_montserrat_14_bold;
 // Must be HIGHER than whatever update/version.json currently advertises, or the
 // device will keep offering (and auto-installing) a build that is not actually
 // newer. The site was on 2.2.6 when this was written.
-const String build_version = "2.2.10";
+const String build_version = "2.2.11";
 int debug =0; // Change to 1 to enable serial prints
 // Firmware check interval variable
 // Was 100000UL, which is 100 SECONDS, not the 5 minutes the comment claimed - so
@@ -454,7 +454,7 @@ String last_ignored_notification = "";
 String current_notification_text = "";
 String backgroundFilename = ""; // New: Store the background image filename
 // OTA variables
-String currentFirmwareVersion = "2.2.10"; // replaced by build_version in setup()
+String currentFirmwareVersion = "2.2.11"; // replaced by build_version in setup()
 String latestFirmwareVersion = "";
 String firmwareUrl = "";
 WiFiClientSecure client;
@@ -4501,7 +4501,23 @@ void fetchThemeConfig() {
   // A "backlight" key may still be present in the response; it is ignored on
   // purpose, because the panel cannot be dimmed (see display.h).
   String sig = scheme + "|" + String(darkness) + "|" + (web_auto ? "1" : "0");
-  if (sig == themeSignature) return; // unchanged: leave the local choice alone
+
+  // A local choice that has not reached the site yet is the newest thing there is:
+  // the site's copy is about to be overwritten by our own push, so leave the device
+  // alone. This is the protection the guard below was written for, and it must come
+  // first - the mode check that follows is only meaningful when nothing is pending.
+  if (themePushPending) return;
+
+  // Otherwise the device should end up matching the site. Skipping is only safe when
+  // the site has not changed AND the device already agrees about the MODE, because
+  // the mode is the part that does not survive a reboot: g_brightness_auto is
+  // re-read from prefs at boot, and a choice made just before a power cut never got
+  // pushed. themeSignature, by contrast, lives in flash and says only "the site has
+  // not changed since we last applied it" - it is no evidence that the runtime flag
+  // it describes still holds. Returning on the signature alone is exactly what left
+  // the device showing 100% (the site's stored darkness is 0, which is 100% bright)
+  // while the site said Auto.
+  if (sig == themeSignature && web_auto == g_brightness_auto) return;
 
   if (scheme.length()) {
     int idx = -1;
@@ -4525,11 +4541,15 @@ void fetchThemeConfig() {
   }
   // Brightness, as chosen on the website.
   //
-  // These compare against the last value the SITE sent, not against the current
-  // darkness. While Auto is running the current darkness moves with the clock, so
-  // comparing to it would make every scheme change on the site look like a
-  // brightness change - it would cancel Auto and snap the screen to the site's
+  // The LEVEL is compared against the last value the SITE sent, not against the
+  // current darkness. While Auto is running the current darkness moves with the
+  // clock, so comparing to it would make every scheme change on the site look like
+  // a brightness change - it would cancel Auto and snap the screen to the site's
   // stored level. Only a real change of the site's own setting counts.
+  //
+  // Both branches state the MODE as well as the level and are idempotent, so
+  // running this on every poll and at every boot converges the device on the site
+  // rather than only reacting to changes.
   if (web_auto) {
     if (!g_brightness_auto) {
       g_brightness_auto = true;
@@ -4537,22 +4557,41 @@ void fetchThemeConfig() {
       preferences.putBool("ui_brightness_auto", true);
       preferences.end();
       updateAutoBrightness(true);
-      if (debug == 1) Serial.println("[THEME] Auto brightness enabled from server");
+      Serial.println("[THEME] Auto brightness enabled from server");
     }
-  } else if (darkness >= 0 && darkness <= 100 && darkness != g_web_darkness) {
-    g_web_darkness = darkness;
-    g_brightness_auto = false;
-    preferences.begin("ui", false);
-    preferences.putInt("ui_web_darkness", g_web_darkness);
-    preferences.putBool("ui_brightness_auto", false);
-    preferences.end();
-    apply_ui_darkness(darkness);
-    if (debug == 1) Serial.println("[THEME] brightness set from server: " + String(darkness));
+  } else {
+    // The site says a fixed level, so Auto must not be running. The old code only
+    // turned Auto off as a side effect of the level having changed, which left the
+    // device able to sit in Auto while the site said otherwise.
+    const bool leaving_auto = g_brightness_auto;
+    if (leaving_auto) {
+      g_brightness_auto = false;
+      preferences.begin("ui", false);
+      preferences.putBool("ui_brightness_auto", false);
+      preferences.end();
+      Serial.println("[THEME] Auto brightness disabled from server");
+    }
+    // Apply the level when the site's own value changed - or when we have just left
+    // Auto, because the level on screen is then an Auto level rather than the
+    // site's, so it has to be replaced even if the number happens to match.
+    if (darkness >= 0 && darkness <= 100 && (leaving_auto || darkness != g_web_darkness)) {
+      g_web_darkness = darkness;
+      preferences.begin("ui", false);
+      preferences.putInt("ui_web_darkness", g_web_darkness);
+      preferences.end();
+      apply_ui_darkness(darkness);
+      Serial.println("[THEME] brightness set from server: " + String(darkness));
+    }
   }
-  themeSignature = sig;
-  preferences.begin("ui", false);
-  preferences.putString("theme_sig", themeSignature);
-  preferences.end();
+  // Written only on a real change of the site's value. The guard above no longer
+  // returns whenever the signature matches, so this block is now reached on every
+  // poll - and an unconditional write here would burn a flash sector a minute.
+  if (themeSignature != sig) {
+    themeSignature = sig;
+    preferences.begin("ui", false);
+    preferences.putString("theme_sig", themeSignature);
+    preferences.end();
+  }
 }
 // Send a theme chosen on the DEVICE back to the site, so the Themes tab shows the
 // same thing after a refresh. This is the mirror of fetchThemeConfig(), which has
