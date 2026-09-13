@@ -19,7 +19,7 @@ extern const lv_font_t lv_font_montserrat_14_bold;
 // Must be HIGHER than whatever update/version.json currently advertises, or the
 // device will keep offering (and auto-installing) a build that is not actually
 // newer. The site was on 2.2.6 when this was written.
-const String build_version = "2.2.11";
+const String build_version = "2.3.0";
 int debug =0; // Change to 1 to enable serial prints
 // Firmware check interval variable
 // Was 100000UL, which is 100 SECONDS, not the 5 minutes the comment claimed - so
@@ -105,7 +105,13 @@ static void brightness_steps_highlight(int active); // repaint the brightness ro
 static int  ui_brightness_active_button();      // 0 = Auto, 1..N = preset + 1
 static void updateAutoBrightness(bool force);   // recompute the level from the sun
 static void apply_ui_darkness_ex(int value, bool persist);
-static bool pushThemeToServer();                // send a local theme choice to the site
+// Send a local theme choice to the site. `fromSync` is true when a manual Sync
+// asked for it, which skips the retry backoff - the user asked for it right now.
+// The default argument belongs HERE (on the declaration) and not on the
+// definition: writing it on both is an error, and leaving this declaration as
+// pushThemeToServer() would declare a *second, zero-argument overload* that makes
+// every bare pushThemeToServer() call ambiguous.
+static bool pushThemeToServer(bool fromSync = false);
 // Colour-scheme helpers. Defined next to apply_calendar_theme() further down, but
 // declared here because the settings popup (which sits above them) calls
 // apply_theme_accent() to keep the theme's light/dark flag in step.
@@ -454,7 +460,7 @@ String last_ignored_notification = "";
 String current_notification_text = "";
 String backgroundFilename = ""; // New: Store the background image filename
 // OTA variables
-String currentFirmwareVersion = "2.2.11"; // replaced by build_version in setup()
+String currentFirmwareVersion = "2.3.0"; // replaced by build_version in setup()
 String latestFirmwareVersion = "";
 String firmwareUrl = "";
 WiFiClientSecure client;
@@ -4613,7 +4619,7 @@ void fetchThemeConfig() {
 // wait (the user asked for it right now) but still refreshes it.
 #define THEME_PUSH_RETRY_MS 5000
 static unsigned long lastThemePushAttempt = 0;
-static bool pushThemeToServer(bool fromSync = false) {
+static bool pushThemeToServer(bool fromSync) {
   if (!themePushPending) return true;
   if (WiFi.status() != WL_CONNECTED) return false;   // stays pending; retried when up
   if (apiCode.isEmpty()) return false;
