@@ -82,7 +82,7 @@
             <div class="contact-info">Contact us: <span>info@crontech.uk</span></div>
             <!-- If on a page without showMyBookings (like about.php), it routes them back to index.php -->
             <button class="btn-nav" id="btn-my-bookings" onclick="if(typeof showMyBookings === 'function') { showMyBookings(); } else { window.location.href='index.php'; } toggleMenu();" style="display:none;">My Bookings</button>
-            <a href="offers.php" class="btn-nav" style="text-decoration: none; display: inline-block;" onclick="toggleMenu();">Offers</a>
+            <a href="offers.php" class="btn-nav" style="text-decoration: none; display: inline-block;" onclick="toggleMenu();">CronSmart</a>
             <a href="about.php" class="btn-nav" style="text-decoration: none; display: inline-block;" onclick="toggleMenu();">About Us</a>
             <a href="verify.php" class="btn-nav" style="text-decoration: none; display: inline-block;" onclick="toggleMenu();">Verify Member</a>
             <a href="contact.php" class="btn-nav" style="text-decoration: none; display: inline-block;" onclick="toggleMenu();">Contact</a>
