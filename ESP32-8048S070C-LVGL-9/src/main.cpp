@@ -16,7 +16,7 @@ extern const lv_font_t technology_98;
 // embolden the event titles.
 extern const lv_font_t lv_font_montserrat_14_bold;
 // Build version
-const String build_version = "2.2.2";
+const String build_version = "2.2.3";
 int debug =0; // Change to 1 to enable serial prints
 // Firmware check interval variable
 // Was 100000UL, which is 100 SECONDS, not the 5 minutes the comment claimed - so
@@ -407,7 +407,7 @@ String last_ignored_notification = "";
 String current_notification_text = "";
 String backgroundFilename = ""; // New: Store the background image filename
 // OTA variables
-String currentFirmwareVersion = "2.2.2"; // replaced by build_version in setup()
+String currentFirmwareVersion = "2.2.3"; // replaced by build_version in setup()
 String latestFirmwareVersion = "";
 String firmwareUrl = "";
 WiFiClientSecure client;

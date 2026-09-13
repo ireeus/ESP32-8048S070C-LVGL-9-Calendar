@@ -21,6 +21,11 @@
 #define TOUCH_MAP_X2 0
 #define TOUCH_MAP_Y1 480
 #define TOUCH_MAP_Y2 0
+#define TOUCH_PANEL_W max(TOUCH_MAP_X1, TOUCH_MAP_X2)
+#define TOUCH_PANEL_H max(TOUCH_MAP_Y1, TOUCH_MAP_Y2)
+// Defined in main.cpp. Declared so the touch path can gate its (rare) logging on
+// the same flag as the rest of the firmware instead of printing every poll.
+extern int debug;
 // Initialize touchscreen object
 TAMC_GT911 ts(TOUCH_GT911_SDA, TOUCH_GT911_SCL, TOUCH_GT911_INT, TOUCH_GT911_RST, max(TOUCH_MAP_X1, TOUCH_MAP_X2), max(TOUCH_MAP_Y1, TOUCH_MAP_Y2));
 // RGB Panel configuration
@@ -62,29 +67,156 @@ void my_disp_flush(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
   gfx.draw16bitRGBBitmap(area->x1, area->y1, (uint16_t *)px_map, w, h);
   lv_disp_flush_ready(disp);
 }
+// ---------------------------------------------------------------------------
+// Touch: read the GT911 directly instead of through TAMC_GT911::read()
+//
+// That function is a memory-safety hazard on a flaky bus. It returns void, so
+// there is no way to see an I2C error, and it checks none of them either: a
+// failed transfer leaves Wire.read() returning -1, which makes pointInfo 0xFF,
+// so touches becomes 0xF = 15 and isTouched becomes true. It then runs
+//     for (uint8_t i = 0; i < touches; i++) points[i] = readPoint(data);
+// against `TP_Point points[5]` - ten elements past the end of a global object -
+// and reports whatever that memory held as a touch coordinate. The visible
+// symptom is a phantom finger pressed somewhere random, which swallows real taps,
+// plus a UI that crawls because every failed transfer blocks for the Wire timeout
+// and there are about seventeen of them per read.
+//
+// So the point-info byte is fetched here, validated, and only then acted on. A
+// bad value means "no touch", never a press, and a run of failures recovers the
+// bus instead of being ignored.
+//
+// setRotation(1) in setup_display() selects ROTATION_INVERTED, which the driver
+// implements as the identity mapping (x = x, y = y), so the register values are
+// already panel coordinates. If that rotation is ever changed, this must follow.
+// ---------------------------------------------------------------------------
+#define GT911_POINT_INFO_REG GT911_POINT_INFO  // 0x814E: flags + touch count
+#define GT911_POINT_1_REG    GT911_POINT_1     // 0x814F: first point block
+#define GT911_POINT_STRIDE   8                 // id(1) x(2) y(2) size(2) reserved(1)
+#define GT911_MAX_TOUCHES    5                 // matches the driver's points[5]
+// ~1/3 s of dead bus at LVGL's poll rate before trying to rescue it.
+#define TOUCH_FAILS_BEFORE_RECOVER 10
+#define TOUCH_RECOVER_INTERVAL_MS  10000UL
+
+static uint32_t    touch_fail_streak = 0;
+static unsigned long touch_last_recover_ms = 0;
+static bool        touch_have_point = false;  // last good coordinates
+static uint16_t    touch_x = 0;
+static uint16_t    touch_y = 0;
+
+// One register read, with the ACK and the byte count actually checked.
+static bool gt911_read_reg(uint16_t reg, uint8_t *buf, uint8_t len) {
+  Wire.beginTransmission(GT911_ADDR1);
+  Wire.write((uint8_t)(reg >> 8));
+  Wire.write((uint8_t)(reg & 0xFF));
+  if (Wire.endTransmission() != 0) return false; // not ACKed
+  if (Wire.requestFrom((uint8_t)GT911_ADDR1, len) != len) return false;
+  for (uint8_t i = 0; i < len; i++) buf[i] = (uint8_t)Wire.read();
+  return true;
+}
+static bool gt911_write_reg(uint16_t reg, uint8_t value) {
+  Wire.beginTransmission(GT911_ADDR1);
+  Wire.write((uint8_t)(reg >> 8));
+  Wire.write((uint8_t)(reg & 0xFF));
+  Wire.write(value);
+  return Wire.endTransmission() == 0;
+}
+// A slave interrupted mid-transaction can hold SDA low, which wedges the bus until
+// the power is removed - which is why a reboot, and even a reflash, does not clear
+// it. Clocking SCL by hand lets the slave finish its byte and let go.
+static void touch_bus_recover() {
+  Wire.end();
+  pinMode(TOUCH_GT911_SDA, INPUT_PULLUP);
+  pinMode(TOUCH_GT911_SCL, OUTPUT);
+  digitalWrite(TOUCH_GT911_SCL, HIGH);
+  delayMicroseconds(5);
+  for (int i = 0; i < 9 && digitalRead(TOUCH_GT911_SDA) == LOW; i++) {
+    digitalWrite(TOUCH_GT911_SCL, LOW);
+    delayMicroseconds(5);
+    digitalWrite(TOUCH_GT911_SCL, HIGH);
+    delayMicroseconds(5);
+  }
+  // A STOP condition, so the slave sees the transaction end cleanly.
+  pinMode(TOUCH_GT911_SDA, OUTPUT);
+  digitalWrite(TOUCH_GT911_SDA, LOW);
+  delayMicroseconds(5);
+  digitalWrite(TOUCH_GT911_SCL, HIGH);
+  delayMicroseconds(5);
+  digitalWrite(TOUCH_GT911_SDA, HIGH);
+  delayMicroseconds(5);
+  Wire.begin(TOUCH_GT911_SDA, TOUCH_GT911_SCL);
+  // Public, and re-provisions the controller (address, resolution, config).
+  ts.reset();
+}
 void my_touchpad_read(lv_indev_t *indev, lv_indev_data_t *data)
 {
-  ts.read();
-  if (ts.isTouched)
-  {
-    for (int i = 0; i < ts.touches; i++)
-    {
-      if (i == 0)
-      {
-        data->state = LV_INDEV_STATE_PRESSED;
-        data->point.x = ts.points[i].x;
-        data->point.y = ts.points[i].y;
-        // No Serial output here. This runs on every indev poll while a finger is
-        // down (tens of times a second), and the printf was not gated by the debug
-        // flag, so it added serial latency to every touch and made the UI feel
-        // like it had stopped responding.
+  (void)indev;
+  uint8_t pointInfo = 0;
+  const bool bus_ok = gt911_read_reg(GT911_POINT_INFO_REG, &pointInfo, 1);
+  const uint8_t touches = pointInfo & 0x0F;
+  const bool buffer_ready = (pointInfo >> 7) & 1;
+
+  // The controller reports at most five points, so anything above that is a
+  // corrupt byte rather than a report. This is the check the driver omits before
+  // walking off the end of points[5].
+  if (!bus_ok || touches > GT911_MAX_TOUCHES) {
+    touch_fail_streak++;
+    // Never leave the previous state standing: a stale PRESSED is exactly what
+    // holds a phantom finger down and eats the next real tap. Drop the cached
+    // point too, so a hiccup cannot be resumed from as a press at the old spot.
+    touch_have_point = false;
+    data->state = LV_INDEV_STATE_RELEASED;
+    data->point.x = 0;
+    data->point.y = 0;
+    if (touch_fail_streak >= TOUCH_FAILS_BEFORE_RECOVER &&
+        millis() - touch_last_recover_ms > TOUCH_RECOVER_INTERVAL_MS) {
+      touch_last_recover_ms = millis();
+      touch_fail_streak = 0;
+      if (debug == 1) Serial.println("[TOUCH] bus not responding - recovering");
+      touch_bus_recover();
+    }
+    return;
+  }
+  if (touch_fail_streak) {
+    if (debug == 1) Serial.println("[TOUCH] responding again");
+    touch_fail_streak = 0;
+  }
+
+  if (touches == 0) {
+    // A lift arrives as "ready" with zero touches. Clear the flag so the next
+    // scan can be reported, and forget the cached point.
+    if (buffer_ready) gt911_write_reg(GT911_POINT_INFO_REG, 0);
+    touch_have_point = false;
+    data->state = LV_INDEV_STATE_RELEASED;
+    return;
+  }
+
+  if (buffer_ready) {
+    uint8_t raw[7];
+    if (gt911_read_reg(GT911_POINT_1_REG, raw, sizeof(raw))) {
+      const uint16_t x = (uint16_t)(raw[1] | (raw[2] << 8));
+      const uint16_t y = (uint16_t)(raw[3] | (raw[4] << 8));
+      // A partial read shows up as coordinates outside the panel; ignore them
+      // rather than pressing at (0, 0) or wherever the garbage lands.
+      if (x <= TOUCH_PANEL_W && y <= TOUCH_PANEL_H) {
+        touch_x = x;
+        touch_y = y;
+        touch_have_point = true;
       }
     }
+    // Acknowledge the scan whether or not the point block read back cleanly.
+    gt911_write_reg(GT911_POINT_INFO_REG, 0);
   }
-  else
-  {
+  // The ready bit is not set on every scan while a finger is held still, so fall
+  // back to the last good coordinates. The driver behaved the same way (it kept
+  // the previous points[] and only re-read them when the bit was set), and that
+  // is what keeps press-and-hold and dragging working.
+  if (!touch_have_point) {
     data->state = LV_INDEV_STATE_RELEASED;
+    return;
   }
+  data->state = LV_INDEV_STATE_PRESSED;
+  data->point.x = touch_x;
+  data->point.y = touch_y;
 }
 void setup_display()
 {
