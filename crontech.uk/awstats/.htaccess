@@ -1,0 +1,5 @@
+Options -Indexes
+
+RewriteEngine On
+RewriteCond %{HTTP_HOST} ^www.crontech.uk$ [NC]
+RewriteRule ^(.*)$ http://crontech.uk/awstats/$1 [R=301,L]

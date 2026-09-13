@@ -1,0 +1,1440 @@
+AWSTATS DATA FILE 8.0 (build 20240604)
+# If you remove this file, all statistics for date 202606 will be lost/reset.
+# Last config file used to build this data file was /home/host908429/domains/crontech.uk/awstats/.data/awstats.www.crontech.uk.conf.
+
+# Position (offset in bytes) in this file for beginning of each section for
+# direct I/O access. If you made changes somewhere in this file, you should
+# also remove completely the MAP section (AWStats will rewrite it at next
+# update).
+BEGIN_MAP 30
+POS_GENERAL 2177                
+POS_TIME 2862                
+POS_VISITOR 28053               
+POS_DAY 36224               
+POS_DOMAIN 3808                
+POS_LOGIN 4273                
+POS_ROBOT 4428                
+POS_WORMS 5222                
+POS_EMAILSENDER 5353                
+POS_EMAILRECEIVER 5496                
+POS_SESSION 37162               
+POS_FILESIZE 37698               
+POS_REQUESTTIME 37840               
+POS_SIDER 37360               
+POS_FILETYPES 5631                
+POS_DOWNLOADS 5860                
+POS_OS 5927                
+POS_BROWSER 6293                
+POS_SCREENSIZE 8088                
+POS_UNKNOWNREFERER 8162                
+POS_UNKNOWNREFERERBROWSER 8870                
+POS_ORIGIN 9074                
+POS_SEREFERRALS 9215                
+POS_PAGEREFS 9410                
+POS_SEARCHWORDS 9681                
+POS_KEYWORDS 9833                
+POS_MISC 2526                
+POS_ERRORS 9892                
+POS_CLUSTER 4129                
+POS_SIDER_400 10023               
+POS_SIDER_403 10105               
+POS_SIDER_404 11009               
+END_MAP
+
+# LastLine    = Date of last record processed - Last record line number in last log - Last record offset in last log - Last record signature value
+# FirstTime   = Date of first visit for history file
+# LastTime    = Date of last visit for history file
+# LastUpdate  = Date of last update - Nb of parsed records - Nb of parsed old records - Nb of parsed new records - Nb of parsed corrupted - Nb of parsed dropped
+# TotalVisits = Number of visits
+# TotalUnique = Number of unique visitors
+# MonthHostsKnown   = Number of hosts known
+# MonthHostsUnKnown = Number of hosts unknown
+BEGIN_GENERAL 8
+LastLine 20260701000001 2374 280030 6756294217417
+FirstTime 20260601000027
+LastTime 20260630235907
+LastUpdate 20260701015556 2374 0 2373 0 0
+TotalVisits 280                 
+TotalUnique 208                 
+MonthHostsKnown 0                   
+MonthHostsUnknown 211                 
+END_GENERAL
+
+# Misc ID - Pages - Hits - Bandwidth
+BEGIN_MISC 10
+AddToFavourites 0 5 0
+JavaEnabled 0 0 0
+WindowsMediaPlayerSupport 0 0 0
+JavascriptDisabled 0 0 0
+PDFSupport 0 0 0
+TotalMisc 0 0 0
+DirectorSupport 0 0 0
+QuickTimeSupport 0 0 0
+FlashSupport 0 0 0
+RealPlayerSupport 0 0 0
+END_MISC
+
+# Hour - Pages - Hits - Bandwidth - Not viewed Pages - Not viewed Hits - Not viewed Bandwidth
+BEGIN_TIME 24
+0 2926 2926 2624279 17 48 78763
+1 2994 2994 2747949 32 84 152788
+2 2949 2958 2928109 61 104 168642
+3 2929 2929 2620847 43 79 160468
+4 2944 2953 2946640 49 114 200775
+5 3003 3004 2717039 48 149 224618
+6 3048 3048 2760013 44 150 212958
+7 3073 3073 2862539 83 269 2308764
+8 3062 3063 2789806 207 388 584526
+9 3019 3020 2800641 381 471 819033
+10 3038 3043 4084763 23 65 143023
+11 2951 2957 4662131 35 85 184014
+12 2946 2946 2673523 40 90 182256
+13 2941 2945 4397838 43 133 216187
+14 2906 2906 2608241 42 106 297225
+15 2896 2896 2547755 22 81 128587
+16 2888 2888 2543501 28 103 168441
+17 2926 2927 2586732 31 106 222474
+18 2921 2921 2593628 38 88 169443
+19 2939 2960 4785805 46 91 180771
+20 2885 2890 4452103 97 140 228165
+21 2824 2824 2470108 31 77 142800
+22 2779 2779 2428450 29 77 114605
+23 2882 2883 2956819 17 63 97914
+END_TIME
+
+# Domain - Pages - Hits - Bandwidth
+# The 10 first Pages must be first (order not required for others)
+BEGIN_DOMAIN 17
+gb 70284 70287 61172222
+us 219 262 5308852
+pl 73 73 881358
+se 21 21 85762
+de 17 28 3469259
+fr 12 13 506419
+cn 12 12 49051
+nl 12 12 69423
+ca 7 12 1974548
+fi 3 3 12310
+sg 1 1 4611
+lu 1 1 13961
+tn 1 1 4091
+es 1 1 13406
+ru 1 1 4277
+br 3 4 15101
+sc 1 1 4608
+END_DOMAIN
+
+# Cluster ID - Pages - Hits - Bandwidth
+BEGIN_CLUSTER 0
+END_CLUSTER
+
+# Login - Pages - Hits - Bandwidth - Last visit
+# The 10 first Pages must be first (order not required for others)
+BEGIN_LOGIN 0
+END_LOGIN
+
+# Robot ID - Hits - Bandwidth - Last visit - Hits on robots.txt
+# The 10 first Hits must be first (order not required for others)
+BEGIN_ROBOT 18
+Go\-http\-client/ 49 23144 20260629182105 0
+ning 30 388144 20260628195351 0
+Googlebot/ 29 105324 20260630212000 0
+360Spider 19 77244 20260629142309 0
+dataprovider\.com 19 2028549 20260613141044 0
+core 10 4500 20260625200138 0
+bot[\s_+:,\.\;\/\\-] 9 32745 20260613024408 0
+checker 8 31718 20260604183204 0
+^mozilla\/5\.0$ 4 31903 20260626020904 0
+no_user_agent 4 46764 20260616140651 0
+curl 1 4091 20260614185039 0
+CheckMarkNetwork/ 2 4407 20260610165754 0
+[\s_+:,\.\;\/\\-]bot 1 4277 20260618014435 0
+python 2 8182 20260623140943 0
+bingbot/ 3 8984 20260620210406 0
+scrapy 3 13163 20260620142447 0
+crawl 2 8849 20260601145412 0
+netcraft 3 37494 20260612170031 0
+END_ROBOT
+
+# Worm ID - Hits - Bandwidth - Last visit
+# The 5 first Hits must be first (order not required for others)
+BEGIN_WORMS 0
+END_WORMS
+
+# EMail - Hits - Bandwidth - Last visit
+# The 20 first Hits must be first (order not required for others)
+BEGIN_EMAILSENDER 0
+END_EMAILSENDER
+
+# EMail - Hits - Bandwidth - Last visit
+# The 20 first hits must be first (order not required for others)
+BEGIN_EMAILRECEIVER 0
+END_EMAILRECEIVER
+
+# Files type - Hits - Bandwidth - Bandwidth without compression - Bandwidth after compression
+BEGIN_FILETYPES 9
+svg 1 1231 0 0
+woff2 2 127165 0 0
+png 7 3093809 0 0
+css 3 71897 0 0
+json 25023 14238087 0 0
+js 36 785021 0 0
+mp4 14 6070250 0 0
+php 45646 49201080 0 0
+log 1 719 0 0
+END_FILETYPES
+
+# Downloads - Hits - Bandwidth
+BEGIN_DOWNLOADS 1
+/debug.log 1 0 719
+END_DOWNLOADS
+
+# OS ID - Hits
+BEGIN_OS ID - Hits - Pages 22
+macosx13 7 7
+linuxubuntu 1 1
+win8.1 4 4
+Unknown 70288 70288
+macosx8 1 1
+macintosh 51 51
+win7 16 15
+linux 61 54
+androidmarshmallow 2 2
+win10 187 153
+android10 6 3
+macosx12 4 4
+macosx11 5 5
+macosx10 1 1
+ios_iphone 6 6
+android 3 3
+win8 1 1
+android13 1 1
+macosx9 1 1
+macosx15 78 59
+macosx14 6 6
+unix 3 3
+END_OS
+
+# Browser ID - Hits - Pages
+BEGIN_BROWSER 83
+chrome136.0.7103.84 2 2
+chrome136.0.0.0 53 53
+safari17.0 5 5
+firefox43.0 1 1
+chrome120.0.0.0 8 8
+safari18.3.1 1 1
+firefox115 3 3
+chrome124.0 3 2
+chrome136.0.8900.41 3 3
+firefox121.0 1 1
+chrome77.0.3865.19 1 0
+chrome148.0.0.0 3 1
+chrome136.0.7103.50 1 1
+chrome124.0.0.0 24 15
+chrome136.0.7103.63 2 2
+chrome131.0.0.0 14 4
+chrome111.0.0.0 62 62
+chrome136.0.7103.64 1 1
+chrome116.0.0.0 2 2
+chrome136.0.7103.66 1 1
+chrome144.0.0.0 1 1
+chrome148.0.7778.96 2 2
+chrome136.0.7103.99 4 4
+safari6.0 1 1
+chrome29.0.1547.66 1 1
+chrome136.0.7103.60 3 3
+opera80.4.4244.7786 1 1
+chrome136.0.7103.62 3 3
+chrome77.0.3865.120 1 1
+chrome112.0.5615.136 1 1
+chrome99.0.4844.51 1 1
+firefox127.0 1 1
+safari 1 1
+firefox142.0 10 10
+chrome95.0.4638.69 12 12
+chrome50.0.2661.102 12 12
+chrome123.0.0.0 15 6
+chrome136.0.7103.51 1 1
+chrome134.0.0.0 2 2
+chrome142.0.0.0 30 30
+chrome136.0.7103.81 2 2
+chrome122.0.0.0 2 2
+chrome105.0.0.0 7 7
+chrome136.0.7103.93 1 1
+chrome136.0.7103.52 2 2
+chrome117.0.5938.132 21 2
+chrome136.0.7103.49 2 2
+chrome136.0.7103.97 3 3
+chrome128.0.0.0 4 3
+mozilla 10 10
+chrome135.0.0.0 2 2
+chrome80.0.3987.162 2 2
+chrome91.0.4472.114 1 1
+firefox123 2 2
+iphone 1 1
+chrome45.0.6815.1015 1 1
+chrome136.0.7103.65 1 1
+chrome132.0.0.0 1 1
+chrome149.0.0.0 9 3
+chrome136.0.7103.61 3 3
+chrome136.0.7103.59 4 4
+chrome147.0.0.0 5 5
+chrome146.0.7680.165 2 1
+chrome136.0.7103.56 1 1
+chrome137.0.0.0 7 6
+chrome139.0.0.0 2 2
+chrome145.0.0.0 8 8
+safari13.0.4 12 12
+chrome136.0.7103.54 2 2
+firefox126.0 1 1
+firefox149.0 12 12
+chrome125.0.0.0 2 2
+chrome136.0.7103.48 3 3
+netscape5.0 3 3
+firefox55.0 1 1
+chrome121.0.0.0 4 4
+chrome131.0.6778.86 1 1
+safari17.3.1 1 1
+Unknown 70276 70276
+chrome106.0.0.0 8 4
+chrome146.0.0.0 5 5
+chrome136.0.7103.85 1 1
+chrome126.0.0.0 1 1
+END_BROWSER
+
+# Screen size - Hits
+BEGIN_SCREENSIZE 0
+END_SCREENSIZE
+
+# Unknown referer OS - Last visit date
+BEGIN_UNKNOWNREFERER 10
+Mozilla/5.0_(compatible;_InternetMeasurement/1.0;__https://internet-measurement.com/) 20260613194407
+Mozilla/5.0_(compatible;_uk-leads-fresh/0.2;__https://example.com) 20260619033813
+Mozilla/5.0_(compatible;_CensysInspect/1.1;__https://about.censys.io/) 20260621083928
+ESP32HTTPClient 20260630235907
+Mozilla/5.0_(NextF-Detector) 20260606231041
+Mozilla/5.0_(compatible;_InsolvencyTracker/1.0) 20260605141702
+Goosee-Audit/1.0_(_internal-security-audit) 20260611105219
+MobileSafari/600.1.4_CFNetwork/711.1.12_Darwin/14.0.0 20260625190139
+Mozilla/5.0_(compatible;_RecScan/2.0) 20260621070919
+RootEvidence/1.0 20260603073537
+END_UNKNOWNREFERER
+
+# Unknown referer Browser - Last visit date
+BEGIN_UNKNOWNREFERERBROWSER 3
+Goosee-Audit/1.0_(_internal-security-audit) 20260611105219
+ESP32HTTPClient 20260630235907
+RootEvidence/1.0 20260603073537
+END_UNKNOWNREFERERBROWSER
+
+# Origin - Pages - Hits 
+BEGIN_ORIGIN 6
+From0 70616 70619
+From1 0 0
+From2 6 6
+From3 3 36
+From4 44 72
+From5 0 0
+END_ORIGIN
+
+# Search engine referers ID - Pages - Hits
+BEGIN_SEREFERRALS 3
+www_google_com 2 2
+duckduckgo 2 2
+www_bing_com 2 2
+END_SEREFERRALS
+
+# External page referers - Pages - Hits
+# The 10 first Pages must be first (order not required for others)
+BEGIN_PAGEREFS 3
+http://mail.crontech.uk 3 3
+https://mail.crontech.uk/skins/elastic/styles/styles.min.css 0 2
+https://mail.crontech.uk 0 31
+END_PAGEREFS
+
+# Search keyphrases - Number of search
+# The 10 first number of search must be first (order not required for others)
+BEGIN_SEARCHWORDS 0
+END_SEARCHWORDS
+
+# Search keywords - Number of search
+# The 10 first number of search must be first (order not required for others)
+BEGIN_KEYWORDS 0
+END_KEYWORDS
+
+# Errors - Hits - Bandwidth
+BEGIN_ERRORS 4
+404 2777 4277163
+301 27 28123
+302 1 560
+403 102 166598
+END_ERRORS
+
+# URL with 400 errors - Hits - Last URL referrer
+BEGIN_SIDER_400 0
+END_SIDER_400
+
+# URL with 403 errors - Hits - Last URL referrer
+BEGIN_SIDER_403 37
+/build/.git/config 2 -
+/backend/.git/config 2 -
+/api/.git/config 2 -
+/wordpress/.git/config 2 -
+/wp-content/.git/config 2 -
+/blog/.git/config 2 -
+/sitemap.xml 1 -
+/.htaccess 1 -
+/symfony/.git/config 2 -
+/.htpasswd 1 -
+/uploads/ 1 binance.com
+/robots.txt 7 -
+/laravel/.git/config 2 -
+/app/.git/config 2 -
+/.git/HEAD 2 -
+/web/.git/config 2 -
+/assets/.git/config 2 -
+/src/.git/config 2 -
+/html/.git/config 2 -
+/site/.git/config 2 -
+/portal/.git/config 2 -
+/v2/.git/config 2 -
+/dashboard/.git/config 2 -
+/frontend/.git/config 2 -
+/ 21 https://www.crontech.uk/
+/www/.git/config 2 -
+/shop/.git/config 2 -
+/dist/.git/config 2 -
+/static/.git/config 2 -
+/v3/.git/config 2 -
+/v1/.git/config 2 -
+/code/.git/config 2 -
+/.git/config 10 -
+/project/.git/config 2 -
+/htdocs/.git/config 2 -
+/admin/.git/config 2 -
+/public/.git/config 2 -
+END_SIDER_403
+
+# URL with 404 errors - Hits - Last URL referrer
+BEGIN_SIDER_404 729
+/jolokia 2 -
+/webshell 9 -
+/api/database.yml 1 -
+/app/docker-compose.yml 1 -
+/wp-ccv.php 1 -
+/services/config.json 1 -
+/wp-json/ 2 -
+/.drone.yml 1 -
+/internal/.env.production 1 -
+/v1/config.json 1 -
+//wp1/wp-includes/wlwmanifest.xml 6 -
+/api/.env.local 1 -
+/profiler 1 -
+/api/.env.backup 1 -
+/administrator/ 1 -
+/rip.php 1 -
+/.idea/dataSources.local.xml 1 -
+/crgio.php 1 -
+/deploy/service-account.json 1 -
+/api/.env.bak 1 -
+/wp-config.php 1 -
+/.well-known/ 1 binance.com
+/src/.env 1 -
+/internal/credentials.json 1 -
+/INSTALL.txt 2 -
+/phpinfo.php 1 -
+/api/env 1 -
+/src/application.yml 1 -
+/app/.env.dev 1 -
+//2021/wp-includes/wlwmanifest.xml 6 -
+/api/application.yml 1 -
+//c1279ab7-60d0-11f1-b0b2-fbd6542ee4dc 1 -
+/.gitlab-ci.yml 1 -
+/services/database.yml 1 -
+/db.sql 1 -
+/sql/db.sql 1 -
+/frontend/.env.dev 1 -
+/internal/.env 1 -
+/packages/api/.env 1 -
+/.continue/config.json 1 https://www.google.com/search
+/.env.production.bak 1 -
+/.docker/config.json 1 -
+/backend/database.php 1 -
+/api/v1/config.json 1 -
+/about-us 1 -
+/info.php 1 -
+/aws.json 1 -
+/settings.py 1 -
+/app/.env.staging 1 -
+/production/.env 1 -
+/secrets.env 1 -
+/terms 2 -
+/pedodont.php 1 -
+/backups/dump.sql 1 -
+/app/config/parameters.yaml 1 -
+/wp-login.php 22 -
+/Dockerfile 1 -
+/test.php 1 -
+/api/config.php 1 -
+/src/database.yml 1 -
+/.drone.yaml 1 -
+/src/settings.json 1 -
+/awp-careers.php 1 -
+/shell.php 10 -
+/backend/.env.production 1 -
+/config/config.php 1 -
+/haz.php 1 -
+/app/parameters.yml 1 -
+/database.json 1 -
+/html/.env 1 -
+/settings 1 -
+//a64a2561-5d75-11f1-b0b2-fbd6542ee4dc 1 -
+//5b94793c-748d-4e31-9251-4bc036e37223 1 -
+/wp-config.php~ 1 -
+//wp/wp-includes/wlwmanifest.xml 6 -
+/database.yml 1 -
+//test/wp-includes/wlwmanifest.xml 6 -
+/service/.env 1 -
+/internal/config.json 1 -
+//shop/wp-includes/wlwmanifest.xml 6 -
+/actuator/auditevents 1 -
+/sitemap_index.xml 53 -
+/helm/values.yaml 1 -
+/server/actuator/heapdump 1 -
+/appsettings.Development.json 1 -
+/frontend/.env.staging 1 -
+/logs/error.log 1 -
+/terraform.tfvars 1 -
+/backups/db.sql 1 -
+/wp-good.php 1 -
+/backend/appsettings.json 1 -
+/config/mail.php 1 -
+/h2.php 1 -
+/backup.sql 1 -
+/wp-temp.php 1 -
+/api/config.json 1 -
+/.aws/credentials 1 -
+/backend/actuator/env 1 -
+/core/settings.py 1 -
+/config/secrets.json 1 -
+/.vscode/launch.json 1 -
+/api/appsettings.json 1 -
+/infrastructure/docker-compose.yml 1 -
+//2019/wp-includes/wlwmanifest.xml 6 -
+//a05a29e4-eab4-4475-8a45-f1b0053fb327 1 -
+/api/v2/application.yml 1 -
+/deploy/config.json 1 -
+/pricing 1 https://www.google.com/search
+/server/secrets.json 1 -
+/api/heapdump 1 -
+/dump 1 -
+/Jenkinsfile 1 -
+//cms/wp-includes/wlwmanifest.xml 6 -
+/api/settings.yml 1 -
+/src/config.json 1 -
+/backend/application.properties 1 -
+/private/credentials.json 2 -
+/sitemap.xml.gz 28 -
+/.gcloud/credentials.json 1 -
+/wp-link-poer.php 1 -
+/server/docker-compose.yml 1 -
+/project/settings.py 1 -
+/backend/.env.local 1 -
+/.env.demo 1 -
+/bootstrap/cache/config.php 2 -
+/app/.env.bak 1 -
+/config.env 1 -
+/backup/db.sql 1 -
+/config/.env.local 1 -
+/application.properties 1 -
+/mosty.php 1 -
+/cilng.php 1 -
+//a245e3bd-6a1e-11f1-b0b2-fbd6542ee4dc 1 -
+//3854f1c5-5e08-11f1-b0b2-fbd6542ee4dc 1 -
+/services/api/.env 1 -
+/app/actuator/configprops 1 -
+/WEB-INF/web.xml 1 -
+/xmlrpc.php 14 -
+/docker/docker-compose.yml 1 -
+/cream1.php 1 -
+/mysqldump.sql 1 -
+/database.ini 1 -
+/whs73au5.php 1 -
+/wornnessesal.php 1 -
+//dbe214c1-66b0-11f1-b0b2-fbd6542ee4dc 1 -
+/api/jolokia/list 2 -
+//feed/ 6 -
+/server/actuator/env 1 -
+/web.zip 1 -
+/frontend/.env.backup 1 -
+/parameters.php 1 -
+/enhancecp 2 -
+/client_secret.json 1 https://www.google.com/search
+/.terraform/terraform.tfstate 1 -
+/app/config/config.yml 1 -
+/server.xml 1 -
+/.vscode/sftp.json 1 -
+/privacy 2 -
+/config/settings.json 1 -
+/services/secrets.json 1 -
+/backend/.env.bak 1 -
+//wp-cron.php 21 -
+/.travis.yml 1 -
+/site.zip 1 -
+/dump.sql 1 -
+/mr.php 1 -
+/config/keys.json 1 -
+/logs/debug.log 1 -
+/sf.php 1 -
+/backup.tar.bz2 1 -
+/f222.php 1 -
+/bhm.php 1 -
+/shop/wp-includes/wlwmanifest.xml 12 -
+/api/.env.dev 1 -
+/api-keys.json 1 -
+/app/.env.local 1 -
+/backend/settings.py 1 -
+/.env.local.bak 1 -
+/src/config.yml 1 -
+/secrets/azure.json 1 -
+/gk.php 1 -
+/admin/.env.local 1 -
+/.vscode/settings.json 1 -
+/aaf.php 1 -
+/application.yml 1 -
+/.env.live 1 -
+/.gitconfig 1 -
+//blog/wp-includes/wlwmanifest.xml 6 -
+/settings.yml 1 -
+//faab1d60-662a-11f1-b0b2-fbd6542ee4dc 1 -
+/secrets.yml 1 -
+/application/config/config.php 1 -
+/signup 1 https://www.google.com/search
+/wplogbak.php 1 -
+/actuator/logfile 1 -
+/k8s.yaml 1 -
+/.env.staging 1 -
+/private/config.json 1 -
+/admin/.env.production 1 -
+/super.php 1 -
+//71db2441-6262-11f1-b0b2-fbd6542ee4dc 1 -
+/login 1 -
+/actuator/sessions 1 -
+/api_keys.yml 1 -
+/app/secrets.json 1 -
+/qa/.env 1 -
+/debug.php 1 -
+/wp-sitemap.xml 48 -
+/bajah.php 1 -
+/configuration.yml 1 -
+/credentials.json 1 -
+/services/docker-compose.yml 1 -
+/backend/config.json 1 -
+/config/application.properties 1 -
+/deploy/docker-compose.prod.yml 1 -
+/docker/docker-compose.prod.yml 1 -
+/secrets/aws.json 1 -
+/backend/docker-compose.prod.yml 1 -
+/dump.sql.gz 1 -
+/wp-includes/js/jquery/jquery.js 1 -
+/feed/ 12 -
+/livewire/preview-file/123 1 -
+/contact-us 5 -
+/config/config.yml 1 -
+/.npmrc 1 -
+/.env.testing 1 -
+/.netrc 1 -
+/logs/app.log 1 -
+/uploads/XANLG36JUIMH_background565.bin 703 -
+/src/settings.py 1 -
+/test/.env 1 -
+//2819f39c-6c45-11f1-82c3-2dfe726b4ac8 1 -
+/parameters.yml 1 -
+/.env.dist 2 -
+/checkout 1 -
+/database.yaml 1 -
+/backend/parameters.yml 1 -
+/var/.env 1 -
+//xmlrpc.php 6 -
+/id_rsa 1 -
+/api/.env.prod 1 -
+/7.php 1 -
+/wp-Blogs.php 1 -
+/api/backend/.env 1 -
+/db.zip 1 -
+/op.php 1 -
+/app.yml 1 -
+/administrator/manifests/files/joomla.xml 3 -
+/actuator/configprops 1 -
+/config.ini 1 -
+/env.old 1 -
+/tmp/backup.sql 1 -
+/server/.env.production 1 -
+/log/error.log 1 -
+/serviceaccount.json 1 -
+/contact 8 -
+/v1/actuator/heapdump 1 -
+/wp-json/gravitysmtp/v1/tests/mock-data 12 -
+/shell 10 -
+/terraform.tfstate 1 -
+/security.txt 2 -
+/app/database.yml 1 -
+/backend/config.yml 1 -
+/ponxnwapemsce.php 1 -
+/config/config.json 1 -
+/backend/.env.staging 1 -
+/.env.preprod 1 -
+/wp-sanita.php 1 -
+/server/config.json 1 -
+/src/credentials.json 1 -
+//site/wp-includes/wlwmanifest.xml 6 -
+/vx.php 1 -
+/media/system/js/core.js 2 -
+/api/v3/.env 1 -
+/laravel.log 1 -
+/server/.env.local 1 -
+/app/.env 1 -
+//9caa82b3-8d90-42a4-90ba-6d1f0f7f5397 1 -
+/v2/config.json 1 -
+/.env.txt 1 -
+/api/v1/application.yml 1 -
+/bitbucket-pipelines.yml 1 -
+/settings.json 1 -
+/config/database.php 1 -
+/apps/frontend/.env 1 -
+/config/.env 1 -
+/v2/.env 1 -
+/deploy/secrets.json 1 -
+/config/database.yml 1 -
+/wp-json/gravitysmtp/v1/config 6 -
+/ethnogr.php 1 -
+/config/service-account.json 1 -
+/release/.env 1 -
+/conf/.env 1 -
+/.vscode/tasks.json 1 -
+/docker-compose.local.yml 1 -
+/this_is_a_new_hello_world.php 1 -
+/app.yaml 1 -
+/firebase-adminsdk.json 1 -
+/docker-compose.production.yml 1 -
+/configuration.json 1 -
+/config.json 2 -
+/settings/production.py 1 -
+/api/docker-compose.prod.yml 1 -
+/kubernetes.yml 1 -
+/secret.json 1 -
+//web/wp-includes/wlwmanifest.xml 6 -
+/_profiler 1 -
+/humans.txt 2 -
+//aa35421f-6ee0-11f1-b0b2-fbd6542ee4dc 1 -
+/.env.save 1 -
+/aws_credentials.json 1 -
+/dump.zip 1 -
+/api/configprops 1 -
+/keys.json 1 -
+/api/actuator/logfile 1 -
+/backend/database.yml 1 -
+/system/application/config/database.php 1 -
+/.env 4 -
+/app 1 https://www.google.com/search
+/l/p60csdbgpof7/ 1 -
+/php.php 1 -
+/.env.uat 1 -
+/wee.php 1 -
+/app/credentials.json 1 -
+//2020/wp-includes/wlwmanifest.xml 6 -
+/wp-includes/css/buttons.css 4 -
+/.env.production.local 1 -
+/app/.env.old 1 -
+/xs.php 1 -
+/wp/.env 1 -
+/app/actuator/heapdump 1 -
+/sitemap-index.xml 49 -
+/actuator/heapdump 1 -
+/config/parameters.yaml 1 -
+/api/database.php 1 -
+/server.log 1 -
+/xmff.php 1 -
+/v3/.env 1 -
+/staging/.env 1 -
+/pg_dump.sql 1 -
+//wordpress/wp-includes/wlwmanifest.xml 6 -
+/web/wp-includes/wlwmanifest.xml 12 -
+/configuration.php 1 -
+/settings/base.py 1 -
+/api/actuator/heapdump 1 -
+/wp-json/gravitysmtp/v1/settings 6 -
+/uat/.env 1 -
+/api/credentials.json 2 -
+/config/aws.json 1 -
+/private/secrets.json 1 -
+/exports/db.sql 1 -
+/app/.env.prod 1 -
+/api/secrets.json 1 -
+/frontend/.env.prod 1 -
+/wp-config.php.bak 1 -
+/gcp-credentials.json 1 -
+/.env.local 2 -
+/trace.log 1 -
+/env 2 -
+/docker-compose.override.yml 1 -
+/backend/.env 1 -
+/api/.env.old 1 -
+/.env.dev.local 1 -
+/jolokia/version 2 -
+/config/credentials.json 1 -
+/app/config/parameters.yml 1 -
+/wp-json/wp/v2/users 1 -
+/www/.env 1 -
+/docker-compose.staging.yml 1 -
+/admin/.env 1 -
+/wplink.php 1 -
+/server/application.yml 1 -
+/jenkins/Jenkinsfile 1 -
+/jolokia/list 1 -
+/.aws/config 1 -
+/deploy/terraform.tfvars 1 -
+/app/docker-compose.prod.yml 1 -
+/tmp/.env 1 -
+/env.bak 1 -
+//107617db-707b-11f1-b0b2-fbd6542ee4dc 1 -
+/services/.env.production 1 -
+/www.zip 1 -
+/db.yml 1 -
+/.env.old 2 -
+//83dd85da-6ac0-11f1-82c3-2dfe726b4ac8 1 -
+/tmp/dump.sql 1 -
+/app/application.properties 1 -
+/service-account.json 1 -
+/config/parameters.yml 1 -
+/.env.default 1 -
+/app/heapdump 1 -
+/settings.ini 1 -
+/wp-content/plugins/hellopress/wp_filemanager.php 1 -
+/.env.backup.txt 1 -
+/services/application.yml 1 -
+/spawns.php 1 -
+/readme.html 2 -
+/.github/workflows/production.yml 1 -
+/wp-content/plugins/fix/up.php 3 -
+/trace 1 -
+/.git/HEAD 1 -
+/gcp.json 1 -
+/api/phpinfo.php 1 -
+/api/jolokia 2 -
+/plugins/editors/tinymce/tinymce.xml 2 -
+/about 7 -
+/src/.env.production 1 -
+/pass4.php 1 -
+/by.php 1 -
+/product.php 1 -
+/log/debug.log 1 -
+/backend/actuator/heapdump 1 -
+/api/settings.json 1 -
+/secrets.yaml 2 -
+/app/settings.json 1 -
+//wp-includes/js/wp-emoji-release.min.js 21 -
+/app/service-account.json 1 -
+/apps/api/.env 1 -
+/threaddump 1 -
+/backend/config.php 1 -
+/.github/workflows/main.yml 1 -
+/access.log 1 -
+/stage/.env 1 -
+/.idea/WebServers.xml 1 -
+/development/.env 1 -
+/wp-config.txt 1 -
+/phptest.php 1 -
+/backend/.env.old 1 -
+/local-config.php 1 -
+/cxs.php 1 -
+/v2/actuator/heapdump 1 -
+/.git/config 4 -
+/app/api/.env 1 -
+/wp/xmlrpc.php 2 -
+/.bash_history 1 -
+/admin 1 -
+/wordpress/wp-includes/wlwmanifest.xml 12 -
+/src/config.php 1 -
+/actuator/httptrace 1 -
+/sitemap.txt 2 -
+/frontend/.env.local 1 -
+/.azure/credentials 1 -
+/web.config 1 -
+/app/.env.backup 2 -
+//0c346244-6936-11f1-82c3-2dfe726b4ac8 1 -
+/ 3 https://mail.crontech.uk/
+/apps/backend/.env 1 -
+/.env.dev 1 -
+/devops/docker-compose.yml 1 -
+/.github/workflows/deploy.yml 1 -
+/db.json 1 -
+/config/database.json 1 -
+/internal/actuator/heapdump 1 -
+/wp-admin/css/ 1 binance.com
+/dev/.env 1 -
+/backend/service-account.json 1 -
+//c3667de8-68b1-11f1-b0b2-fbd6542ee4dc 1 -
+/configprops 1 -
+/api/actuator/configprops 1 -
+/api/aws.json 1 -
+/file6.php 1 -
+/wordpress/.env 1 -
+/internal/config.yml 1 -
+/app/config.yml 1 -
+/.env.development.local 1 -
+/api/jolokia/version 2 -
+/2021/wp-includes/wlwmanifest.xml 12 -
+/.env.orig 1 -
+/adobe.php 1 -
+/.well-known/security.txt 6 -
+/wp-config.bak 1 -
+/WEB-INF/context.xml 1 -
+/wp-config.php.old 1 -
+/dashboard 1 https://www.google.com/search
+/storage/logs/laravel.log 1 -
+/application.log 1 -
+/services/.env.local 1 -
+/.env.stage 1 -
+/.env.pre-production 2 -
+/jjhf.php 1 -
+/.env.example 1 -
+/db.sql.gz 1 -
+/docker/.env 1 -
+/00.php 1 -
+/backend/settings.php 1 -
+/server/application.properties 1 -
+/blog/wp-includes/wlwmanifest.xml 12 -
+/sql/dump.sql 1 -
+/_profiler/open 1 -
+/settings/local.py 1 -
+/database.sql 1 -
+/META-INF/context.xml 1 -
+/balbasaur.php 1 -
+/robots.txt 249 -
+/nxx.php 1 -
+/sdm.php 1 -
+/private_key.pem 1 -
+/private/.env.production 1 -
+/secrets.json 2 -
+/src/api/.env 1 -
+/site/wp-includes/wlwmanifest.xml 12 -
+/parameters.yaml 1 -
+/services/.env 1 -
+/green1.php 1 -
+/admin/.env.backup 1 -
+/backend/.env.backup 1 -
+/actuator/threaddump 1 -
+/frontend/.env.production 1 -
+/.env.development 1 -
+/sites/default/files/ 1 binance.com
+/test/wp-includes/wlwmanifest.xml 12 -
+/uploads/.env 1 -
+/sitemaps.xml 54 -
+//dfcb68e7-0407-4f64-8db6-c01050d9489d 1 -
+/README.txt 1 -
+/backup.sql.gz 1 -
+/backend/settings.json 1 -
+/server/.env 1 -
+/credentials.yaml 1 -
+/application.json 1 -
+/.buildkite/pipeline.yml 1 -
+/cms/.env 1 -
+/dashboard/.env 1 -
+/config/.env.production 1 -
+/backend/application.yml 1 -
+/docker-compose.prod.yml 1 -
+//fc22616c-720f-11f1-82c3-2dfe726b4ac8 1 -
+/frontend/.env 1 -
+/app/settings.php 1 -
+/app/.env.production 1 -
+/class-bda.php 1 -
+/sitemap-index.xml.gz 24 -
+/v1/.env 1 -
+/k8s.yml 1 -
+/services/config.yml 1 -
+/api/application.properties 1 -
+/private.key 1 -
+/appsettings.Production.json 1 -
+/firebase-credentials.json 1 -
+/2019/wp-includes/wlwmanifest.xml 12 -
+/.env.production 2 -
+/docker-compose.yml 1 -
+/less.php 1 -
+/jolokia/exec 1 -
+/app/config.json 1 -
+/data/.env 1 -
+/aws-credentials.json 1 -
+/docker-compose.yaml 1 -
+/htdocs/.env 1 -
+/backend/.env.prod 2 -
+/deploy/.env 1 -
+/img/logo.png 11 -
+/icon-192x192.png 2 -
+/cloud.json 1 -
+/backend/credentials.json 1 -
+/prod/.env 1 -
+/actuator/trace 1 -
+/src/.env.backup 1 -
+/misgrimmerly.php 1 -
+/.credentials 1 -
+/google-credentials.json 1 -
+/service-worker.js.map 1 -
+/server/appsettings.json 1 -
+/classwithtostring.php 1 -
+/.env.prod.bak 1 -
+/public/.env 1 -
+/server/.env.backup 1 -
+/wp-lvminl.php 1 -
+/v2/actuator/configprops 1 -
+/api/.env.production 1 -
+/WEB-INF/classes/application.properties 1 -
+/.env.prod 1 -
+/services/backend/.env 1 -
+/web/.env 1 -
+/deploy/docker-compose.yml 1 -
+/api/config.yml 1 -
+/infra/terraform.tfvars 1 -
+/backend/docker-compose.yml 1 -
+/config/application.yml 1 -
+/.ssh/id_rsa 1 -
+/error.log 1 -
+/.env.template 1 -
+/azure-pipelines.yml 1 -
+/wp-json/wp/v2/settings 6 -
+/config/.aws/credentials 1 -
+/config/settings.php 1 -
+/services/auth/.env 1 -
+/.config/gcloud/credentials.db 1 -
+/heapdump 1 -
+/.env.test 1 -
+/application.yaml 1 -
+/env.backup 1 -
+/v2/actuator/env 1 -
+/sql/backup.sql 1 -
+//a8ef8164-67eb-11f1-82c3-2dfe726b4ac8 1 -
+/nginx.config 1 -
+/api_keys.json 1 -
+/webshell.php 9 -
+/config/cache.php 1 -
+/admin/api/.env 1 -
+/ftde.php 1 -
+/profiler/phpinfo 1 -
+/server/database.yml 1 -
+/deploy/credentials.json 1 -
+/data.sql 1 -
+/private/service-account.json 1 -
+/wp1/wp-includes/wlwmanifest.xml 12 -
+/api/.env 1 -
+/api/v2/config.json 1 -
+/app.log 1 -
+/secrets/credentials.json 1 -
+/ads.txt 4 -
+/config.yaml 2 -
+/dal.php 1 -
+/internal/actuator/env 1 -
+/laravel/.env 1 -
+/src/application.properties 1 -
+/kubernetes.yaml 1 -
+/.env.sample 1 -
+/config/docker-compose.yml 1 -
+/api/keys.json 1 -
+/config.yml 1 -
+/api/config 2 -
+/dist/.env 1 -
+/.github/workflows/ci.yml 1 -
+/wp-tivate.php 1 -
+/api/.env.staging 1 -
+/logs/application.log 1 -
+/wp-aothait.php 1 -
+/ogghjd.php 1 -
+/api/actuator/env 1 -
+/wp-admin/install.php 342 -
+/server.pem 1 -
+/server/credentials.json 1 -
+/application/config/database.php 1 -
+/.env.qa 1 -
+/.env.bak 1 -
+/_profiler/phpinfo 1 -
+/.ssh/authorized_keys 1 -
+/_rNd9xZ7kL3 1 -
+/backend/actuator/configprops 1 -
+/api/parameters.yml 1 -
+/dass.php 1 -
+/eknmacnl.php 1 -
+/appsettings.json 1 -
+/app/backend/.env 1 -
+/admin/controller/extension/extension/ 1 binance.com
+/server/settings.json 1 -
+/helm/values.yml 1 -
+/wp-block.php 1 -
+/.circleci/config.yml 1 -
+/config.js 1 -
+/private.json 1 -
+/database.php 1 -
+/src/.env.local 1 -
+/backend/aws.json 1 -
+/.env.docker 1 -
+/internal/secrets.json 1 -
+/.env.copy 1 -
+/app/actuator/logfile 1 -
+/helm/values-production.yaml 1 -
+/config/services.php 1 -
+/wp/wp-includes/wlwmanifest.xml 12 -
+/wordpress/ 3 http://mail.crontech.uk/wordpress/
+/actuator/dump 1 -
+/backend/.env.dev 1 -
+/app/actuator/env 1 -
+/src/secrets.json 1 -
+/wp-includes/ID3/license.txt 12 -
+/env.txt 1 -
+/temp/.env 1 -
+//wp-includes/ID3/license.txt 6 -
+/license.txt 1 -
+/docker-compose.prod.yaml 1 -
+/backup.tar.gz 1 -
+/infra/docker-compose.yml 1 -
+/admin/phpinfo.php 1 -
+/.idea/dataSources.xml 1 -
+/llms.txt 3 -
+/language/en-GB/en-GB.xml 1 -
+/cms/wp-includes/wlwmanifest.xml 12 -
+/.env.backup 2 -
+/sitemap.xml 55 -
+/rithin.php 1 -
+/nginx.conf 1 -
+/portal/.env 1 -
+/app/database.php 1 -
+/.pypirc 1 -
+/v1/actuator/env 1 -
+/installation/index.php 1 -
+/agieylcmwl.php 1 -
+/api/docker-compose.yml 1 -
+/wp-blink.php 1 -
+/credentials.yml 1 -
+/app/application.yml 1 -
+/secrets/gcp.json 1 -
+/backend/api/.env 1 -
+/logfile 1 -
+/.env~ 2 -
+/.idea/workspace.xml 1 -
+/docker-compose.dev.yml 1 -
+/private/.env 1 -
+//894bbedb-6464-11f1-82c3-2dfe726b4ac8 1 -
+/storage/.env 1 -
+/internal/docker-compose.yml 1 -
+/l/vkcyui3n68zd/ 1 -
+/build/.env 1 -
+/api/v2/.env 1 -
+/config/app.php 1 -
+//9952958e-6d3e-11f1-b0b2-fbd6542ee4dc 1 -
+/backend/secrets.json 1 -
+/wp-the.php 1 -
+/symfony/.env 1 -
+/api/v1/.env 1 -
+/.idea/deployment.xml 1 -
+/actuator/env 1 -
+/backup/dump.sql 1 -
+/actuator/jolokia/version 1 -
+/wp-ver.php 1 -
+/server.key 1 -
+/backup.zip 1 -
+/server/config.yml 1 -
+/hoeig.php 1 -
+/2020/wp-includes/wlwmanifest.xml 12 -
+/credentials 1 -
+/app.json 1 -
+/v1/actuator/configprops 1 -
+/app/config.php 1 -
+END_SIDER_404
+
+# Host - Pages - Hits - Bandwidth - Last visit date - [Start date of last visit] - [Last page of last visit]
+# [Start date of last visit] and [Last page of last visit] are saved only if session is not finished
+# The 10 first Hits must be first (order not required for others)
+BEGIN_VISITOR 211
+82.19.170.150 70273 70274 61116864 20260630235907
+54.38.58.71 25 25 345274 20260626183803
+185.238.75.151 18 18 248616 20260630175839
+185.110.51.12 12 12 48723 20260630013713
+83.168.90.89 9 9 124308 20260622095222
+54.38.56.124 8 8 110496 20260615142107
+136.113.110.81 5 5 14788 20260621070332
+34.20.244.236 5 5 17518 20260620074506
+44.200.84.255 5 5 17546 20260617012648
+34.162.48.199 5 5 14785 20260621050452
+199.244.88.220 1 1 4091 20260623135603
+62.141.44.236 1 1 4050 20260619110854
+193.125.22.28 1 1 13406 20260623162031
+66.132.186.191 1 1 4277 20260614042541
+139.59.177.65 2 2 8368 20260614092336
+138.197.96.47 2 2 8327 20260620093852
+195.96.139.69 1 1 4240 20260613194407
+192.36.109.123 1 1 4054 20260605010528
+157.230.13.218 2 2 8368 20260607022831
+35.179.124.181 1 1 4277 20260619033813
+138.199.140.203 2 7 2018182 20260602115618
+58.243.156.101 1 1 4091 20260605220532
+199.244.88.230 2 4 1234590 20260623135615
+5.161.230.157 1 1 4240 20260622023542
+167.253.19.44 1 1 4277 20260611105219
+34.162.76.185 1 1 3313 20260621050453
+34.95.184.70 2 3 1695 20260608091550
+34.60.106.77 1 1 3313 20260621051521
+167.99.126.107 2 2 8368 20260607021151
+34.11.15.150 1 1 13812 20260604160806
+192.71.126.151 1 1 4054 20260608211341
+54.38.50.21 2 2 27624 20260629053841
+192.36.137.155 1 1 4054 20260621202536
+46.4.198.155 2 3 7371 20260602115606
+34.162.183.192 1 1 3313 20260622043123
+34.172.247.245 1 1 3313 20260621081112
+192.36.109.116 1 1 4054 20260605120938
+51.77.53.215 1 1 3941 20260608050244
+35.239.138.225 1 1 3313 20260621064232
+205.169.39.5 1 5 1717872 20260611190053
+34.162.33.43 1 1 3313 20260621084143
+13.61.100.187 1 1 4054 20260629155426
+34.55.44.109 1 1 3313 20260621070333
+40.160.26.78 1 1 3647 20260603013153
+34.16.243.85 1 10 264925 20260620045047
+192.36.109.96 1 1 4054 20260621064200
+34.42.34.237 1 1 3763 20260602185726
+35.223.182.65 2 2 6626 20260621071647
+114.246.35.77 1 1 4091 20260610223330
+136.113.135.76 1 1 3313 20260621064922
+5.133.192.127 1 1 4277 20260607105213
+82.30.91.175 1 1 4277 20260605141702
+130.211.122.66 5 5 14752 20260621075556
+92.204.40.219 5 6 460418 20260609231406
+34.173.59.211 1 1 3313 20260621070955
+71.6.240.27 2 2 8294 20260603073537
+35.238.192.94 1 1 3313 20260621151649
+170.130.115.155 1 1 4277 20260620110555
+34.16.12.46 1 1 13812 20260602143629
+147.182.168.92 2 2 8327 20260602092529
+157.230.42.44 1 1 4611 20260607013205
+117.148.112.208 1 1 4091 20260620223646
+185.148.3.232 1 1 4572 20260606054056
+104.238.159.195 1 1 4091 20260606231041
+34.121.114.50 1 1 3313 20260621150556
+35.226.44.238 1 2 3825 20260608080152
+44.215.102.67 1 10 264926 20260617021858
+34.66.180.13 1 1 3313 20260621051721
+66.132.172.130 1 1 4277 20260621083928
+3.217.128.115 1 1 4277 20260629141608
+35.222.38.200 5 5 14786 20260621064232
+159.203.36.53 2 2 8368 20260624083141
+34.181.229.236 1 1 13812 20260605120552
+112.84.49.223 1 1 4091 20260619212341
+117.160.168.80 1 1 4091 20260618225611
+34.170.140.135 1 1 13812 20260602170332
+168.144.184.184 2 2 8327 20260616083003
+176.65.139.234 1 1 13961 20260618123424
+217.155.125.57 1 1 13406 20260628023703
+23.20.64.241 2 2 8368 20260625190139
+134.209.30.90 2 2 8368 20260622101253
+35.239.230.151 1 1 3313 20260621133244
+91.135.222.85 1 1 4277 20260624025148
+66.132.195.65 1 1 4091 20260613201827
+34.127.161.225 1 1 3313 20260621191049
+93.158.91.13 1 1 4277 20260627205437
+34.30.18.22 5 5 14786 20260621051520
+34.162.213.19 5 5 17567 20260620062804
+199.45.155.97 1 1 4277 20260606200632
+159.65.217.184 1 1 4609 20260627044126
+36.158.71.33 1 1 4091 20260612020403
+34.144.187.240 5 5 14785 20260621084142
+34.72.98.102 1 1 3313 20260621150343
+3.18.186.238 1 1 4612 20260624085232
+82.132.238.83 0 1 0 
+216.251.143.109 3 8 1938672 20260623203154
+35.253.108.53 1 1 3313 20260621050000
+185.13.96.91 1 1 4054 20260617122357
+176.65.139.235 2 2 19422 20260614114834
+34.67.141.69 5 5 14785 20260621064721
+162.252.53.36 1 1 3941 20260610175522
+134.199.235.193 2 2 8368 20260629130332
+34.9.138.173 1 1 3313 20260621150421
+206.189.203.211 2 2 8368 20260601163144
+5.133.192.199 1 1 4054 20260609071701
+23.94.179.91 1 1 3904 20260604095042
+93.158.90.65 1 1 4054 20260614083845
+167.99.211.198 2 2 8368 20260618083121
+34.82.215.162 1 1 13812 20260605134036
+35.243.45.71 1 1 3763 20260602041507
+138.68.101.105 2 2 8368 20260604103621
+192.71.2.9 1 1 4054 20260616011157
+34.195.125.215 3 3 12974 20260630092333
+35.225.245.176 1 1 13812 20260604134039
+138.199.136.184 1 1 3044 20260621033539
+2a06:98c0:3600::103 1 1 4308 20260621052812
+192.36.109.104 1 1 4054 20260625044201
+52.25.222.146 1 1 13998 20260609120031
+23.82.109.239 2 2 6626 20260629235005
+34.144.177.136 1 1 3647 20260608100456
+67.205.169.121 2 2 8368 20260612082326
+138.199.142.69 3 8 1382402 20260615223922
+205.169.39.14 1 16 466614 20260611190321
+35.192.50.127 1 1 13812 20260605083552
+35.224.161.208 5 5 14784 20260621080911
+31.134.2.55 1 1 4608 20260611105218
+34.162.183.96 5 5 14751 20260621082209
+199.244.88.222 1 2 446145 20260623135459
+35.87.90.163 1 1 13998 20260624031323
+185.247.137.184 1 1 4054 20260613075631
+34.48.193.60 1 1 13812 20260607135011
+34.162.133.147 1 1 3313 20260622031307
+34.162.30.15 1 1 3313 20260622063833
+35.254.19.207 1 1 3277 20260621064722
+34.74.36.226 1 1 13812 20260608065152
+159.203.101.87 5 5 21344 20260607024549
+196.179.133.72 1 1 4091 20260621070919
+159.203.189.4 2 2 8368 20260615070340
+68.183.36.151 2 2 8368 20260626113326
+146.190.26.188 2 2 8327 20260614174652
+93.158.90.41 1 1 4054 20260608152225
+192.71.2.119 1 1 4054 20260610102517
+64.23.245.222 2 2 8368 20260610095517
+85.25.185.20 5 5 18377 20260621010116
+192.36.109.108 1 1 4054 20260629104126
+209.38.41.232 2 2 8368 20260608084253
+104.248.119.4 1 1 4607 20260613093236
+34.57.54.69 1 1 3313 20260621151358
+34.162.150.146 1 1 3313 20260622063633
+192.36.109.78 1 1 4013 20260627172324
+35.254.176.159 1 1 3313 20260621075557
+23.80.148.156 2 2 6626 20260629231407
+192.71.126.245 1 1 4054 20260610102108
+66.132.172.128 1 1 4091 20260606195651
+34.178.3.98 1 1 13812 20260610115016
+16.58.56.207 2 2 7294 20260603043237
+34.34.23.147 1 1 13812 20260610074700
+64.89.160.220 2 2 8890 20260618212219
+8.231.36.234 1 1 3313 20260622080322
+120.84.12.36 1 1 4091 20260603041426
+82.132.238.233 0 1 0 
+199.244.88.223 0 1 30694 
+136.115.124.168 5 5 14751 20260621045959
+157.230.127.37 2 2 8368 20260606083912
+149.56.150.2 1 1 13754 20260613141045
+34.10.157.242 1 1 3313 20260621183950
+192.121.135.97 1 1 4054 20260603085349
+223.90.35.207 1 1 4091 20260618014931
+34.153.29.38 1 1 3277 20260621082210
+176.65.139.236 1 1 13961 20260614114834
+5.133.192.146 1 1 4277 20260619015334
+67.149.204.35 1 1 13406 20260629083726
+34.136.20.239 1 1 3313 20260621184151
+65.108.124.214 1 1 3647 20260625022033
+34.127.172.9 1 1 3313 20260621082210
+8.231.42.139 1 1 3313 20260621084143
+101.26.28.27 1 1 4091 20260603223706
+60.7.169.52 1 1 4091 20260616235525
+54.82.33.143 1 1 4277 20260624105343
+34.55.247.4 5 5 14786 20260621071646
+34.195.135.127 4 4 17069 20260630192925
+136.112.196.113 5 5 14787 20260621070955
+134.199.233.91 2 2 8327 20260628045517
+65.55.210.56 1 2 3410 20260617050230
+5.133.192.175 1 1 4054 20260620015633
+34.69.51.220 1 1 3313 20260621151558
+35.233.224.214 1 1 13812 20260601173305
+66.249.74.167 2 2 6000 20260609195624
+199.244.88.225 1 1 4091 20260624120026
+34.122.16.212 3 3 11289 20260616042117
+60.189.208.125 1 1 4091 20260604205122
+204.188.192.103 1 1 4277 20260630090655
+136.113.9.105 1 1 3763 20260616092227
+37.27.62.78 1 1 4091 20260602140638
+205.169.39.27 1 1 4277 20260618124918
+146.190.28.128 2 2 8368 20260630103425
+100.26.35.196 1 1 3755 20260604060528
+161.115.234.148 1 1 3313 20260626101701
+104.168.93.75 1 1 4091 20260601074124
+35.254.244.123 2 2 7526 20260616073045
+94.154.113.189 1 1 3313 20260616071711
+168.232.221.91 1 1 13406 20260623150530
+144.217.135.181 1 1 13754 20260603070338
+35.253.240.0 2 2 6590 20260621071647
+34.1.18.237 2 2 7369 20260621095430
+104.198.21.48 1 1 3313 20260621135431
+134.122.57.162 2 2 8368 20260607001949
+35.192.232.168 1 1 3763 20260617163804
+35.188.194.43 1 1 3313 20260621114506
+112.36.51.6 1 1 4050 20260621211008
+4.227.232.143 1 1 3763 20260604082112
+END_VISITOR
+
+# Date - Pages - Hits - Bandwidth - Visits
+BEGIN_DAY 30
+20260601 2449 2449 2530161 5
+20260602 2430 2436 4566940 10
+20260603 2430 2435 3874598 9
+20260604 2423 2425 2530093 9
+20260605 2429 2429 2552869 10
+20260606 2416 2416 2470543 6
+20260607 2431 2431 2554198 11
+20260608 2426 2428 2539601 13
+20260609 2419 2420 2929045 5
+20260610 2366 2366 2473730 10
+20260611 2422 2442 4519285 6
+20260612 2423 2423 2148558 4
+20260613 2425 2425 2094512 7
+20260614 2159 2159 1873846 11
+20260615 2431 2431 2100398 5
+20260616 2430 2430 2109694 10
+20260617 2422 2432 2346998 7
+20260618 1139 1139 1031881 9
+20260619 1881 1881 1648706 8
+20260620 2436 2445 2395211 10
+20260621 2556 2556 2421322 52
+20260622 2429 2429 2121605 10
+20260623 2419 2428 5735104 8
+20260624 2422 2422 1819240 7
+20260625 2311 2311 1622812 5
+20260626 2423 2423 1693747 4
+20260627 2427 2427 1727435 7
+20260628 2434 2434 1697899 4
+20260629 2430 2430 1732092 11
+20260630 2431 2431 1727136 7
+END_DAY
+
+# Session range - Number of visits
+BEGIN_SESSION 6
+30s-2mn 3
+15mn-30mn 2
+1h+ 30
+30mn-1h 1
+0s-30s 243
+5mn-15mn 1
+END_SESSION
+
+# URL - Pages - Bandwidth - Entry - Exit
+# The 10 first Pages must be first (order not required for others)
+BEGIN_SIDER 11
+/api.php 44547 46577553 23 24
+/update/version.json 25023 14238087 8 7
+/background.php 702 297648 0 0
+/ 318 1871184 246 214
+// 21 290052 0 16
+/purchase.php 19 61006 1 7
+/register.php 18 48468 1 5
+/login.php 18 50617 0 6
+/map/ 1 3576 0 0
+/db.php 1 451 0 1
+/config.php 1 525 1 0
+END_SIDER
+
+# Payload Range - Payload Frequency
+BEGIN_FILESIZE 6
+500-1K 34621
+5K+ 194
+1K-2K 34822
+100-500 3700
+2K-5K 396
+0-44 161
+END_FILESIZE
+
+# Request Time Range - Request Time Frequency
+BEGIN_REQUESTTIME 0
+END_REQUESTTIME

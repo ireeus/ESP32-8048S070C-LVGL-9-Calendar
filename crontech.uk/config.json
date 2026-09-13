@@ -1,0 +1,22 @@
+{
+    "admin_user": "ireeus",
+    "admin_pass": "EicrAdmin2026!",
+    "environment": "sandbox",
+    "paypal_sandbox_client_id": "Abg5Wq3ImvgejhJDvJ9TvNHxqCa0Ld5jzne6tV2tJ53A_m3UmzJvJ9k6MxU67cgiKbhSlm20P5tUDY7f",
+    "paypal_sandbox_secret": "ENUDzwlVKwzZz9THX56v88TF1jyeHor7pbSjH4aiAE1SZ1dxqv5pBaZagrDGUGufX2RzeVsrFjaOgcGf",
+    "paypal_production_client_id": "Ad3T1XJoOoH8i19EhqZg5PoX89pckJiAovAEJ3hqbXTnvMLzlwOJfRe1PpX52bjlx2zJiR466GVwPtMI",
+    "paypal_production_secret": "EJNT7mnj29SH3b-3us_a83c1OmWJASjbtuxVgTQljBqYYic1RczgLlM2uQqJ0PS5B1mFlQYmZkHP3av5",
+    "price_studio": 120,
+    "price_2bed": 150,
+    "price_3bed": 180,
+    "price_4bed": 220,
+    "price_hmo": 280,
+    "price_extra_circuit": 20,
+    "price_pat_base": 50,
+    "pat_base_items": 10,
+    "price_pat_extra": 2,
+    "discount_tier1_pct": 10,
+    "discount_tier1_mins": 10,
+    "discount_tier2_pct": 0,
+    "discount_tier2_mins": 0
+}

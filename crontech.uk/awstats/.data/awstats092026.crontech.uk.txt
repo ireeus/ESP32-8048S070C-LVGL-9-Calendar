@@ -1,0 +1,1762 @@
+AWSTATS DATA FILE 8.0 (build 20240604)
+# If you remove this file, all statistics for date 202609 will be lost/reset.
+# Last config file used to build this data file was /home/host908429/domains/crontech.uk/awstats/.data/awstats.crontech.uk.conf.
+
+# Position (offset in bytes) in this file for beginning of each section for
+# direct I/O access. If you made changes somewhere in this file, you should
+# also remove completely the MAP section (AWStats will rewrite it at next
+# update).
+BEGIN_MAP 30
+POS_GENERAL 2173                
+POS_TIME 2858                
+POS_VISITOR 39748               
+POS_DAY 41991               
+POS_DOMAIN 3774                
+POS_LOGIN 4306                
+POS_ROBOT 4461                
+POS_WORMS 5352                
+POS_EMAILSENDER 5483                
+POS_EMAILRECEIVER 5626                
+POS_SESSION 42421               
+POS_FILESIZE 43294               
+POS_REQUESTTIME 43445               
+POS_SIDER 42596               
+POS_FILETYPES 5761                
+POS_DOWNLOADS 5978                
+POS_OS 6061                
+POS_BROWSER 6263                
+POS_SCREENSIZE 7021                
+POS_UNKNOWNREFERER 7095                
+POS_UNKNOWNREFERERBROWSER 8054                
+POS_ORIGIN 8197                
+POS_SEREFERRALS 8339                
+POS_PAGEREFS 8483                
+POS_SEARCHWORDS 8631                
+POS_KEYWORDS 8783                
+POS_MISC 2522                
+POS_ERRORS 8842                
+POS_CLUSTER 4162                
+POS_SIDER_403 30649               
+POS_SIDER_404 8991                
+POS_SIDER_400 30483               
+END_MAP
+
+# LastLine    = Date of last record processed - Last record line number in last log - Last record offset in last log - Last record signature value
+# FirstTime   = Date of first visit for history file
+# LastTime    = Date of last visit for history file
+# LastUpdate  = Date of last update - Nb of parsed records - Nb of parsed old records - Nb of parsed new records - Nb of parsed corrupted - Nb of parsed dropped
+# TotalVisits = Number of visits
+# TotalUnique = Number of unique visitors
+# MonthHostsKnown   = Number of hosts known
+# MonthHostsUnKnown = Number of hosts unknown
+BEGIN_GENERAL 8
+LastLine 20260913015212 5435 799383 6812089795732
+FirstTime 20260901000006
+LastTime 20260913015212
+LastUpdate 20260913015221 5435 0 5435 0 0
+TotalVisits 69                  
+TotalUnique 54                  
+MonthHostsKnown 0                   
+MonthHostsUnknown 54                  
+END_GENERAL
+
+# Misc ID - Pages - Hits - Bandwidth
+BEGIN_MISC 10
+JavaEnabled 0 0 0
+DirectorSupport 0 0 0
+RealPlayerSupport 0 0 0
+FlashSupport 0 0 0
+TotalMisc 0 0 0
+WindowsMediaPlayerSupport 0 0 0
+AddToFavourites 0 2 0
+JavascriptDisabled 0 0 0
+QuickTimeSupport 0 0 0
+PDFSupport 0 0 0
+END_MISC
+
+# Hour - Pages - Hits - Bandwidth - Not viewed Pages - Not viewed Hits - Not viewed Bandwidth
+BEGIN_TIME 24
+0 1088 1097 978490 290 314 474352
+1 1069 1082 3329965 368 408 168761
+2 944 959 5278528 12 33 47817
+3 906 906 721558 9 20 31841
+4 908 908 744897 8 21 50213
+5 906 906 723200 13 25 57707
+6 906 906 724374 18 31 40703
+7 910 910 764886 13 30 125928
+8 917 917 895802 289 314 236963
+9 924 936 851189 20 36 68744
+10 925 931 3142464 21 61 75933
+11 1034 1088 12457001 54 82 205426
+12 1043 1072 18899975 20 39 89589
+13 1045 1067 16606797 20 43 56877
+14 1112 1134 12272854 11 33 43761
+15 1169 1188 37841664 304 340 204733
+16 1165 1183 6127642 1734 1830 3412316
+17 1068 1093 977627 13 30 40916
+18 1130 1130 871491 12 29 77774
+19 1301 1336 26475971 682 747 12702934
+20 1414 1592 18943997 610 636 800704
+21 1367 1376 1014989 18 43 95776
+22 1086 1136 16116284 34 63 11788210
+23 981 981 869002 22 48 442435
+END_TIME
+
+# Domain - Pages - Hits - Bandwidth
+# The 10 first Pages must be first (order not required for others)
+BEGIN_DOMAIN 23
+gb 25195 25700 162133011
+us 53 53 953755
+tw 17 17 309850
+fr 6 8 23232713
+br 6 6 102012
+pl 6 6 121295
+be 6 15 301714
+qa 5 5 32515
+it 4 4 81078
+au 3 3 60906
+mr 1 1 20324
+in 1 1 20350
+iq 1 1 2415
+nl 3 3 60422
+ng 1 1 20350
+ca 1 1 82216
+cn 2 2 20773
+de 2 2 23489
+cv 1 1 3708
+ua 1 1 2622
+am 1 1 18867
+jm 1 1 18808
+tn 1 1 7454
+END_DOMAIN
+
+# Cluster ID - Pages - Hits - Bandwidth
+BEGIN_CLUSTER 0
+END_CLUSTER
+
+# Login - Pages - Hits - Bandwidth - Last visit
+# The 10 first Pages must be first (order not required for others)
+BEGIN_LOGIN 0
+END_LOGIN
+
+# Robot ID - Hits - Bandwidth - Last visit - Hits on robots.txt
+# The 10 first Hits must be first (order not required for others)
+BEGIN_ROBOT 20
+curl 66 437338 20260912123259 0
+no_user_agent 38 1855 20260909174238 0
+bot[\s_+:,\.\;\/\\-] 13 225204 20260911191932 0
+dataprovider\.com 11 385960 20260903233636 0
+bingbot/ 9 75622 20260909232657 0
+360Spider 7 141008 20260906214743 0
+facebook 6 23133588 20260911192205 0
+robot 6 121232 20260910160249 0
+crawl 6 110683 20260912202431 0
+[\s_+:,\.\;\/\\-]bot 4 63873 20260910160252 0
+facebookexternalhit/ 3 43886 20260910160249 0
+Discordbot/ 2 40533 20260910160247 0
+scrapy 1 20361 20260912084922 0
+Googlebot/ 2 37452 20260905070614 0
+LinkedInBot/ 3 60872 20260910160247 0
+TelegramBot 3 60549 20260910160254 0
+twitterbot 2 40533 20260910160246 0
+Slackbot\-LinkExpanding 1 20172 20260910160251 0
+python 2 40722 20260912073158 0
+netcraft 2 92101 20260913012222 0
+END_ROBOT
+
+# Worm ID - Hits - Bandwidth - Last visit
+# The 5 first Hits must be first (order not required for others)
+BEGIN_WORMS 0
+END_WORMS
+
+# EMail - Hits - Bandwidth - Last visit
+# The 20 first Hits must be first (order not required for others)
+BEGIN_EMAILSENDER 0
+END_EMAILSENDER
+
+# EMail - Hits - Bandwidth - Last visit
+# The 20 first hits must be first (order not required for others)
+BEGIN_EMAILRECEIVER 0
+END_EMAILRECEIVER
+
+# Files type - Hits - Bandwidth - Bandwidth without compression - Bandwidth after compression
+BEGIN_FILETYPES 8
+js 357 254971 0 0
+json 8355 4767796 0 0
+css 2 2290 0 0
+png 96 5950003 0 0
+bin 38 85594275 0 0
+php 16962 18396291 0 0
+html 1 1909 0 0
+mp4 23 72663112 0 0
+END_FILETYPES
+
+# Downloads - Hits - Bandwidth
+BEGIN_DOWNLOADS 1
+/update/firmware.bin 38 0 85594275
+END_DOWNLOADS
+
+# OS ID - Hits
+BEGIN_OS ID - Hits - Pages 9
+ios_iphone 12 7
+linuxubuntu 1 1
+Unknown 24865 24827
+linux 27 25
+android10 76 38
+android13 3 3
+win10 812 379
+android12 1 1
+macosx15 37 37
+END_OS
+
+# Browser ID - Hits - Pages
+BEGIN_BROWSER 35
+safari13.0.4 6 6
+chrome136.0.1535.184 1 1
+chrome138.0.0.0 3 3
+chrome151.0.0.0 16 7
+firefox142.0 6 6
+chrome153.0.0.0 69 32
+chrome144.0.0.0 1 1
+chrome126.0.0.0 3 3
+chrome148.0.2655.212 1 1
+chrome130.0.0.0 1 1
+safari18.0 1 1
+chrome131.0.0.0 21 21
+chrome57.0.2987.133 1 1
+firefox140.0 1 1
+chrome80.0.3987.162 1 1
+chrome120.0.0.0 2 2
+chrome134.0.0.0 3 3
+chrome142.0.0.0 19 19
+safari18.5 9 4
+Unknown 24856 24818
+firefox126.0 1 1
+mozilla 9 9
+chrome147.0.5149.55 1 1
+chrome148.0.0.0 7 5
+chrome75.0.3770.142 1 1
+chrome152.0.0.0 762 337
+chrome124.0.0.0 8 8
+chrome58.0.3029.110 1 1
+firefox133.0 1 1
+chrome145.0.0.0 12 12
+safari17.0 1 1
+chrome95.0.4638.69 4 4
+chrome122.0.6261.127 1 1
+chrome124.0 3 3
+firefox143.14 1 1
+END_BROWSER
+
+# Screen size - Hits
+BEGIN_SCREENSIZE 0
+END_SCREENSIZE
+
+# Unknown referer OS - Last visit date
+BEGIN_UNKNOWNREFERER 9
+Mozilla/5.0_AppleWebKit/537.36_(KHTML,_like_Gecko);_compatible;_Claude-User/1.0;__https://www.anthropic.com/claude-user 20260910160209
+Mozilla/5.0_AppleWebKit/537.36_(KHTML,_like_Gecko;_compatible;_Claude-User/1.0;__https://www.anthropic.com/claude-user) 20260910160250
+Mozilla/5.0_AppleWebKit/537.36_(KHTML,_like_Gecko;_compatible;_Claude-User/1.0;__Claude-User@anthropic.com) 20260910160246
+Mozilla/5.0_(compatible;_ForestEngine/1.0;__https://forestengine.net/) 20260908233613
+ESP32HTTPClient 20260913015212
+Mozilla/5.0_(compatible;_DefaultsExposed/1.0;__https://defaults.exposed/headers) 20260904165520
+Mozilla/5.0_AppleWebKit/537.36_(KHTML,_like_Gecko;_compatible;_Perplexity-User/1.0;__https://perplexity.ai/perplexity-user) 20260910160246
+Mozilla/5.0_AppleWebKit/537.36_(KHTML,_like_Gecko;_compatible;_WhatsApp/10.0.2.1) 20260910160259
+get_titles/1.0 20260902221517
+END_UNKNOWNREFERER
+
+# Unknown referer Browser - Last visit date
+BEGIN_UNKNOWNREFERERBROWSER 2
+ESP32HTTPClient 20260913015212
+get_titles/1.0 20260902221517
+END_UNKNOWNREFERERBROWSER
+
+# Origin - Pages - Hits 
+BEGIN_ORIGIN 6
+From0 24968 25103
+From1 0 0
+From2 0 0
+From3 0 0
+From4 350 731
+From5 0 0
+END_ORIGIN
+
+# Search engine referers ID - Pages - Hits
+BEGIN_SEREFERRALS 0
+END_SEREFERRALS
+
+# External page referers - Pages - Hits
+# The 10 first Pages must be first (order not required for others)
+BEGIN_PAGEREFS 0
+END_PAGEREFS
+
+# Search keyphrases - Number of search
+# The 10 first number of search must be first (order not required for others)
+BEGIN_SEARCHWORDS 0
+END_SEARCHWORDS
+
+# Search keywords - Number of search
+# The 10 first number of search must be first (order not required for others)
+BEGIN_KEYWORDS 0
+END_KEYWORDS
+
+# Errors - Hits - Bandwidth
+BEGIN_ERRORS 6
+404 4367 5291236
+403 559 862965
+301 12 12770
+500 6 0
+302 90 0
+400 5 1109
+END_ERRORS
+
+# URL with 404 errors - Hits - Last URL referrer
+BEGIN_SIDER_404 947
+/api/.env/public/.env 2 -
+/wp-admin/install.php 172 -
+/metrics 4 -
+/www/.env 9 -
+/erp/.env 7 -
+/@fs/../.env 6 -
+/@fs/root/.vultr-cli.yaml 2 -
+/config.yml 3 -
+/@fs/app/.serverless/serverless-state.json 2 -
+/pi.php 11 -
+/_debugbar/open 3 -
+/home/ubuntu/.aws/credentials 2 -
+/store/.env 7 -
+/github/.env 7 -
+/profile 1 -
+/actions/.env 6 -
+/api/openapi.json 5 -
+/v3/.env 7 -
+/@fs/etc/passwd 2 -
+/api/sysConfig/getAll 1 -
+/instance/config.py 3 -
+/transactional/.env 7 -
+/@fs/var/task/.env 1 -
+/psnlink/.env 7 -
+/cms/.env 9 -
+/actuator/threaddump 1 -
+/wordpress/wp-includes/wlwmanifest.xml 4 -
+/.claude/mcp.json 1 -
+/api/v1/keys 1 -
+/exapi/.env 7 -
+/bin/.env 7 -
+/localhost.key 3 -
+/admin/login 2 -
+/staging/phpinfo.php 7 -
+/vite/.env 7 -
+/backend/aws.json 3 -
+/aws_credentials 1 -
+/.local/share/opencode/auth.json 2 -
+/wp-config.php.swp 2 -
+/.env.production.bak 3 -
+/graphql/.env 7 -
+/rabbitmq/.env 7 -
+/execute 2 -
+/server-info 1 -
+/nginx_status 2 -
+/.azure/accessTokens.json 3 -
+/about 1 -
+/mailgun/.env 7 -
+/config/env.json 2 -
+/sellers.json 1 -
+/stripe.env 2 -
+/api/v1/config 3 -
+/app/api/.env 3 -
+/apps/frontend/.env 2 -
+/@fs/root/.aws/credentials.bak 3 -
+/dump.sql 1 -
+/static../.azure/credentials 2 -
+/web/wp-includes/wlwmanifest.xml 4 -
+/gitlab/.env 7 -
+/@fs/var/www/html/.env 2 -
+/_profiler/latest 2 -
+/pages/index.astro.mjs.map 2 -
+/api/url 4 -
+/cms/wp-includes/wlwmanifest.xml 4 -
+/aws.env 1 -
+/@fs/.env 10 -
+/info 7 -
+/_phpinfo.php 7 -
+/project/.env 7 -
+/@fs/root/.claude/settings.json 1 -
+/campaign/.env 7 -
+/application.properties 3 -
+/resources/.env 7 -
+/.dockerenv 2 -
+/creds.json 2 -
+/service_account.json 5 -
+//2020/wp-includes/wlwmanifest.xml 2 -
+/.hermes/.env 2 -
+/@fs/..%252f..%252f..%252f..%252f..%252fproc/self/environ 5 -
+/pinfo.php 7 -
+/api/account 2 -
+/gcp-key.json 9 -
+/application.env 1 -
+/_nuxt/../.env 2 -
+/@fs/root/.local/share/opencode/auth.json 1 -
+/app-config.json 4 -
+/config/credentials.json.bak 1 -
+/opt/.env 7 -
+/gradle.properties 3 -
+/@fs/root/.azure/accessTokens.json 2 -
+//shop/wp-includes/wlwmanifest.xml 2 -
+/shell 1 -
+/@fs/proc/self/cwd/.aws/credentials 1 -
+/config/stripe.json 1 -
+/telescope/requests 5 -
+/.well-known/ucp 1 -
+/build/manifest.json 3 -
+/service-principal.json 1 -
+/microservice/.env 7 -
+/config/azure.json 2 -
+/@fs/app/terraform.tfvars 2 -
+/api/execute 2 -
+/backend/settings.py 3 -
+/debug/pprof/cmdline 1 -
+/.env.docker 11 -
+/aws/.env 10 -
+/azure-credentials.json 2 -
+/config.php.bak 2 -
+/.ssh/known_hosts 2 -
+/.env.txt 7 -
+/mcp_config.json 2 -
+/.windsurf/mcp.json 2 -
+/prestashop/.env 7 -
+/aws/.env.production 2 -
+/@fs/root/.aws/credentials.backup 1 -
+/graphql 6 -
+/.env.production 13 -
+/public/admin.json 3 -
+/server/.env.production 2 -
+/.zshrc 2 -
+/old_phpinfo.php 7 -
+/dev/.env 9 -
+/userfiles 6 -
+/load 3 -
+/app/.aws/credentials 3 -
+/google-cloud-key.json 1 -
+/mailing/.env 7 -
+/appsettings.Development.json 4 -
+/config/.env.php 4 -
+/api/proxy 4 -
+/api/v1/env 3 -
+/dashboard 2 -
+/api/v2/config 4 -
+/public/env.js 2 -
+/ssl/server.key 4 -
+/jenkins/.env 7 -
+/app_dev.php/_profiler 1 -
+/api/v1/config/ 1 -
+/appsettings.json 3 -
+/company-profile 1 -
+/public_html/phpinfo.php 7 -
+/@fs/root/terraform.tfstate 3 -
+/graphql/console 6 -
+/pages/api/index.astro.mjs.map 2 -
+/admin/.env 11 -
+/service-account.json 11 -
+/app/config.json 3 -
+/development/.env 9 -
+/var/www/.env 10 -
+/app/.env.prod 2 -
+/.azure/azureProfile.json 2 -
+/postmark/.env 7 -
+/server-status 2 -
+/.git-credentials 3 -
+/@fs/root/.config/anthropic/credentials/default.json 2 -
+/.github/workflows/deploy.yml 4 -
+/config/.env 9 -
+/config/application.yml 2 -
+/bootstrap.properties 4 -
+/.env.development.local 2 -
+/.idea/WebServers.xml 1 -
+/storage/.env 9 -
+/node/.env 8 -
+/job/.env 7 -
+/frontend/.env.staging 1 -
+/config/env/aws_credentials.env 1 -
+/.kube/config 1 -
+/.aws/credentials.old 3 -
+/constants.js 2 -
+/config/settings.py 3 -
+/client_secret.json 2 -
+/uploads/XANLG36JUIMH_background565.bin 340 -
+/app/.env.backup 2 -
+/@fs/proc/1/environ 1 -
+/bulk/.env 7 -
+/api/graphql 8 -
+/mailer/.env 7 -
+/serviceAccount.json 2 -
+/auth 2 -
+/.env_copy 7 -
+/userfiles/x 2 -
+/api%2F.env 2 -
+/read 2 -
+/reset-password 2 -
+/v2/.env 9 -
+/wp-includes/css/buttons.css 1 -
+/.env.json 7 -
+/@fs/home/azureuser/.azure/credentials 1 -
+/device-theme.php 2 -
+/backend/.env.prod 2 -
+/services/.env.local 1 -
+/@fs/var/www/html/wp-config.php 3 -
+/@fs/src/.env 3 -
+/config/app/.env 7 -
+/ses/.env 7 -
+/.boto 3 -
+/application_default_credentials.json 9 -
+/sbin/.env 7 -
+/saas/.env 7 -
+/settings.js 4 -
+/server/.env.local 2 -
+/config/gcp-credentials.json 3 -
+/.env.example 11 -
+/api/w/default/jobs_u/get_log_file/../../../../proc/self/environ 1 -
+/api/.env 9 -
+/api/config.json 2 -
+/api/v2/settings 5 -
+/login 4 -
+/account/_payload.json 1 -
+/en/.env 7 -
+/shared/.env 9 -
+/user-panel/.env 7 -
+/@fs/app/gcp-credentials.json 2 -
+/__vite_rsc_findSourceMapURL 8 -
+/register 2 -
+/nuxt/.env 7 -
+/public../.env 2 -
+/dev/phpinfo.php 7 -
+/services/api/.env 1 -
+/assets/.env 7 -
+/vue/.env 7 -
+/private/.env 9 -
+/settings/_payload.json 1 -
+/_payload.json 1 -
+/release/.env 7 -
+/home/ubuntu/.azure/accessTokens.json 2 -
+/.env.js 4 -
+/wp-config.old 2 -
+/geoserver/wfs 1 -
+/backoffice 2 -
+/2019/wp-includes/wlwmanifest.xml 4 -
+/.git/.env 3 -
+/asset-manifest.json 2 -
+//2019/wp-includes/wlwmanifest.xml 2 -
+/home/node/.aws/credentials 1 -
+/mcp.json 2 -
+/admin 9 -
+/.claude/.credentials.json 2 -
+/site/wp-includes/wlwmanifest.xml 4 -
+/config/gcp.json 1 -
+/config.py 3 -
+/notify/.env 7 -
+/static../proc/self/environ 1 -
+/img/logo.png 1 https://crontech.uk/offers.php
+/@fs/root/.config/gcloud/credentials.db 1 -
+/.sendgrid.env 1 -
+/staging/.env 9 -
+/wp-config.php.save 2 -
+/qa/.env 7 -
+/proc/self/cgroup 2 -
+/admin/phpinfo.php 7 -
+/.env 18 -
+/manage/env 1 -
+/apps/.env 9 -
+/users/login 2 -
+/sitemap.xml.gz 1 -
+/@fs/..%252f..%252f..%252f..%252f..%252froot/.env 5 -
+/buildkite/.env 7 -
+/core/phpinfo.php 7 -
+/preview/phpinfo.php 7 -
+/.gcp/credentials.json 2 -
+/service-account-key.json 2 -
+/terraform.tfvars 3 -
+/sign-in 2 -
+/xmlrpc.php 5 -
+/@fs/home/debian/.aws/credentials 3 -
+/webroot/index.php/_environment 7 -
+/@fs/app/.aws/credentials 1 -
+/.zsh_history 2 -
+/.config/gcloud/application_default_credentials.json 8 -
+/api/keys.json 3 -
+/images../.env 4 -
+/admin-panel/.env 7 -
+/llms.txt 2 -
+/wp-admin/phpinfo.php 7 -
+/api/settings 4 -
+/@fs/app/serverless.yml 2 -
+/static../.aws/credentials 1 -
+/google-credentials.json 9 -
+/serverless.yaml 4 -
+/api/webhook 5 -
+/@fs/root/.config/openai/config.json 2 -
+/.streamlit/secrets.toml 4 -
+/@fs/root/.openai/config.json 2 -
+/secrets.env 4 -
+/google-key.json 7 -
+/config/anthropic.json 2 -
+/rest/.env 7 -
+/config.toml 2 -
+/health 3 -
+/frontend/.env.production 2 -
+/awsConfig.js 2 -
+/database/.env 8 -
+/firebase-key.json 7 -
+/zend/.env 7 -
+/z9x8c7v6b5-debug-trigger-mail.crontech.uk 1 -
+/tmp/.env 7 -
+/backup/.env 9 -
+/serviceAccountKey.json 3 -
+/.env.yml 7 -
+/wordpress/xmlrpc.php 1 -
+/env 1 -
+/var/www/html/.env 10 -
+/static../.env 3 -
+/qa/phpinfo.php 7 -
+/settings.json 3 -
+/app 2 -
+/hosting/phpinfo.php 7 -
+/_profiler/open 1 -
+/request 4 -
+/api/v3/.env 7 -
+/secure/.. 2 -
+/.ssh/id_ed25519 4 -
+/claude.json 2 -
+/.cursor/mcp.json 1 -
+/mongodb/.env 7 -
+/@fs/home/ubuntu/.azure/accessTokens.json 2 -
+/src/.env.local 3 -
+/shop/wp-includes/wlwmanifest.xml 4 -
+/firebase-admin.json 3 -
+/angular/.env 7 -
+/@fs/root/.config/gcloud/application_default_credentials.json 3 -
+/.env.php 1 -
+/api/query 2 https://www.crontech.uk
+/.npmrc 3 -
+//wordpress/wp-includes/wlwmanifest.xml 2 -
+/.env.remote 7 -
+/yii/.env 7 -
+/@fs/root/.ovh.conf 2 -
+/@fs/app/credentials.json 1 -
+/secrets/aws.json 3 -
+/.//.env 1 -
+/elmah.axd 2 -
+/beta/.env 7 -
+/backend/.env.local 2 -
+/uat/.env 7 -
+/terraform/.env 7 -
+/api 1 -
+/wp-config.php~ 2 -
+//xmlrpc.php 2 -
+/vendor/.env 7 -
+/.env.prod.local 2 -
+/@fs/app/service-account.json 1 -
+/old/.env 8 -
+/__debug__/ 5 -
+/files../.env 4 -
+/@fs/app/.anthropic/config.json 2 -
+/signup 2 -
+/worker/.env 7 -
+/cloud/.env 7 -
+/@fs/app/terraform.tfstate 3 -
+/.env.prod.bak 3 -
+/config/storage.yml 1 -
+/@fs/app/.config/gcloud/application_default_credentials.json 1 -
+/assets/manifest.json 2 -
+/firebase-adminsdk.json 11 -
+/includes/phpinfo.php 7 -
+/drupal/.env 7 -
+/@fs/root/.env 3 -
+/smtp/phpinfo.php 7 -
+/config.json.js 4 -
+/runtime.js 3 -
+/config.js 2 -
+/cd/.env 7 -
+/env.bak 1 -
+/tools/.env 7 -
+/shopify/.env 7 -
+/config.json 3 -
+/configuration.php.bak 4 -
+/api/gql 1 https://www.crontech.uk
+/api/w/admins/jobs_u/get_log_file/../../../../proc/self/environ 2 -
+/tmp/phpinfo.php 7 -
+/openai_key.json 1 -
+/.bashrc 2 -
+/@fs/home/node/.aws/config 2 -
+/ads.txt 2 -
+/mcp 1 -
+/@fs/home/ubuntu/.openai/config.json 2 -
+/express/.env 7 -
+/ansible/.env 7 -
+/control-panel/.env 7 -
+/app/.env.local 3 -
+/back-end/.env 1 -
+/lib/.env 7 -
+/v1/.env 10 -
+/static//app/.env 2 -
+/config/env.php 2 -
+//2021/wp-includes/wlwmanifest.xml 2 -
+/.env.php.bak 3 -
+/query 2 https://www.crontech.uk
+/site/phpinfo.php 7 -
+/.s3cfg 5 -
+/phpinfo 7 -
+/__/firebase/init.json 3 -
+/.claude.json 1 -
+/debug/vars 3 -
+/@fs/app/.env.local 3 -
+/swagger.json 2 -
+/actuator/mappings 3 -
+/config/aws.php 3 -
+/_next/../.env 1 -
+/@fs/.env.production 1 -
+/kubernetes.yml 2 -
+/static/.env 2 -
+/config.yaml 4 -
+/kafka/.env 7 -
+/core/settings.py 4 -
+/static/manifest.json 2 -
+/update.php 2 -
+/user/login 2 -
+/src/.env 9 -
+/deploy/service-account.json 3 -
+/.vscode/mcp.json 2 -
+/src/.env.production 2 -
+/forgot-password 2 -
+/services/.env 2 -
+/lab/.env 7 -
+/.bash_profile 4 -
+/manifest.webmanifest 2 -
+/aws-exports.js 3 -
+/mailjet/.env 7 -
+/@fs/app/.env.production 5 -
+/@fs/root/.anthropic/config.json 2 -
+/debug/pprof 2 -
+/.azure/config 2 -
+/config/credentials.json 2 -
+/shop/.env 7 -
+/@fs/home/ubuntu/.env 3 -
+/dist/manifest.json 5 -
+/serverless.yml 4 -
+/values.yaml 5 -
+/api/v1/validate/code 1 -
+/media../.azure/credentials 2 -
+/administrator/manifests/files/joomla.xml 1 -
+/config/database.yml 2 -
+/info.php.bak 7 -
+/_image 2 -
+/service-worker.js 1 -
+/backend/.env.backup 2 -
+/awsconfiguration.json 1 -
+/api/inngest 1 -
+/privatekey.key 4 -
+/@fs/etc/apache2/apache2.conf 3 -
+/@fs/root/.aws/config 3 -
+/signin 2 -
+/server.key 3 -
+/horizon/dashboard 1 -
+/.auth.json 1 -
+/wp/wp-includes/wlwmanifest.xml 4 -
+//cms/wp-includes/wlwmanifest.xml 2 -
+/cgi-bin/fetch 3 -
+/travis/.env 7 -
+/amplify_outputs.json 1 -
+/terraform.tfstate 5 -
+/env.old 3 -
+/logs/.env 7 -
+/_next/static/../.env 3 -
+/.config/anthropic/credentials/default.json 2 -
+/sa.json 10 -
+/private/.env.production 2 -
+/.github/.env 1 -
+/.continue/config.json 1 -
+/build../.env 2 -
+/_environment 7 -
+/.env.orig 1 -
+/react/.env 7 -
+/azure/.env 7 -
+/.aws/credentials.bak 3 -
+/.well-known/jwks.json 5 -
+/who-we-are 1 -
+/.ssh/id_dsa 3 -
+/2020/wp-includes/wlwmanifest.xml 4 -
+/fetch 29 -
+/web/.env 9 -
+/.openclaw/.env 2 -
+/company 1 -
+/@fs/home/ec2-user/.aws/config 1 -
+/htdocs/phpinfo.php 7 -
+/_ignition/health-check 2 -
+/elasticsearch/.env 7 -
+/info.php 9 -
+/keys.json 1 -
+/.env.live 7 -
+/.gcloud/credentials.json 1 -
+/svelte/.env 7 -
+/.codex/config.toml 2 -
+/@fs/home/ec2-user/.aws/credentials 5 -
+/google-services.json 1 -
+/@fs/var/run/secrets/kubernetes.io/serviceaccount/ca.crt 1 -
+/s3/.aws/config 2 -
+/.env.prod 9 -
+/api/uploads/..%2f..%2f.env 1 -
+/@fs/home/ubuntu/.azure/credentials 2 -
+/preview/.env 7 -
+/Dockerfile 4 -
+/prod/.env 9 -
+/htdocs/.env 8 -
+/test.php 9 -
+/gateway/.env 7 -
+/api/system 5 -
+/docker-compose.prod.yml 2 -
+/api/v1/.env 7 -
+/queue/.env 7 -
+/@fs/var/www/html/.aws/credentials 2 -
+/archivarix.cms.php 1 -
+/front/.env 1 -
+/.docker/.env 1 -
+/@fs/var/run/secrets/kubernetes.io/serviceaccount/token 4 -
+/config/environment.json 2 -
+/.env.dist 7 -
+/firebase-config.json 3 -
+/@fs/home/ubuntu/.local/share/opencode/auth.json 2 -
+/.gcp/service-account.json 3 -
+/core/app/.env 7 -
+//test/wp-includes/wlwmanifest.xml 2 -
+/assets../.env 3 -
+/.ssh/id_rsa 2 -
+/phpinfo.php.save 7 -
+/.env.backup2 7 -
+/laravel/.env 11 -
+/@fs/root/.oci/config 3 -
+/test/.env 10 -
+/newsletter/.env 7 -
+/id_ecdsa 4 -
+/configuration.js 5 -
+/.env.backup 11 -
+/.env.production.local 2 -
+//wp/wp-includes/wlwmanifest.xml 2 -
+/sendgrid/.env 9 -
+/settings.py 2 -
+/@fs/app/amplifyconfiguration.json 2 -
+/app/settings.py 4 -
+/home/node/.config/gcloud/application_default_credentials.json 1 -
+/@fs/home/ubuntu/.oci/config 2 -
+/dashboard%2F.env 2 -
+/panel/.env 7 -
+/env.json 4 -
+/config/creds.json 2 -
+/img../.env 2 -
+/frontend/.env 9 -
+/.env1 7 -
+/trace.axd 2 -
+/.aws/credentials 2 -
+/backend/.env.staging 2 -
+/@fs/home/ubuntu/.ovh.conf 2 -
+/.svn/entries 1 -
+/wp/.env 11 -
+/auth/login 2 -
+/admin/_payload.json 1 -
+/redirect 5 -
+/beta/phpinfo.php 7 -
+/host.key 5 -
+//wp1/wp-includes/wlwmanifest.xml 2 -
+/p.php 7 -
+/.ssh/config 4 -
+/@fs/home/admin/.aws/credentials 3 -
+/google.json 1 -
+/.openclaw/openclaw.json 1 -
+/.env.vault 3 -
+/firebase-credentials.json 3 -
+/test/wp-includes/wlwmanifest.xml 4 -
+/api/v2/.env 7 -
+/api/staging/.env 7 -
+/.env.backup1 7 -
+/home/ubuntu/.config/gcloud/application_default_credentials.json 1 -
+/@fs/home/node/.config/gcloud/application_default_credentials.json 2 -
+/infrastructure/.env 7 -
+/.gradle/gradle.properties 2 -
+/.codeium/windsurf/mcp_config.json 2 -
+/api/exec 6 -
+/bootstrap.yml 3 -
+/openai.json 2 -
+/sitemap_index.xml 2 -
+/core/.env 11 -
+/phpinfo.php.old 7 -
+/wp-config.php.old 4 -
+/backend/.env 10 -
+/application/.env 7 -
+/web.config 4 -
+/terraform.tfstate.backup 2 -
+/test/phpinfo.php 7 -
+/phpversion.php 7 -
+/api/.aws/credentials 2 -
+/aws-credentials.json 2 -
+/config/application.properties 3 -
+/dist/.env 7 -
+/uat/phpinfo.php 7 -
+/phpinfo.php 10 -
+/src/amplifyconfiguration.json 1 -
+/client/.env 9 -
+/build/.env 7 -
+/old/phpinfo.php 7 -
+/amplifyconfiguration.json 3 -
+/backup.sql 2 -
+/secret.json 2 -
+/aws.json 2 -
+/uploads../.env 3 -
+/download 2 -
+/firebase.json 4 -
+/admin/.env.local 2 -
+/env.js 4 -
+/phpinfo.php.bak 7 -
+/actuator/env 3 -
+/anthropic.json 3 -
+/k8s/.env 7 -
+/api/env 3 -
+/admin/.env.production 2 -
+/robots.txt 79 -
+/.git/config 5 -
+/webpack-stats.json 2 -
+/config/service-account.json 3 -
+/api/w/starter/jobs_u/get_log_file/../../../../proc/self/environ 1 -
+/@fs/root/.aws/credentials 4 -
+/gc-service.json 3 -
+/services/.env.production 1 -
+/releases/.env 7 -
+/@fs/home/ubuntu/.anthropic/config.json 1 -
+/.env.preprod 7 -
+/api/4/config 1 -
+/icon-192x192.png 6 -
+/@fs/home/www-data/.aws/credentials 3 -
+/config/.env.local 1 -
+/api/ping 4 -
+/gql 2 https://www.crontech.uk
+/scripts/.env 7 -
+/dashboard/_payload.json 1 -
+/@fs/root/.config/linode-cli 1 -
+/public/.env 10 -
+/app/backend/.env 3 -
+/inngest 1 -
+/config/sendgrid.env 3 -
+/debug.php 7 -
+/keys/service-account.json 3 -
+/app/.env 10 -
+/@fs/.env.staging 2 -
+/phpinfo.php~ 7 -
+/push_config.json 2 -
+/cpanel/phpinfo.php 7 -
+/console 4 -
+/runtime-config.js 2 -
+/.well-known/security.txt 1 -
+/firebase-service-account.json 4 -
+/@fs/proc/self/environ 5 -
+/secrets.yaml 3 -
+/.flaskenv 2 -
+/gcp-service-account.json 3 -
+/gcp-service.json 3 -
+/mandrill/.env 7 -
+/.env.uat 7 -
+/static//.env 2 -
+/.openai/config.json 1 -
+/redis/.env 7 -
+/config/aws.yml 3 -
+/www/phpinfo.php 7 -
+/backend/config.json 3 -
+/@fs/proc/self/cwd/.env 4 -
+/codeigniter/.env 7 -
+/.env.stage 7 -
+/css../.env 2 -
+/@fs/proc/self/cmdline 4 -
+/@fs/app/.env 5 -
+/backend/api/.env 2 -
+/.env.dev 11 -
+/@fs/app/aws-exports.js 3 -
+/stage/.env 7 -
+/portal/.env 8 -
+/secrets.yml 4 -
+/cronlab/.env 7 -
+/private-key 4 -
+/account/login 2 -
+/magento/.env 7 -
+/administrator/phpinfo.php 7 -
+/.env.test 10 -
+/aboutus 1 -
+/.env~ 8 -
+/gcp-sa.json 7 -
+/s3/credentials 1 -
+/@fs/var/www/.env 3 -
+/admin%2F.env 2 -
+/static//home/user/.env 2 -
+/apps/backend/.env 1 -
+/.anthropic/config.json 1 -
+/server.php 1 -
+/root/.aws/config 1 -
+/readme.html 1 -
+/config/prod.exs 2 -
+/ai.json 1 -
+/claude_desktop_config.json 1 -
+/environment.js 3 -
+/aws-credentials 2 -
+/azure.json 2 -
+/__env.js 4 -
+/.gitlab-ci.yml 4 -
+/docker-compose.yml 4 -
+/proxy 16 -
+/v1/graphql 7 -
+/wp-config.php.bak 4 -
+/actuator/configprops 4 -
+/key.pem 3 -
+/var/run/secrets/kubernetes.io/serviceaccount/token 2 -
+/panel 2 -
+/config/config.php 2 -
+/i.php 12 -
+/secrets.json 4 -
+/@fs/home/ubuntu/.config/gcloud/application_default_credentials.json 2 -
+/credentials.js 5 -
+/config/runtime.exs 3 -
+/@fs/.env.local 1 -
+/proc/self/environ 2 -
+/backend/.env.production 3 -
+/out 3 -
+/cache/.env 7 -
+/admin/config 4 -
+/@fs/root/.ssh/id_ed25519 2 -
+/dashboard/.env 7 -
+/api/run 3 -
+/next/.env 7 -
+/webhook 4 -
+/api/health 2 -
+/dist/.vite/manifest.json 3 -
+/@fs/home/node/.aws/credentials 2 -
+/backend-api/.env 1 -
+/docs/phpinfo.php 7 -
+/.env2 7 -
+/@fs/home/ubuntu/.aws/config 3 -
+/live/.env 7 -
+/current/.env 7 -
+/v1/onboarding/config 1 -
+/rclone.conf 3 -
+//feed/ 2 -
+/.env.ci 7 -
+/.env.sample 7 -
+/docker-compose.yaml 3 -
+//web/wp-includes/wlwmanifest.xml 2 -
+/nest/.env 7 -
+/backups/.env 7 -
+/deploy/.env 9 -
+/root/.config/gcloud/application_default_credentials.json 1 -
+/.hermes/config.yaml 2 -
+/@fs/app/.terraform/terraform.tfstate 1 -
+/account 2 -
+/@fs/root/.ssh/id_rsa 3 -
+/gcp/.env 7 -
+/frontend/.env.local 1 -
+/internal/.env.production 1 -
+/.htpasswd 1 -
+/ai_config.json 1 -
+/login/.. 2 -
+/mysql/.env 7 -
+/backend/.aws/credentials 1 -
+/api-keys.json 3 -
+/tokens.json 2 -
+/wp-includes/ID3/license.txt 4 -
+/.bash_history 1 -
+/cron/.env 7 -
+/id_ed25519 4 -
+/api/fetch 5 -
+/actuator/loggers 2 -
+/application.yml 3 -
+/assets/env.js 1 -
+/site/.env 8 -
+/actuator 2 -
+/.ssh/authorized_keys 2 -
+/.claude/settings.json 2 -
+/settings%2F.env 2 -
+/app/.env.production 2 -
+/api_keys.json 1 -
+/.codeium/settings.json 1 -
+/our-story 1 -
+/.docker/config.json 4 -
+/php-info.php 7 -
+/secrets/gcp.json 2 -
+/@fs/root/.azure/credentials 3 -
+/postgres/.env 7 -
+/z9x8c7v6b5-debug-trigger-crontech.uk 1 -
+/api/aws.json 2 -
+/.env.bak 10 -
+//wp-includes/ID3/license.txt 2 -
+/service/.env 8 -
+/.env.testing 2 -
+/cakephp/.env 7 -
+/config/aws.json 1 -
+/.env.staging 9 -
+/public/phpinfo.php 7 -
+/wp1/wp-includes/wlwmanifest.xml 4 -
+/settings.local.py 2 -
+/sitemaps/.env 7 -
+/ngsw.json 2 -
+/config.env 4 -
+/packages/api/.env 2 -
+/.gitconfig 1 -
+/portal 2 -
+/.azure/credentials 3 -
+/local.settings.json 2 -
+/joomla/.env 7 -
+/llm.json 1 -
+/ses.env 3 -
+/keyfile.json 10 -
+/debug 4 -
+/config/openai.json 3 -
+/ssl/localhost.key 4 -
+/@fs/.env.development 1 -
+/app_dev.php 2 -
+/html/.env 9 -
+/server/.env 9 -
+/@fs/usr/src/app/.config/gcloud/application_default_credentials.json 1 -
+/key.json 11 -
+/api/v0/run_sql 1 -
+/static../.azure/accessTokens.json 3 -
+/gcp.json 2 -
+/.profile 2 -
+/wp-json 2 -
+/.ssh/id_ecdsa 2 -
+/run 3 -
+/static../.config/gcloud/application_default_credentials.json 2 -
+/@fs/usr/src/app/.aws/credentials 1 -
+/@fs/proc/self/cwd/.config/gcloud/application_default_credentials.json 2 -
+/k8s/secrets.yaml 2 -
+/proc/self/cmdline 2 -
+/stripe.json 3 -
+//.env 2 -
+/wp-config.php 1 -
+/api/config 3 -
+/database.php 1 -
+/api/redirect 4 -
+/gcloud-service-account.json 1 -
+/@fs/root/.aws/sso/cache/ 2 -
+/sitemap.xml 3 -
+/webmail/phpinfo.php 7 -
+/_next/../.azure/credentials 2 -
+/_profiler/phpinfo 7 -
+/.vite/manifest.json 2 -
+/config/secrets.yml 3 -
+/.vscode/launch.json 4 -
+/.env.anthropic 2 -
+/id_dsa 4 -
+/.env.yaml 7 -
+/@vite/env 1 -
+/secure 2 -
+/url 3 -
+/.hermes/auth.json 1 -
+/.env.save 9 -
+/server-info.php 7 -
+/@fs/home/ubuntu/.aws/credentials 3 -
+/.git/HEAD 1 -
+/ci/.env 7 -
+/id_rsa 4 -
+/administrator/.env 7 -
+/.env.development 12 -
+/credentials.json 10 -
+/crm/.env 7 -
+/uploads/.env 7 -
+/config/firebase-admin.json 4 -
+/local/.env 7 -
+/security.txt 1 -
+/_astro/pages/index.astro.mjs.map 2 -
+/symfony/.env 9 -
+/@fs/var/www/.aws/credentials 3 -
+/api/request 6 -
+/storage/logs/laravel.log 3 -
+/ 14 -
+/.env.swp 10 -
+/smtp/.env 7 -
+/public_html/.env 9 -
+/api/.env.bak 3 -
+/src/api/.env 3 -
+/server-status.php 7 -
+/.secrets.json 1 -
+/mail/phpinfo.php 7 -
+/api/dev/.env 7 -
+/sitemap.txt 2 -
+/.env.old 11 -
+/contact 1 -
+/dist../.env 2 -
+/kubernetes/.env 7 -
+/sender/.env 7 -
+/cgi-bin/test 3 -
+/php.php 7 -
+/google-service-account.json 4 -
+/read-document 2 -
+/production/.env 11 -
+/js../.env 1 -
+/auth.json 3 -
+/config/master.key 4 -
+/_next/../.aws/credentials 2 -
+/api/v1/settings 3 -
+/openapi.json 4 -
+/.aws/config 4 -
+/notifications/.env 7 -
+/apps/api/.env 1 -
+/backend/service-account.json 2 -
+/api/fs/exec 1 -
+/.. 2 -
+/bootstrap/.env 7 -
+/config/auth.json 1 -
+/docker/.env 9 -
+/@fs/usr/src/app/.env 2 -
+/plugins/editors/tinymce/tinymce.xml 1 -
+/aws-config.js 4 -
+/gcp-credentials.json 10 -
+/home/azureuser/.azure/credentials 3 -
+/.env.local 17 -
+/about-us 1 -
+/wordpress/.env 7 -
+/wp-login.php 5 -
+/2021/wp-includes/wlwmanifest.xml 4 -
+/@fs/home/ubuntu/.config/anthropic/credentials/default.json 1 -
+/feed/ 4 -
+/laravel5/.env 7 -
+/INSTALL.txt 1 -
+/.gcloud/credentials 1 -
+/aws/credentials 1 -
+/internal/.env 10 -
+/mail/.env 10 -
+/.env.openai 2 -
+/home/ec2-user/.aws/credentials 2 -
+/sw.js 2 -
+/email/.env 9 -
+/media../.env 4 -
+/.aider.conf.yml 1 -
+/sendgrid.env 4 -
+/stripe/.env 1 -
+/blog/wp-includes/wlwmanifest.xml 4 -
+/sitemaps.xml 1 -
+/log-viewer 2 -
+/back/.env 2 -
+/@fs/proc/self/cwd/.azure/credentials 3 -
+/circleci/.env 7 -
+/appsettings.Production.json 3 -
+/sparkpost/.env 7 -
+/.pypirc 1 -
+//blog/wp-includes/wlwmanifest.xml 2 -
+/manifest.json 1 -
+/@fs/..%252f..%252f..%252f..%252f..%252fapp/.env 3 -
+/system 3 -
+/brevo/.env 7 -
+//site/wp-includes/wlwmanifest.xml 2 -
+/frontend/.env.prod 2 -
+/@fs/root/rootkey.csv 3 -
+/vendor/phpunit/phpunit/src/Util/PHP/eval-stdin.php 2 -
+/root/.aws/credentials 2 -
+/humans.txt 1 -
+/home/ec2-user/.aws/config 1 -
+/config.php 1 -
+/keys/gcp.json 1 -
+/api/v1/models 1 -
+/temp/.env 7 -
+END_SIDER_404
+
+# URL with 400 errors - Hits - Last URL referrer
+BEGIN_SIDER_400 3
+/device-theme.php 1 -
+/.well-known/autoconfig/mail/config-v1.1.xml 1 -
+/api.php 3 -
+END_SIDER_400
+
+# URL with 403 errors - Hits - Last URL referrer
+BEGIN_SIDER_403 360
+/google-cloud-key.json 2 -
+/load 3 -
+/userfiles 2 -
+/dev/.env 2 -
+/uploads../.env 1 -
+/secret.json 1 -
+/.env.production 2 -
+/public/admin.json 1 -
+/graphql 2 https://www.crontech.uk
+/@fs/root/.aws/credentials.backup 2 -
+/aws/.env.production 1 -
+/amplifyconfiguration.json 1 -
+/client/.env 1 -
+/phpinfo.php 1 -
+/robots.txt 5 -
+/.git/config 10 -
+/api/env 1 -
+/appsettings.json 1 -
+/app_dev.php/_profiler 1 -
+/ssl/server.key 1 -
+/api/v2/config 1 -
+/api/v1/env 1 -
+/api/proxy 2 -
+/config/.env 2 -
+/config/.env.local 1 -
+/.github/workflows/deploy.yml 1 -
+/.git-credentials 1 -
+/@fs/app/.openai/config.json 2 -
+/@fs/home/ubuntu/.anthropic/config.json 1 -
+/services/.env.production 1 -
+/.azure/azureProfile.json 1 -
+/gc-service.json 1 -
+/@fs/root/.aws/credentials 1 -
+/development/.env 1 -
+/api/w/starter/jobs_u/get_log_file/../../../../proc/self/environ 1 -
+/config/settings.py 1 -
+/.kube/config 1 -
+/frontend/.env.staging 1 -
+/config/env/aws_credentials.env 1 -
+/node/.env 2 -
+/@fs/root/.config/hcloud/cli.toml 2 -
+/public/.env 1 -
+/@fs/root/.config/linode-cli 1 -
+/.idea/WebServers.xml 1 -
+/config/application.yml 1 -
+/.mcp.json 2 -
+/v2/.env 1 -
+/read 2 -
+/.flaskenv 1 -
+/@fs/proc/self/environ 1 -
+/firebase-service-account.json 1 -
+/runtime-config.js 2 -
+/push_config.json 2 -
+/@fs/proc/1/environ 1 -
+/@fs/.env.staging 1 -
+/client_secret.json 1 -
+/verify.php 1 -
+/.boto 2 -
+/@fs/src/.env 4 -
+/services/.env.local 1 -
+/@fs/home/azureuser/.azure/credentials 2 -
+/.cursor/config.json 2 -
+/.openai/config.json 1 -
+/home/ubuntu/.azure/credentials 3 -
+/gcp-service.json 1 -
+/s3/credentials 2 -
+/@fs/app/gcp-credentials.json 1 -
+/.env~ 2 -
+/api/config.json 1 -
+/api/w/default/jobs_u/get_log_file/../../../../proc/self/environ 1 -
+/api/.env 2 -
+/secrets.yml 1 -
+/stage/.env 3 -
+/config/gcp-credentials.json 1 -
+/backend/api/.env 1 -
+/settings.js 1 -
+/@fs/proc/self/cmdline 1 -
+/@fs/app/.env 2 -
+/application_default_credentials.json 1 -
+/.git/.env 4 -
+/v1/graphql 1 https://www.crontech.uk
+/geoserver/wfs 1 -
+/proxy 4 -
+/.gitlab-ci.yml 1 -
+/contact.php 2 -
+/azure.json 1 -
+/ai.json 1 -
+/claude_desktop_config.json 1 -
+/environment.js 2 -
+/root/.aws/config 1 -
+/config/prod.exs 2 -
+/home/ubuntu/.azure/accessTokens.json 1 -
+/.anthropic/config.json 1 -
+/apps/backend/.env 1 -
+/private/.env 1 -
+/services/api/.env 1 -
+/@fs/var/run/secrets/kubernetes.io/serviceaccount/ca.crt 1 -
+/_debugbar/open 2 -
+/pi.php 1 -
+/@fs/app/.serverless/serverless-state.json 1 -
+/.gcloud/credentials.json 1 -
+/keys.json 1 -
+/_ignition/health-check 3 -
+/@fs/../.env 1 -
+/@fs/home/ec2-user/.aws/config 1 -
+/web/.env 2 -
+/api/v1/keys 1 -
+/api/system 1 -
+/.claude/mcp.json 1 -
+/@fs/var/task/.env 3 -
+/htdocs/.env 1 -
+/prod/.env 1 -
+/Dockerfile 1 -
+/instance/config.py 1 -
+/@fs/home/ubuntu/.azure/credentials 1 -
+/@fs/etc/passwd 1 -
+/llm_config.json 2 -
+/.env.prod 1 -
+/s3/.aws/config 1 -
+/.ssh/id_rsa 2 -
+/assets../.env 1 -
+/firebase-config.json 1 -
+/aws_credentials 1 -
+/@fs/var/run/secrets/kubernetes.io/serviceaccount/token 1 -
+/.docker/.env 2 -
+/localhost.key 2 -
+/front/.env 1 -
+/@fs/var/www/html/.aws/credentials 1 -
+/@fs/app/amplifyconfiguration.json 1 -
+/settings.py 2 -
+/sendgrid/.env 1 -
+/server-info 1 -
+/.aws/credentials 2 -
+/@fs/var/www/html/.env 1 -
+/frontend/.env 1 -
+/img../.env 2 -
+/static../.azure/credentials 1 -
+/dump.sql 1 -
+/offers.php 2 -
+/api/v1/config 1 -
+/stripe.env 1 -
+/home/node/.config/gcloud/application_default_credentials.json 1 -
+/.openclaw/openclaw.json 1 -
+/google.json 1 -
+/creds.json 1 -
+/credentials.ini 2 -
+/%24%7B%28%23a%3D%40org.apache.commons.io.IOUtils%40toString%28%40java.lang.Runtime%40getRuntime%28%29.exec%28%22echo%20GSCAN_CF%22%29.getInputStream%28%29%2C%22utf-8%22%29%29.%28%40com.opensymphony.webwork.ServletActionContext%40getResponse%28%29.setHeade 2 -
+/application.properties 1 -
+/@fs/root/.claude/settings.json 1 -
+/redirect 1 -
+/.svn/entries 4 -
+/aws.env 1 -
+/api/url 2 -
+/backend/.env 1 -
+/config/stripe.json 2 -
+/openai.json 1 -
+/@fs/proc/self/cwd/.aws/credentials 1 -
+/bootstrap.yml 1 -
+/api/exec 2 -
+/shell 1 -
+/@fs/root/.azure/accessTokens.json 1 -
+/.gradle/gradle.properties 2 -
+/config/credentials.json.bak 1 -
+/home/ubuntu/.config/gcloud/application_default_credentials.json 1 -
+/gradle.properties 1 -
+/@fs/home/node/.config/gcloud/application_default_credentials.json 1 -
+/@fs/root/.local/share/opencode/auth.json 1 -
+/application.env 2 -
+/video.mp4 1 -
+/_nuxt/../.env 2 -
+/gcp-key.json 1 -
+/config.php.bak 2 -
+/azure-credentials.json 1 -
+/config/application.properties 1 -
+/aws-credentials.json 1 -
+/about.php 1 -
+/api/.aws/credentials 1 -
+/backend/settings.py 1 -
+/@fs/app/terraform.tfvars 1 -
+/service-principal.json 2 -
+/config/.env.production 2 -
+/_next/../.azure/credentials 1 -
+/env.bak 2 -
+/@fs/root/.aws/sso/cache/ 1 -
+/gcloud-service-account.json 1 -
+/api/redirect 2 -
+/database.php 1 -
+/config.js 2 -
+/api/config 2 -
+/config.json.js 1 -
+/runtime.js 2 -
+/wp-config.php 1 -
+/@fs/root/.env 1 -
+/@fs/usr/src/app/.aws/credentials 2 -
+/back-end/.env 1 -
+/@fs/home/ubuntu/.aws/credentials 2 -
+/.git/HEAD 3 -
+/@fs/home/node/.aws/config 1 -
+/url 3 -
+/openai_key.json 1 -
+/.hermes/auth.json 1 -
+/@vite/env 1 -
+/api/gql 1 https://crontech.uk
+/.env.anthropic 1 -
+/.vscode/launch.json 1 -
+/configuration.php.bak 1 -
+/config.json 1 -
+/@fs/app/.env.local 2 -
+/.env.swp 1 -
+/ 41 -
+/storage/logs/laravel.log 1 -
+/.claude.json 1 -
+/__/firebase/init.json 1 -
+/@fs/app/rootkey.csv 3 -
+/.env.php.bak 1 -
+/credentials.json 1 -
+/.env.development 2 -
+/auth.json 1 -
+/src/.env.production 1 -
+/js../.env 1 -
+/cgi-bin/test 1 -
+/src/.env 1 -
+/.secrets.json 1 -
+/_next/../.env 2 -
+/@fs/.env.production 2 -
+/actuator/mappings 1 -
+/.azure/config 1 -
+/@fs/usr/src/app/.env 1 -
+/docker/.env 1 -
+/config/auth.json 1 -
+/apps/api/.env 1 -
+/backend/service-account.json 1 -
+/aws-exports.js 1 -
+/.bash_profile 1 -
+/services/.env 1 -
+/openapi.json 1 -
+/api/v1/settings 1 -
+/.env.openai 1 -
+/sw.js 2 -
+/@fs/etc/nginx/nginx.conf 3 -
+/aws/credentials 2 -
+/config/database.yml 1 -
+/.gcloud/credentials 1 -
+/media../.azure/credentials 1 -
+/.terraform/terraform.tfstate 2 -
+/@fs/home/ubuntu/.config/anthropic/credentials/default.json 1 -
+/serverless.yml 1 -
+/wordpress/.env 2 -
+/system 1 -
+/appsettings.Production.json 1 -
+/cgi-bin/fetch 3 -
+/back/.env 1 -
+/horizon/dashboard 1 -
+/.auth.json 1 -
+/stripe/.env 2 -
+/server.key 1 -
+/.aider.conf.yml 2 -
+/email/.env 1 -
+/.cursor/settings.json 2 -
+/fetch 15 -
+/api/v1/models 1 -
+/keys/gcp.json 1 -
+/config.php 1 -
+/.ssh/id_dsa 1 -
+/home/ec2-user/.aws/config 1 -
+/.env.orig 1 -
+/.github/.env 3 -
+/.continue/config.json 1 -
+/@fs/root/.config/gcloud/credentials.db 1 -
+/@fs/home/ubuntu/.config/gcloud/application_default_credentials.json 1 -
+/static../proc/self/environ 1 -
+/api/ 3 https://crontech.uk/api
+/config.py 1 -
+/config/gcp.json 1 -
+/key.pem 1 -
+/admin 1 -
+/home/node/.aws/credentials 1 -
+/actuator/configprops 1 -
+/service-account-key.json 1 -
+/.gcp/credentials.json 1 -
+/out 3 -
+/apps/.env 1 -
+/manage/env 1 -
+/.env 3 -
+/@fs/.env.local 2 -
+/config/runtime.exs 1 -
+/staging/.env 2 -
+/.sendgrid.env 2 -
+/@fs/app/.terraform/terraform.tfstate 2 -
+/root/.config/gcloud/application_default_credentials.json 1 -
+/secrets.env 1 -
+/docker-compose.yaml 1 -
+/api/webhook 1 -
+/serverless.yaml 1 -
+/google-credentials.json 1 -
+/static../.aws/credentials 1 -
+/@fs/app/serverless.yml 1 -
+/rclone.conf 2 -
+/backend-api/.env 2 -
+/.config/gcloud/application_default_credentials.json 1 -
+/@fs/home/node/.aws/credentials 1 -
+/.zsh_history 1 -
+/webhook 2 -
+/@fs/app/.aws/credentials 2 -
+/api/run 1 -
+/@fs/root/.ssh/id_ed25519 1 -
+/admin/config 2 -
+/api/fetch 1 -
+/backup/.env 1 -
+/.bash_history 2 -
+/awsConfig.js 1 -
+/frontend/.env.production 1 -
+/database/.env 1 -
+/health 1 -
+/backend/.aws/credentials 2 -
+/ai_config.json 1 -
+/config.toml 2 -
+/.htpasswd 4 -
+/config/anthropic.json 1 -
+/internal/.env.production 1 -
+/frontend/.env.local 2 -
+/service/.env 1 -
+/.env.bak 1 -
+/request 2 -
+/secrets/gcp.json 1 -
+/_profiler/open 1 -
+/.codeium/settings.json 1 -
+/settings.json 1 -
+/api_keys.json 1 -
+/app/.env.production 1 -
+/static../.env 1 -
+/env 1 -
+/assets/env.js 1 -
+/serviceAccountKey.json 1 -
+/.npmrc 1 -
+/.env.php 1 -
+/@fs/root/.config/gcloud/application_default_credentials.json 2 -
+/firebase-admin.json 1 -
+/config/aws.json 2 -
+/.env.staging 1 -
+/app/.env.staging 2 -
+/.cursor/mcp.json 1 -
+/ssl/localhost.key 1 -
+/@fs/.env.development 2 -
+/debug 2 -
+/backend/.env.local 1 -
+/llm.json 1 -
+/.//.env 1 -
+/local.settings.json 2 -
+/.azure/credentials 1 -
+/@fs/app/credentials.json 2 -
+/.gitconfig 1 -
+/config/storage.yml 3 -
+/@fs/app/.config/gcloud/application_default_credentials.json 1 -
+/run 1 -
+/.ssh/id_ecdsa 2 -
+/api/v0/run_sql 1 -
+/server/.env 1 -
+/@fs/usr/src/app/.config/gcloud/application_default_credentials.json 1 -
+/@fs/app/service-account.json 2 -
+END_SIDER_403
+
+# Host - Pages - Hits - Bandwidth - Last visit date - [Start date of last visit] - [Last page of last visit]
+# [Start date of last visit] and [Last page of last visit] are saved only if session is not finished
+# The 10 first Hits must be first (order not required for others)
+BEGIN_VISITOR 54
+82.19.170.150 25190 25695 162103505 20260913015212 20260913000036 /device-theme.php
+104.199.227.190 17 17 309850 20260910160259
+35.95.120.191 9 9 96775 20260906155550
+185.110.51.38 6 6 121295 20260907115632
+34.79.186.35 6 15 301714 20260913013329 20260913013329 /
+34.23.79.87 6 6 27127 20260908084945
+34.1.37.135 5 5 32515 20260906115042
+8.229.23.212 4 4 81233 20260909190935
+66.207.183.161 4 4 43857 20260907141528
+23.83.92.30 4 4 43801 20260907160826
+34.86.40.12 1 1 82223 20260903101503
+188.166.67.50 1 1 19900 20260908233613
+35.234.144.153 3 3 28950 20260911192359
+179.0.163.23 1 1 18493 20260912224154
+104.131.167.168 2 2 40539 20260904081745
+194.124.158.34 1 1 20372 20260912151932
+41.188.104.30 1 1 20324 20260910173047
+178.62.215.76 2 2 40522 20260910085913
+137.184.143.22 2 2 40522 20260912105830
+146.190.124.159 1 1 4608 20260905185515
+120.239.255.191 2 2 20773 20260907235137
+66.102.9.36 1 1 3248 20260911225811
+68.183.146.74 2 2 40550 20260906083727
+149.56.150.123 1 1 82216 20260903233637
+34.26.163.40 3 3 13566 20260912151058
+5.77.139.67 1 1 18867 20260909081009
+35.188.248.237 3 3 60926 20260912163957
+57.128.28.91 1 1 81977 20260902221517
+102.141.212.19 1 1 20350 20260902003821
+209.38.72.31 2 2 40533 20260908091632
+146.120.199.50 1 1 2622 20260912115427
+82.23.55.74 2 3 11565246 20260903150335
+34.17.132.186 3 3 60926 20260912161730
+82.23.63.193 2 3 11565318 20260903150323
+169.224.124.196 1 1 2415 20260912130833
+66.249.81.36 1 1 3248 20260911225810
+74.125.210.36 1 1 3248 20260911225811
+169.58.22.97 1 1 20172 20260901192501
+35.177.242.208 2 2 556 20260904165520
+103.77.42.174 1 1 20350 20260901205742
+102.158.200.105 1 1 7454 20260912160344
+179.96.172.128 1 1 20313 20260910041854
+157.230.209.151 2 2 40539 20260902092507
+34.70.4.124 1 1 82216 20260906160509
+35.189.9.52 3 3 60906 20260907000503
+34.27.199.128 1 1 82223 20260902162953
+177.121.181.43 1 1 2300 20260913002357
+154.203.71.197 1 1 3708 20260911093559
+35.198.15.96 3 3 60906 20260901201433
+158.173.77.142 1 1 20152 20260903101630
+184.170.16.226 1 1 18808 20260909081009
+143.244.155.24 2 2 40550 20260906074823
+91.36.200.139 1 1 3117 20260911093602
+35.193.254.129 1 1 82223 20260901151210
+END_VISITOR
+
+# Date - Pages - Hits - Bandwidth - Visits
+BEGIN_DAY 13
+20260901 2429 2429 2166646 5
+20260902 2421 2421 2093218 5
+20260903 2423 2425 25182471 6
+20260904 2402 2402 1897408 3
+20260905 2420 2420 1873776 2
+20260906 2444 2445 2196921 7
+20260907 2438 2438 2160726 6
+20260908 2216 2227 14648423 4
+20260909 188 188 259370 4
+20260910 335 335 633384 5
+20260911 1588 1840 46609747 9
+20260912 3730 3971 87443117 10
+20260913 284 293 465440 3
+END_DAY
+
+# Session range - Number of visits
+BEGIN_SESSION 4
+5mn-15mn 1
+0s-30s 45
+30s-2mn 8
+1h+ 13
+END_SESSION
+
+# URL - Pages - Bandwidth - Entry - Exit
+# The 10 first Pages must be first (order not required for others)
+BEGIN_SIDER 24
+/api.php 15307 13659941 8 9
+/update/version.json 7965 4524158 4 3
+/device-theme.php 820 508477 0 1
+/background.php 341 144584 2 0
+/update/policy.json 310 195737 0 0
+/ 125 2608948 46 36
+/settings.php 81 480258 0 0
+/update/theme.json 74 44173 0 0
+/calendar.php 66 463836 0 0
+/firmware.php 64 143024 0 0
+/verify.php 2 15169 1 2
+/weather.php 13 35879 0 0
+/purchase.php 8 22478 4 4
+/manifest.json 6 3728 0 0
+/login.php 42 113160 1 1
+/api/ 2 6492 0 0
+/api_eicr.php 31 6973 0 3
+/offers.php 30 96259 1 1
+/test.html 1 1909 0 0
+/admin.php 1 568 0 0
+/register.php 2 4599 1 1
+/contact.php 8 30871 1 4
+/theme.php 11 26865 0 0
+/about.php 8 27910 0 2
+END_SIDER
+
+# Payload Range - Payload Frequency
+BEGIN_FILESIZE 7
+100-500 3347
+2K-5K 214
+1K-2K 5624
+5K+ 485
+0-44 510
+44-100 42
+500-1K 20868
+END_FILESIZE
+
+# Request Time Range - Request Time Frequency
+BEGIN_REQUESTTIME 0
+END_REQUESTTIME

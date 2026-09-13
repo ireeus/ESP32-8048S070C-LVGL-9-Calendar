@@ -1,0 +1,877 @@
+AWSTATS DATA FILE 8.0 (build 20240604)
+# If you remove this file, all statistics for date 202605 will be lost/reset.
+# Last config file used to build this data file was /home/host908429/domains/crontech.uk/awstats/.data/awstats.www.crontech.uk.conf.
+
+# Position (offset in bytes) in this file for beginning of each section for
+# direct I/O access. If you made changes somewhere in this file, you should
+# also remove completely the MAP section (AWStats will rewrite it at next
+# update).
+BEGIN_MAP 30
+POS_GENERAL 2177                
+POS_TIME 2863                
+POS_VISITOR 14831               
+POS_DAY 24068               
+POS_DOMAIN 3799                
+POS_LOGIN 4285                
+POS_ROBOT 4440                
+POS_WORMS 5193                
+POS_EMAILSENDER 5324                
+POS_EMAILRECEIVER 5467                
+POS_SESSION 25031               
+POS_FILESIZE 25848               
+POS_REQUESTTIME 25990               
+POS_SIDER 25219               
+POS_FILETYPES 5602                
+POS_DOWNLOADS 5839                
+POS_OS 5887                
+POS_BROWSER 6213                
+POS_SCREENSIZE 7735                
+POS_UNKNOWNREFERER 7809                
+POS_UNKNOWNREFERERBROWSER 8307                
+POS_ORIGIN 8452                
+POS_SEREFERRALS 8594                
+POS_PAGEREFS 8757                
+POS_SEARCHWORDS 9000                
+POS_KEYWORDS 9189                
+POS_MISC 2526                
+POS_ERRORS 9285                
+POS_CLUSTER 4141                
+POS_SIDER_400 9412                
+POS_SIDER_403 14443               
+POS_SIDER_404 9494                
+END_MAP
+
+# LastLine    = Date of last record processed - Last record line number in last log - Last record offset in last log - Last record signature value
+# FirstTime   = Date of first visit for history file
+# LastTime    = Date of last visit for history file
+# LastUpdate  = Date of last update - Nb of parsed records - Nb of parsed old records - Nb of parsed new records - Nb of parsed corrupted - Nb of parsed dropped
+# TotalVisits = Number of visits
+# TotalUnique = Number of unique visitors
+# MonthHostsKnown   = Number of hosts known
+# MonthHostsUnKnown = Number of hosts unknown
+BEGIN_GENERAL 8
+LastLine 20260601000027 2310 275679 6820717684962
+FirstTime 20260501000036
+LastTime 20260531235951
+LastUpdate 20260601013921 2310 0 2309 0 0
+TotalVisits 288                 
+TotalUnique 236                 
+MonthHostsKnown 0                   
+MonthHostsUnknown 238                 
+END_GENERAL
+
+# Misc ID - Pages - Hits - Bandwidth
+BEGIN_MISC 10
+AddToFavourites 0 12 0
+JavascriptDisabled 0 0 0
+RealPlayerSupport 0 0 0
+QuickTimeSupport 0 0 0
+WindowsMediaPlayerSupport 0 0 0
+FlashSupport 0 0 0
+PDFSupport 0 0 0
+TotalMisc 0 0 0
+DirectorSupport 0 0 0
+JavaEnabled 0 0 0
+END_MISC
+
+# Hour - Pages - Hits - Bandwidth - Not viewed Pages - Not viewed Hits - Not viewed Bandwidth
+BEGIN_TIME 24
+0 2876 2877 3260479 17 58 110791
+1 3082 3083 3020447 8 62 116775
+2 2927 2927 2862176 31 73 145256
+3 2950 2950 2948382 14 55 103186
+4 2945 2945 2989831 20 65 170953
+5 2965 2965 2878775 4 47 1891838
+6 3008 3009 3509111 10 68 110176
+7 3060 3060 3247593 30 106 172887
+8 3051 3051 3164054 42 114 215640
+9 3066 3066 3043616 34 99 192097
+10 3057 3058 3087003 26 78 128390
+11 3003 3003 2993569 12 88 193079
+12 3016 3016 2938940 60 109 185362
+13 2954 2954 2925450 16 99 178868
+14 3008 3017 3294815 20 105 196999
+15 3042 3043 3529801 9 118 185085
+16 3034 3049 4813776 30 110 202894
+17 3016 3028 3086584 24 89 167211
+18 2948 2957 5079339 15 52 116639
+19 2862 2881 4272517 21 65 177509
+20 2841 2851 3224747 9 48 136029
+21 2913 2931 3487337 21 87 2066385
+22 2856 2895 4834835 8 70 113953
+23 2842 2866 4328410 18 62 100192
+END_TIME
+
+# Domain - Pages - Hits - Bandwidth
+# The 10 first Pages must be first (order not required for others)
+BEGIN_DOMAIN 18
+gb 70799 70860 72941531
+us 189 268 3385794
+nl 144 144 643216
+cn 39 48 2551807
+pl 38 38 349304
+se 30 30 115829
+fr 20 22 1045444
+de 20 27 1159563
+ca 14 14 77716
+lu 9 11 449612
+au 1 1 4604
+sg 5 5 41976
+lt 1 1 4091
+es 1 1 3313
+jp 1 1 3647
+in 3 3 12933
+it 5 5 18376
+ru 3 3 12831
+END_DOMAIN
+
+# Cluster ID - Pages - Hits - Bandwidth
+BEGIN_CLUSTER 0
+END_CLUSTER
+
+# Login - Pages - Hits - Bandwidth - Last visit
+# The 10 first Pages must be first (order not required for others)
+BEGIN_LOGIN 0
+END_LOGIN
+
+# Robot ID - Hits - Bandwidth - Last visit - Hits on robots.txt
+# The 10 first Hits must be first (order not required for others)
+BEGIN_ROBOT 17
+Googlebot/ 38 142531 20260531104917 0
+checker 26 103904 20260531185553 0
+dataprovider\.com 26 3808042 20260515210915 0
+Go\-http\-client/ 24 19501 20260531121550 0
+ning 21 276002 20260530203031 0
+360Spider 16 65415 20260531102759 0
+^mozilla\/5\.0$ 7 71558 20260530145625 0
+crawl 6 24695 20260526095629 0
+python 5 13281 20260524123034 0
+no_user_agent 5 59378 20260525195827 0
+scrapy 3 13158 20260521145847 0
+core 4 1800 20260527003245 0
+bingbot/ 3 9939 20260528162158 0
+netcraft 4 51220 20260511230555 0
+nutch 1 4054 20260522110606 0
+CheckMarkNetwork/ 2 4448 20260506023946 0
+bot[\s_+:,\.\;\/\\-] 3 10941 20260513210528 0
+END_ROBOT
+
+# Worm ID - Hits - Bandwidth - Last visit
+# The 5 first Hits must be first (order not required for others)
+BEGIN_WORMS 0
+END_WORMS
+
+# EMail - Hits - Bandwidth - Last visit
+# The 20 first Hits must be first (order not required for others)
+BEGIN_EMAILSENDER 0
+END_EMAILSENDER
+
+# EMail - Hits - Bandwidth - Last visit
+# The 20 first hits must be first (order not required for others)
+BEGIN_EMAILRECEIVER 0
+END_EMAILRECEIVER
+
+# Files type - Hits - Bandwidth - Bandwidth without compression - Bandwidth after compression
+BEGIN_FILETYPES 9
+woff2 2 125680 0 0
+svg 1 386 0 0
+Unknown 10 3302 0 0
+mp4 17 5008346 0 0
+css 3 69335 0 0
+json 25110 14287182 0 0
+php 46202 57187728 0 0
+png 18 3726404 0 0
+js 119 2413224 0 0
+END_FILETYPES
+
+# Downloads - Hits - Bandwidth
+BEGIN_DOWNLOADS 0
+END_DOWNLOADS
+
+# OS ID - Hits
+BEGIN_OS ID - Hits - Pages 18
+linuxcentos 1 1
+win10 382 298
+win7 33 24
+macosx14 1 1
+macosx13 5 5
+linuxubuntu 10 10
+android12 4 4
+Unknown 70749 70749
+android10 91 59
+android 6 6
+android13 2 2
+win8.1 2 2
+macosx15 71 52
+unix 3 3
+ios_iphone 10 10
+linux 109 93
+androidmarshmallow 1 1
+macosx 2 2
+END_OS
+
+# Browser ID - Hits - Pages
+BEGIN_BROWSER 72
+chrome132.0.0.0 2 2
+chrome91.0.4472.114 1 1
+safari13.0.4 18 18
+chrome146.0.0.0 5 4
+chrome146.0.7680.165 2 1
+chrome135.0.6422.113 1 1
+chrome124.0.0.0 3 3
+chrome81.0.4044.129 1 1
+chrome131.0.0.0 41 13
+opera80.4.4244.7786 2 2
+firefox128.0 2 2
+chrome134.0.0.0 4 4
+chrome79.0.3945.79 16 1
+firefox115 2 2
+safari17.3.1 2 2
+firefox134.0 8 8
+safari26.0 3 3
+chrome144.0.0.0 1 1
+chrome145.0.0.0 3 3
+chrome68.0.3440.106 5 5
+mozilla 32 32
+chrome111.0.0.0 20 20
+firefox150.0 1 1
+chrome126.0.0.0 2 2
+Unknown 70718 70718
+firefox142.0 19 19
+chrome78.0.3904.108 31 31
+safari17.1.2 1 1
+firefox123 3 3
+chrome128.0.0.0 1 1
+chrome142.0.0.0 34 34
+safari26.0.1 1 1
+chrome122.0.0.0 3 3
+chrome55.0.2259.1932 1 1
+chrome79.0.3945.130 1 1
+chrome138.0.0.0 6 6
+chrome100.0.0.0 1 1
+chrome83.0.4103.61 10 1
+opera114.0.0. 6 5
+chrome121.0.0.0 3 3
+firefox124.0 1 1
+chrome105.0.0.0 4 4
+chrome130.0.0.0 50 41
+chrome124.0 11 2
+netscape5.0 144 135
+chrome135.0.0.0 6 6
+chrome116.0.0.0 4 4
+chrome131.0.6778.86 1 1
+chrome107.0.0.0 12 11
+firefox138.0 1 1
+chrome136.0.0.0 1 1
+chrome80.0.3987.162 2 2
+chrome143.0.7499.110 2 2
+chrome120.0.0.0 5 5
+firefox149.0 11 11
+firefox132.0 2 2
+chrome95.0.4638.69 6 6
+firefox29.0 1 1
+chrome59.0.3071.104 1 1
+chrome112.0.5615.136 2 2
+chrome115.0.0.0 2 2
+chrome92.0.4515.107 14 6
+chrome110.0.0.0 2 2
+safari17.0 5 5
+chrome148.0.7778.96 1 1
+chrome50.0.2661.102 21 21
+chrome139.0.0.0 2 2
+safari18.4 1 1
+safari17.0.96 1 1
+chrome147.0.0.0 63 31
+chrome125.0.0.0 1 1
+chrome148.0.0.0 86 49
+END_BROWSER
+
+# Screen size - Hits
+BEGIN_SCREENSIZE 0
+END_SCREENSIZE
+
+# Unknown referer OS - Last visit date
+BEGIN_UNKNOWNREFERER 6
+Mozilla/5.0_(compatible;_DomainShield/1.0) 20260507212142
+Mozilla/5.0_(compatible;_Let's_Encrypt_validation_server;__https://www.letsencrypt.org) 20260521192328
+ESP32HTTPClient 20260531235951
+Mozilla/5.0_(compatible;_CensysInspect/1.1;__https://about.censys.io/) 20260529190408
+Mozilla/5.0_(compatible;_InternetMeasurement/1.0;__https://internet-measurement.com/) 20260519081123
+RootEvidence/1.0 20260509072332
+END_UNKNOWNREFERER
+
+# Unknown referer Browser - Last visit date
+BEGIN_UNKNOWNREFERERBROWSER 2
+ESP32HTTPClient 20260531235951
+RootEvidence/1.0 20260509072332
+END_UNKNOWNREFERERBROWSER
+
+# Origin - Pages - Hits 
+BEGIN_ORIGIN 6
+From0 71229 71288
+From1 0 0
+From2 3 3
+From3 0 24
+From4 90 167
+From5 0 0
+END_ORIGIN
+
+# Search engine referers ID - Pages - Hits
+BEGIN_SEREFERRALS 1
+www_google_com 3 3
+END_SEREFERRALS
+
+# External page referers - Pages - Hits
+# The 10 first Pages must be first (order not required for others)
+BEGIN_PAGEREFS 2
+https://mail.crontech.uk/skins/elastic/styles/styles.min.css 0 2
+https://mail.crontech.uk 0 22
+END_PAGEREFS
+
+# Search keyphrases - Number of search
+# The 10 first number of search must be first (order not required for others)
+BEGIN_SEARCHWORDS 2
+mail.crontech.uk 2
+www.crontech.uk 1
+END_SEARCHWORDS
+
+# Search keywords - Number of search
+# The 10 first number of search must be first (order not required for others)
+BEGIN_KEYWORDS 2
+mail.crontech.uk 2
+www.crontech.uk 1
+END_KEYWORDS
+
+# Errors - Hits - Bandwidth
+BEGIN_ERRORS 4
+302 2 0
+301 13 13299
+403 33 51473
+404 1586 2471661
+END_ERRORS
+
+# URL with 400 errors - Hits - Last URL referrer
+BEGIN_SIDER_400 0
+END_SIDER_400
+
+# URL with 404 errors - Hits - Last URL referrer
+BEGIN_SIDER_404 185
+/wp-includes/wlwmanifest.xml 11 -
+/cms/wp-includes/wlwmanifest.xml 17 -
+/program/js/jquery.min.js.map 1 -
+//2ba5e40d-598b-11f1-b0b2-fbd6542ee4dc 1 -
+//wp-cron.php 8 -
+/api/openapi.json 1 -
+//4cb3321e-564b-11f1-b0b2-fbd6542ee4dc 1 -
+/wordpress/ 1 -
+//0d134c46-57ed-11f1-b0b2-fbd6542ee4dc 1 -
+/wp/wp-includes/wlwmanifest.xml 17 -
+//cms/wp-includes/wlwmanifest.xml 1 -
+/shop/wp-includes/wlwmanifest.xml 17 -
+/runtime-config.js 1 -
+/.well-known/ 2 binance.com
+/website/wp-includes/wlwmanifest.xml 11 -
+/web/wp-includes/wlwmanifest.xml 17 -
+//xmlrpc.php 1 -
+/enhancecp 2 -
+/sitemap.txt 4 -
+//91ada343-5728-11f1-82c3-2dfe726b4ac8 1 -
+/llms.txt 3 -
+/configprops 2 -
+//.aws/config 1 -
+/about-us 1 -
+/.env.dev.local 4 -
+//.aws/credentials 1 -
+/terms-of-service 1 -
+/media/wp-includes/wlwmanifest.xml 11 -
+/program/js/app.min.js.map 1 -
+/wp1/wp-includes/wlwmanifest.xml 17 -
+/webshell.php 6 -
+/wp-login.php 11 -
+/wp-includes/js/jquery/jquery.js 5 -
+/google-service-account.json 1 -
+/api/env 1 -
+/wp-admin/install.php 2 -
+/./tailwind.config.js 1 -
+//2020/wp-includes/wlwmanifest.xml 1 -
+/program/js/common.min.js.map 1 -
+/site/wp-includes/wlwmanifest.xml 17 -
+//shop/wp-includes/wlwmanifest.xml 1 -
+/ 6 -
+/.env.development.local 4 -
+/.env 6 -
+/api/health 1 -
+/admin/controller/extension/extension/ 2 binance.com
+/.git/HEAD 1 -
+/impressum 1 -
+/heapdump 2 -
+//66a51aee-5a91-11f1-b0b2-fbd6542ee4dc 1 -
+/.env.production 2 -
+/plugins/twofactor_gauthenticator/twofactor_gauthenticator.js.map 1 -
+/profiler 2 -
+/env 2 -
+/ads.txt 5 -
+/api/v1/config 1 -
+/.git/config 8 -
+/wp-content/txets.php 2 www.google.com
+/app/.env 6 -
+/.aws/credentials 1 -
+/sitemap_index.xml 2 https://www.google.com/search
+/./tailwind.config.mjs 1 -
+//2019/wp-includes/wlwmanifest.xml 1 -
+/privacy-policy 1 -
+//2021/wp-includes/wlwmanifest.xml 1 -
+/info 1 -
+/api/settings 1 -
+/wordpress/wp-includes/wlwmanifest.xml 17 -
+/.env.dev 4 -
+/firebase-config.json 1 -
+/contact 1 -
+/local.html 3 https://crontech.uk/location/sw.js
+/wp-includes/ID3/license.txt 6 -
+/_profiler/phpinfo.php 1 -
+//0b9b2623-d26a-43d5-9950-da7f0e0905c3 1 -
+/company-details 1 -
+/blog/wp-includes/wlwmanifest.xml 17 -
+/laravel/.env 1 -
+/wp-admin/css/ 2 binance.com
+/app/.env.local 4 -
+/actuator/configprops 2 -
+/contact-us 1 -
+/company-info 1 -
+/team 1 -
+/our-team 1 -
+/about 1 -
+/api/.env 6 -
+/skins/elastic/deps/bootstrap.bundle.min.js.map 1 -
+//pms 1 -
+/api/v1/settings 1 -
+/sito/wp-includes/wlwmanifest.xml 11 -
+/_rNd9xZ7kL3 1 -
+/privacy-notice 1 -
+/.well-known/security.txt 7 -
+/terms 1 -
+//web/wp-includes/wlwmanifest.xml 1 -
+//admin/config 1 -
+/settings.json 1 -
+/INSTALL.txt 3 -
+/wp2/wp-includes/wlwmanifest.xml 11 -
+/actuator/env 2 -
+/app/ 5 -
+/plugins/editors/tinymce/tinymce.xml 3 -
+/serviceAccountKey.json 1 -
+/humans.txt 2 -
+/security.txt 2 -
+/api/config 1 -
+/terms-and-conditions 1 -
+/txets.php 2 www.google.com
+/wp-json/gravitysmtp/v1/tests/mock-data 1 -
+/program/js/jstz.min.js.map 1 -
+/meet-the-team 1 -
+/.env.save 1 -
+/wp-includes/css/buttons.css 3 -
+/.env.docker 4 -
+/api/v1/env 1 -
+/.env.local 5 -
+/sites/default/files/ 2 binance.com
+/legal 1 -
+/2020/wp-includes/wlwmanifest.xml 6 -
+//wp-includes/ID3/license.txt 1 -
+//site/wp-includes/wlwmanifest.xml 1 -
+//wp/wp-includes/wlwmanifest.xml 1 -
+/login/ 5 -
+/webshell 7 -
+//a2362158-559a-11f1-b0b2-fbd6542ee4dc 1 -
+//blog/wp-includes/wlwmanifest.xml 1 -
+/service-account.json 1 -
+//wordpress/wp-includes/wlwmanifest.xml 1 -
+//wp-includes/js/wp-emoji-release.min.js 8 -
+/application/.env 1 -
+/api/v2/settings 1 -
+/credentials.json 1 -
+/_profiler/phpinfo 1 -
+/beta/.env 1 -
+/legal-notice 1 -
+/docker-compose.yml 2 -
+/robots.txt 223 -
+/info.php 1 -
+/__/firebase/init.json 1 -
+/firebase-service-account.json 1 -
+/api/v2/config 1 -
+/2021/wp-includes/wlwmanifest.xml 6 -
+/plugins/jqueryui/js/jquery-ui.min.js.map 1 -
+//feed/ 1 -
+/plugins/twofactor_gauthenticator/qrcode.min.js.map 1 -
+/actuator/heapdump 2 -
+//config/.aws/credentials 1 -
+/config.js 1 -
+/phpinfo 1 -
+/shell.php 6 -
+/aboutus 1 -
+/xmlrpc.php 17 -
+/feed/ 6 -
+/env.json 1 -
+/img/logo.png 28 https://crontech.uk/
+/2019/wp-includes/wlwmanifest.xml 17 -
+/uploads/XANLG36JUIMH_background565.bin 711 -
+/.well-known/jwks.json 1 -
+/config/.env 1 -
+/.well-known/llms.txt 1 -
+/readme.html 3 -
+/shell 6 -
+/prod/.env 1 -
+/media/system/js/core.js 5 -
+/news/wp-includes/wlwmanifest.xml 11 -
+/test/wp-includes/wlwmanifest.xml 17 -
+/contactus 1 -
+/env.js 1 -
+/config.json 1 -
+/wp-admin/ 2 -
+/manifest.webmanifest 1 -
+/privacy 1 -
+/docker-compose.prod.yml 2 -
+/administrator/manifests/files/joomla.xml 3 -
+//home/user/.aws/credentials 1 -
+/sitemap.xml 12 -
+//727badc2-5be7-11f1-b0b2-fbd6542ee4dc 1 -
+/2018/wp-includes/wlwmanifest.xml 11 -
+/profiler/phpinfo 2 -
+/icon-192x192.png 5 https://crontech.uk/login.php
+//test/wp-includes/wlwmanifest.xml 1 -
+/skins/elastic/ui.min.js.map 1 -
+/admin/.env 5 -
+//wp1/wp-includes/wlwmanifest.xml 1 -
+END_SIDER_404
+
+# URL with 403 errors - Hits - Last URL referrer
+BEGIN_SIDER_403 5
+/.git/config 15 -
+/robots.txt 4 -
+/ 9 -
+/.git/HEAD 3 -
+/uploads/ 2 binance.com
+END_SIDER_403
+
+# Host - Pages - Hits - Bandwidth - Last visit date - [Start date of last visit] - [Last page of last visit]
+# [Start date of last visit] and [Last page of last visit] are saved only if session is not finished
+# The 10 first Hits must be first (order not required for others)
+BEGIN_VISITOR 238
+82.19.170.150 70785 70846 72882315 20260531235951
+45.148.10.238 54 54 230846 20260523083329
+45.148.10.249 46 46 195891 20260523113021
+45.148.10.42 32 32 137756 20260524102720
+185.110.51.34 12 12 48682 20260516013244
+54.38.58.71 12 12 165744 20260530074103
+183.207.45.103 11 12 482027 20260504061357
+104.164.173.41 10 10 35591 20260521211928
+104.164.126.64 10 10 35677 20260521192502
+104.164.173.14 9 9 31735 20260521203344
+77.74.177.114 1 1 4277 20260514024802
+185.247.137.64 1 1 4240 20260507085205
+34.45.7.85 1 1 4091 20260520204444
+5.78.127.155 1 1 4240 20260522152103
+159.223.220.56 2 2 8327 20260501104126
+23.178.112.104 1 1 339 20260521192320
+141.98.11.134 1 1 4091 20260514092508
+192.36.109.116 1 1 4013 20260512080750
+35.175.190.54 2 2 8368 20260511182150
+199.45.155.100 1 1 4277 20260528124622
+45.146.54.18 2 2 27810 20260515082838
+123.163.255.138 1 1 4091 20260526002203
+44.247.86.22 1 1 13998 20260513054410
+66.132.195.71 1 1 4277 20260520001427
+167.94.146.59 1 1 4277 20260529190408
+104.248.21.253 2 2 8368 20260519085914
+35.89.79.129 1 1 328 20260521192328
+91.231.89.127 1 1 13775 20260521195539
+94.234.78.74 1 1 4277 20260507212142
+176.65.139.229 1 1 9711 20260519060619
+35.196.230.145 1 1 13812 20260527163516
+3.233.88.40 1 1 4277 20260509235247
+5.133.192.192 1 1 4054 20260502033431
+92.204.54.124 5 6 460388 20260523001059
+165.245.236.78 2 2 8368 20260522141901
+35.192.229.245 3 3 41294 20260518153646
+34.209.253.132 1 1 328 20260521192320
+157.173.122.176 1 1 4091 20260528053429
+34.42.34.237 2 2 7526 20260529205738
+205.169.39.67 2 26 717235 20260527224359
+176.65.139.233 1 1 9711 20260523043235
+42.228.112.192 1 1 4091 20260523010420
+185.12.151.99 2 2 8108 20260529020133
+34.63.27.62 1 1 13812 20260526133304
+176.65.139.232 1 1 9711 20260531082940
+143.198.99.202 2 2 8368 20260522150755
+167.71.101.241 2 2 8368 20260517091905
+93.158.90.36 1 1 4054 20260516185323
+66.132.172.189 1 1 4091 20260529083803
+206.189.198.44 1 1 3755 20260513035503
+134.122.4.112 2 2 8368 20260528162009
+3.146.98.244 1 1 3647 20260504042831
+5.133.192.133 1 1 4277 20260529200423
+34.4.102.132 1 1 3755 20260504085938
+34.150.221.233 3 3 41294 20260518140204
+104.252.191.133 1 1 3941 20260521203309
+116.203.117.103 2 2 4820 20260516233435
+182.91.53.249 1 1 4091 20260521210458
+47.103.110.169 0 1 153826 
+192.36.109.128 1 1 4054 20260519033630
+138.68.158.84 2 2 8368 20260518122557
+47.128.232.73 1 1 328 20260521192320
+185.247.137.55 1 1 4054 20260507113752
+116.202.146.229 1 1 3313 20260516101012
+192.36.109.131 1 1 4054 20260507150436
+208.84.101.168 2 2 8198 20260515100758
+91.231.89.33 1 1 13775 20260521195541
+104.168.98.195 1 1 4240 20260519150736
+85.204.70.118 1 1 13812 20260501224640
+13.49.159.158 2 2 656 20260521192327
+192.36.109.114 1 1 4054 20260525190530
+116.202.240.113 1 1 3313 20260528215457
+192.36.109.102 1 1 4054 20260509221347
+192.36.207.10 1 1 4054 20260525011857
+13.41.195.120 3 3 12031 20260520125910
+168.144.82.9 2 2 8327 20260505100310
+83.168.90.89 2 2 27624 20260529010315
+142.93.42.71 1 1 4611 20260530123813
+39.154.0.123 1 1 4091 20260527235408
+5.133.192.105 1 1 4277 20260511062201
+199.45.154.112 1 1 4091 20260505140719
+192.241.135.168 2 2 8368 20260517150126
+104.23.217.24 1 1 4641 20260525103509
+167.172.239.206 1 1 4609 20260525213224
+104.28.216.164 1 1 4099 20260520083942
+36.43.86.245 1 1 4091 20260523221617
+35.231.77.43 3 3 41294 20260511074548
+149.56.150.105 1 1 13754 20260507045115
+34.1.26.99 1 1 3755 20260513103747
+66.132.172.35 1 1 4604 20260519095428
+20.125.29.41 1 2 3446 20260528162201
+18.191.232.26 1 1 328 20260521192320
+35.235.71.243 3 3 12720 20260528043747
+34.182.201.232 1 1 13812 20260524132743
+66.132.224.225 1 1 4277 20260528114707
+34.181.151.23 3 3 41320 20260520072504
+178.62.74.63 1 1 4607 20260527214523
+34.193.251.180 3 3 13159 20260515080402
+47.100.103.45 1 2 92808 20260516181430
+18.143.199.206 1 1 328 20260521192328
+176.65.139.237 2 3 200541 20260531082940
+192.178.15.35 1 1 4028 20260521225706
+185.247.137.120 1 1 4569 20260519081123
+157.250.205.132 1 1 4277 20260528185813
+46.225.146.136 2 8 1092729 20260517190357
+93.158.90.67 1 1 4054 20260515071537
+192.71.126.245 1 1 4054 20260505075301
+1.194.70.171 1 1 4091 20260521000321
+192.36.109.84 1 1 4054 20260503140116
+34.126.108.192 3 3 41320 20260517115800
+185.188.61.217 1 1 3313 20260521192456
+66.132.224.236 1 1 4277 20260520130730
+34.91.4.231 3 3 41320 20260520060239
+223.90.39.109 1 1 4091 20260521222846
+93.159.230.85 1 1 4277 20260528025719
+222.138.43.230 1 1 4091 20260526002241
+178.156.229.216 1 1 3277 20260528181001
+183.207.48.155 1 1 13812 20260504065435
+104.164.126.7 1 1 3941 20260521192453
+34.84.132.166 1 1 3647 20260508074637
+192.36.198.80 1 1 4054 20260522132349
+104.252.191.239 2 11 268986 20260521192510
+139.196.159.228 1 1 4091 20260516181428
+66.249.88.42 2 2 8056 20260519192928
+71.6.240.147 2 2 8294 20260509072332
+138.197.135.152 2 2 8368 20260522140822
+106.125.135.8 1 1 4091 20260525010414
+3.151.194.164 1 1 4606 20260510153552
+3.20.255.114 1 1 3647 20260504042732
+107.172.195.169 1 10 264384 20260521211929
+66.132.186.205 1 1 4091 20260528125139
+125.79.82.155 1 1 4091 20260517210546
+35.91.242.220 1 1 13998 20260518100053
+137.184.38.69 2 2 8368 20260521085928
+165.22.201.229 2 2 8368 20260513090545
+183.199.192.149 1 1 4091 20260523020612
+167.94.146.52 1 1 4091 20260521212404
+162.159.113.82 1 1 3972 20260526171352
+165.227.205.59 2 2 8368 20260522131956
+101.133.149.233 1 1 4240 20260516181428
+137.184.166.84 2 2 8368 20260531084122
+104.196.10.54 3 3 41320 20260521151921
+23.178.112.108 1 1 339 20260521192327
+176.65.139.239 1 2 186555 20260519060619
+136.119.45.5 1 1 13812 20260524131039
+167.94.146.63 2 2 8883 20260529103505
+172.70.240.57 1 1 4308 20260526171351
+3.18.186.238 1 1 4277 20260502140539
+1.194.132.218 1 1 4091 20260524001437
+64.227.121.126 2 2 8368 20260511101426
+34.75.239.25 3 3 41242 20260510154436
+5.133.192.160 1 1 4277 20260502154923
+159.203.42.198 2 2 8368 20260526160516
+142.93.150.6 2 2 8368 20260507110143
+3.140.188.14 1 1 3755 20260511043440
+64.227.140.49 1 1 4606 20260516031225
+57.131.21.29 5 5 18376 20260510030504
+5.9.94.125 3 4 10700 20260515105114
+185.238.75.151 3 3 41436 20260531073548
+35.208.130.243 2 2 7510 20260504091153
+66.132.224.232 1 1 4091 20260503232703
+35.93.94.162 1 1 13998 20260527182211
+104.28.225.25 1 10 264392 20260519143334
+159.89.89.114 2 2 8368 20260515082431
+66.132.195.47 1 1 4277 20260504044400
+149.56.160.243 1 1 13754 20260515210902
+104.248.168.234 2 2 8368 20260523085215
+172.70.240.193 1 1 4642 20260526171350
+5.133.192.127 1 1 4277 20260520123129
+54.38.56.124 3 3 41436 20260527190200
+34.24.121.167 3 3 41320 20260510142754
+91.231.89.121 1 1 13961 20260521195401
+103.4.251.0 2 11 268997 20260521211924
+176.65.139.234 2 2 23672 20260527072658
+104.164.173.2 1 1 4606 20260521192457
+183.199.180.211 1 1 4091 20260527062927
+39.154.11.166 1 1 4091 20260519233441
+167.99.177.217 2 2 8368 20260509083152
+64.225.64.221 2 2 8368 20260503040917
+68.183.48.220 3 3 12975 20260522135436
+1.24.30.2 1 1 4091 20260520210027
+91.98.178.14 1 1 3313 20260528215624
+192.36.109.125 1 1 4054 20260521055712
+35.196.100.38 1 10 257426 20260504222016
+185.12.148.78 1 1 4054 20260508092554
+39.65.83.129 1 1 4091 20260519213339
+66.249.65.195 1 1 2930 20260518094328
+167.172.20.148 5 5 69034 20260511085157
+46.101.255.99 2 2 8368 20260503101828
+34.11.147.219 1 1 13812 20260524163834
+176.65.139.235 1 1 9711 20260529071920
+37.72.140.10 1 1 4277 20260506030034
+222.77.167.234 1 1 0 20260530220254
+85.25.185.79 5 6 460459 20260526154721
+1.28.88.7 1 1 4091 20260527085449
+152.42.138.78 2 2 8368 20260527093310
+93.158.90.153 1 1 4054 20260508012456
+101.133.157.248 1 3 398728 20260516181434
+91.231.89.96 2 2 27736 20260521195723
+34.31.88.250 2 2 7526 20260526145543
+137.184.206.81 2 2 8327 20260531073537
+91.231.89.35 1 1 9711 20260521195425
+192.71.126.175 1 1 4054 20260530035944
+185.110.51.39 6 6 24382 20260531013548
+66.102.9.36 1 1 4028 20260521225706
+91.98.176.8 1 1 3044 20260528215624
+167.172.28.71 1 1 4607 20260523210020
+107.172.195.136 9 9 31650 20260521211931
+91.231.89.125 1 1 13961 20260521195519
+167.71.139.94 2 2 8368 20260524160655
+66.132.195.67 1 1 4606 20260519132351
+44.201.110.79 2 2 8513 20260518135323
+3.147.140.127 1 1 328 20260521192327
+171.12.234.61 1 1 4091 20260525043310
+101.133.227.58 2 4 710219 20260516181434
+123.53.251.90 1 1 4091 20260531224359
+8.228.70.240 3 3 41320 20260505111143
+192.36.109.96 1 1 4054 20260531224526
+107.172.195.32 2 11 268986 20260521203323
+18.218.41.181 1 1 3941 20260507055442
+35.237.129.40 1 1 13786 20260527082330
+199.45.154.128 1 1 4277 20260511232122
+66.249.81.8 1 1 4028 20260521225705
+192.36.109.83 1 1 4054 20260513130942
+45.94.247.7 1 1 4277 20260513171658
+101.133.152.40 0 2 610236 
+91.231.89.19 1 1 13775 20260521195314
+134.122.14.87 2 2 8368 20260504103947
+116.22.3.20 1 1 4091 20260516232011
+70.189.46.92 1 1 4240 20260513050040
+168.144.145.241 2 2 8368 20260525090241
+34.1.30.248 1 1 3755 20260513104338
+34.9.216.246 2 2 7526 20260523160535
+192.71.2.56 2 2 8108 20260524121106
+170.64.137.20 1 1 4604 20260522132020
+199.45.154.115 1 1 4604 20260511224111
+104.248.233.189 1 1 3755 20260513065240
+66.249.81.7 1 1 4003 20260519192928
+END_VISITOR
+
+# Date - Pages - Hits - Bandwidth - Visits
+BEGIN_DAY 31
+20260501 2503 2517 3963891 4
+20260502 2410 2410 2679438 4
+20260503 2464 2464 2719826 5
+20260504 2435 2446 3455423 10
+20260505 2416 2431 4031050 5
+20260506 2321 2321 2573984 2
+20260507 2408 2408 2702408 8
+20260508 2421 2421 2620705 4
+20260509 1932 1932 1991384 6
+20260510 2361 2361 2513003 6
+20260511 2433 2433 2636812 10
+20260512 1753 1753 1811012 2
+20260513 10 10 49957 9
+20260514 1794 1794 1686261 4
+20260515 2430 2431 2239678 8
+20260516 2437 2445 4111121 13
+20260517 2463 2469 3258080 6
+20260518 2442 2442 2210532 7
+20260519 2433 2447 2599153 14
+20260520 2433 2433 2206399 10
+20260521 2494 2531 3496806 39
+20260522 2496 2496 2430846 12
+20260523 2469 2470 2641525 15
+20260524 2482 2496 4341113 10
+20260525 2467 2479 2512507 9
+20260526 2429 2430 2789930 11
+20260527 2438 2462 3143546 16
+20260528 2431 2432 2364871 15
+20260529 2428 2428 2349931 10
+20260530 2421 2421 2171293 5
+20260531 2468 2469 2519102 9
+END_DAY
+
+# Session range - Number of visits
+BEGIN_SESSION 5
+1h+ 35
+30mn-1h 1
+15mn-30mn 3
+5mn-15mn 1
+0s-30s 248
+END_SESSION
+
+# URL - Pages - Bandwidth - Entry - Exit
+# The 10 first Pages must be first (order not required for others)
+BEGIN_SIDER 17
+/api.php 44904 53648130 23 18
+/update/version.json 25101 14282469 8 12
+/background.php 711 301464 0 1
+/ 487 2747850 241 229
+/location/view.php 42 177680 0 0
+/purchase.php 10 35566 1 5
+/login.php 10 30537 0 0
+/register.php 9 27114 1 1
+// 8 110496 0 7
+/map/ 8 31299 5 5
+/.well-known/acme-challenge/SKBL4IX028xqxhEa1DcqGX99Y8HR2VQYs3AOvtS5AgM 5 1651 5 4
+/calendar.php 7 47314 0 0
+/location/ 5 27349 0 0
+/manifest.json 5 4309 0 1
+/.well-known/acme-challenge/IipGvaaIRaPlDhpu4AA2NPKjkYzSjxmSzIREq19hOJs 5 1651 4 5
+/location/manifest.json 4 404 0 0
+/weather.php 1 2929 0 0
+END_SIDER
+
+# Payload Range - Payload Frequency
+BEGIN_FILESIZE 6
+500-1K 26789
+0-44 164
+2K-5K 604
+100-500 3930
+1K-2K 41654
+5K+ 268
+END_FILESIZE
+
+# Request Time Range - Request Time Frequency
+BEGIN_REQUESTTIME 0
+END_REQUESTTIME
