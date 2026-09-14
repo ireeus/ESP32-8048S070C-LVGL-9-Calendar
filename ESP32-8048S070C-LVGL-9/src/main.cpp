@@ -326,6 +326,12 @@ static bool themePushPending = false;
 // deleted - these point into it, so a stale entry would be a dangling pointer.
 static lv_obj_t *brightness_step_btns[UI_BRIGHTNESS_BUTTON_COUNT] =
     {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
+// The labels inside those buttons. Auto mode recolours the FONT of the preset
+// the current daylight brightness is nearest to, so the live level is visible on
+// the row while the background highlight stays on Auto. Same lifetime rule as
+// brightness_step_btns above.
+static lv_obj_t *brightness_step_labels[UI_BRIGHTNESS_BUTTON_COUNT] =
+    {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
 // There is deliberately no backlight level global any more. TFT_BL turned out to
 // be an enable pin, so PWM on it blacks the panel out below ~60% (see the note in
 // display.h) - there is nothing between full on and off to store.
@@ -2608,6 +2614,7 @@ static void settings_popup_deleted_cb(lv_event_t *e) {
   // Leaving the pointers would leave brightness_steps_highlight() writing through
   // freed memory the next time it ran.
   for (int i = 0; i < UI_BRIGHTNESS_BUTTON_COUNT; i++) brightness_step_btns[i] = nullptr;
+  for (int i = 0; i < UI_BRIGHTNESS_BUTTON_COUNT; i++) brightness_step_labels[i] = nullptr;
 }
 // Internal RAM is the scarce resource on this board - 320KB shared with the WiFi
 // and TLS stacks - while the LVGL draw buffers and the panel framebuffer live in
@@ -2862,6 +2869,7 @@ void show_settings_popup() {
       // the setting.
       lv_obj_add_event_cb(step_btn, brightness_step_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
       brightness_step_btns[i] = step_btn;
+      brightness_step_labels[i] = step_lbl;
     }
     brightness_steps_highlight(ui_brightness_active_button());
 
@@ -4362,13 +4370,16 @@ static void updateAutoBrightness(bool force) {
                   quantised, darkness);
   }
   apply_ui_darkness_ex(darkness, false);
+  // Keep the settings row honest if it is open while the sun moves: the preset
+  // whose font is highlighted has to follow the level. A no-op when the popup is
+  // closed, because every entry in the button/label arrays is nullptr then.
+  brightness_steps_highlight(ui_brightness_active_button());
 }
-// Which button should look selected: 0 = Auto, 1..N = preset index + 1. The
-// device can also be handed an arbitrary value by the website's theme, so a
-// manual value is matched to the nearest preset rather than an exact one.
-static int ui_brightness_active_button() {
-  if (g_brightness_auto) return 0;
-  const int brightness = ui_brightness();
+// Which preset a brightness value is nearest to, as a preset index 0..N-1. The
+// device can be handed an arbitrary value by the website's theme and Auto lands
+// on any point of the 0..100 range, so this always maps to the closest of the
+// five labelled steps rather than requiring an exact hit.
+static int ui_brightness_nearest_preset(int brightness) {
   int best = 0;
   int best_dist = 1000;
   for (int i = 0; i < UI_BRIGHTNESS_PRESET_COUNT; i++) {
@@ -4376,20 +4387,43 @@ static int ui_brightness_active_button() {
     if (dist < 0) dist = -dist;
     if (dist < best_dist) { best_dist = dist; best = i; }
   }
-  return best + 1;
+  return best;
+}
+// Which button should look selected: 0 = Auto, 1..N = preset index + 1.
+static int ui_brightness_active_button() {
+  if (g_brightness_auto) return 0;
+  return ui_brightness_nearest_preset(ui_brightness()) + 1;
 }
 // Repaint the brightness row: the active button takes the scheme accent with a
-// white ring, the rest stay neutral. Called when the row is built and after every
-// tap. `active` is a button index - 0 is Auto.
+// white ring, the rest stay neutral. Called when the row is built, after every
+// tap, and whenever Auto moves the level. `active` is a button index - 0 is Auto.
+//
+// While Auto is running the row also shows WHERE it currently is: the preset the
+// sun's brightness is nearest to gets the accent as its FONT colour. The
+// background stays neutral so it still reads as "not chosen by hand", but the
+// row stops looking frozen from sunrise to sunset. LV_STYLE_TEXT_COLOR is
+// removed (rather than set to a guessed white) for the other labels so they fall
+// back to whatever the active LVGL theme uses.
 static void brightness_steps_highlight(int active) {
+  const int auto_match = g_brightness_auto
+                             ? ui_brightness_nearest_preset(ui_brightness()) + 1
+                             : -1;
   for (int i = 0; i < UI_BRIGHTNESS_BUTTON_COUNT; i++) {
     lv_obj_t *btn = brightness_step_btns[i];
-    if (!btn) continue;
-    const bool on = (i == active);
-    lv_obj_set_style_bg_color(btn, on ? scheme_accent() : lv_color_hex(0x3A3A3A), 0);
-    lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(btn, on ? 2 : 1, 0);
-    lv_obj_set_style_border_color(btn, on ? lv_color_hex(0xFFFFFF) : lv_color_hex(0x555555), 0);
+    if (btn) {
+      const bool on = (i == active);
+      lv_obj_set_style_bg_color(btn, on ? scheme_accent() : lv_color_hex(0x3A3A3A), 0);
+      lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
+      lv_obj_set_style_border_width(btn, on ? 2 : 1, 0);
+      lv_obj_set_style_border_color(btn, on ? lv_color_hex(0xFFFFFF) : lv_color_hex(0x555555), 0);
+    }
+    lv_obj_t *lbl = brightness_step_labels[i];
+    if (!lbl) continue;
+    if (i == auto_match) {
+      lv_obj_set_style_text_color(lbl, scheme_accent(), 0);
+    } else {
+      lv_obj_remove_local_style_prop(lbl, LV_STYLE_TEXT_COLOR, 0);
+    }
   }
 }
 void brightness_step_cb(lv_event_t *e) {
