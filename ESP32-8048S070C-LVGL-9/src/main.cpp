@@ -4420,6 +4420,10 @@ static void brightness_steps_highlight(int active) {
     lv_obj_t *lbl = brightness_step_labels[i];
     if (!lbl) continue;
     if (i == auto_match) {
+      // scheme_accent() is the accent of the scheme the user picked in the
+      // colour-scheme strip - the same colour the selected button's background
+      // uses, and the same one apply_theme_accent() gives LVGL as the theme
+      // primary, so the font always tracks the selected theme colour.
       lv_obj_set_style_text_color(lbl, scheme_accent(), 0);
     } else {
       lv_obj_remove_local_style_prop(lbl, LV_STYLE_TEXT_COLOR, 0);
@@ -4960,6 +4964,11 @@ static void apply_color_scheme() {
   apply_calendar_theme(calendar);
   updateEventDisplay(calendar);   // event cards bake their colours in at creation
   updateWeatherDisplay();         // ...as do the three weather chips
+  // The brightness row bakes the accent into the Auto font colour, so a scheme
+  // swap has to repaint it too - otherwise a swatch tapped while the settings
+  // popup is open leaves that one label in the previous scheme. A no-op when the
+  // popup is closed, because every entry in the button/label arrays is nullptr.
+  brightness_steps_highlight(ui_brightness_active_button());
 }
 
 // ---- Floating colour-scheme selector (ported from LVGL's Widgets demo) -----
