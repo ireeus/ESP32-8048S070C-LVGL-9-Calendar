@@ -112,6 +112,19 @@ $db->exec("CREATE TABLE IF NOT EXISTS persistent_sessions (
     if (!$hasBrightnessAutoColumn) {
         $db->exec("ALTER TABLE user_theme ADD COLUMN brightness_auto INTEGER NOT NULL DEFAULT 0");
     }
+    // Today's sunrise/sunset, used to show which step Auto is currently on. The
+    // device computes its level from those two, so the website has to ask the same
+    // source for the same numbers or the two would disagree about which step is in
+    // force. One row per location per day, so opening this page costs at most one
+    // upstream request; a failed lookup is cached too (with the times left at -1)
+    // so an Open-Meteo outage does not stall every page view.
+    $db->exec("CREATE TABLE IF NOT EXISTS sun_cache (
+        cache_key TEXT PRIMARY KEY,
+        sunrise_min INTEGER NOT NULL DEFAULT -1,
+        sunset_min INTEGER NOT NULL DEFAULT -1,
+        utc_offset INTEGER NOT NULL DEFAULT 0,
+        updated DATETIME DEFAULT CURRENT_TIMESTAMP
+    )");
 } catch (PDOException $e) {
     error_log("Database Error: " . $e->getMessage());
     die("Database Error: Unable to connect to the database.");
@@ -564,6 +577,109 @@ if (!array_key_exists((string)$user_theme['scheme'], $THEME_SCHEMES)) { $user_th
 $user_theme['darkness'] = max(0, min(100, (int)$user_theme['darkness']));
 $user_theme['brightness_auto'] = ((int)$user_theme['brightness_auto']) ? 1 : 0;
 
+// ---- Which step Auto is on -------------------------------------------------
+// The device tells the site THAT Auto is on and what the MANUAL level underneath
+// it is, not the level the sun has picked - pushThemeToServer() in main.cpp sends
+// the stored value deliberately, because the live one moves all day. So the level
+// is worked out here, exactly as the firmware does it: solar noon is the midpoint
+// of today's sunrise and sunset, and brightness is a cosine from solar midnight to
+// solar noon, rounded to the same 5% steps. The ten lines are duplicated rather
+// than pushed by the device so a wall calendar needs no network for it.
+function cron_sun_times(PDO $db, float $lat, float $lon): ?array
+{
+    // Returns [sunrise, sunset, utc_offset]: the first two in minutes after LOCAL
+    // midnight, the third in seconds. Null when the lookup has nothing usable.
+    $key = gmdate('Y-m-d') . '|' . round($lat, 4) . '|' . round($lon, 4);
+    $stmt = $db->prepare("SELECT sunrise_min, sunset_min, utc_offset, updated FROM sun_cache WHERE cache_key = ?");
+    $stmt->execute([$key]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    if ($row) {
+        $ok = (int)$row['sunrise_min'] >= 0 && (int)$row['sunset_min'] > (int)$row['sunrise_min'];
+        $age = time() - (int)strtotime((string)$row['updated'] . ' UTC');
+        // A cached FAILURE is retried every ten minutes rather than on every page
+        // view, so an outage costs one 5s stall per ten minutes at worst instead
+        // of one per refresh.
+        if ($ok || $age < 600) {
+            return $ok ? [(int)$row['sunrise_min'], (int)$row['sunset_min'], (int)$row['utc_offset']] : null;
+        }
+    }
+
+    $sunrise = -1;
+    $sunset  = -1;
+    $offset  = 0;
+    $url = 'https://api.open-meteo.com/v1/forecast?latitude=' . $lat . '&longitude=' . $lon
+         . '&daily=sunrise,sunset&timezone=auto&forecast_days=1';
+    $raw = @file_get_contents($url, false, stream_context_create(['http' => ['timeout' => 5]]));
+    $data = $raw ? json_decode($raw, true) : null;
+    $sr = $data['daily']['sunrise'][0] ?? null;
+    $ss = $data['daily']['sunset'][0] ?? null;
+    // Open-Meteo returns "2026-09-14T06:42" in the location's own timezone, which
+    // is why the offset comes back with it: the comparison below happens in UTC.
+    if (is_string($sr) && is_string($ss)
+        && preg_match('/T(\d{2}):(\d{2})/', $sr, $m1)
+        && preg_match('/T(\d{2}):(\d{2})/', $ss, $m2)) {
+        $sunrise = ((int)$m1[1]) * 60 + (int)$m1[2];
+        $sunset  = ((int)$m2[1]) * 60 + (int)$m2[2];
+        $offset  = (int)($data['utc_offset_seconds'] ?? 0);
+    }
+    $stmt = $db->prepare("INSERT OR REPLACE INTO sun_cache (cache_key, sunrise_min, sunset_min, utc_offset, updated) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)");
+    $stmt->execute([$key, $sunrise, $sunset, $offset]);
+
+    return ($sunrise >= 0 && $sunset > $sunrise) ? [$sunrise, $sunset, $offset] : null;
+}
+
+$auto_brightness_now   = null;   // 0-100, the level the sun has it at right now
+$auto_brightness_step  = null;   // nearest of the five steps in the row below
+$auto_sun_note         = '';     // sunrise/sunset, for the tooltip
+$auto_brightness_estimated = false;
+if (isset($_SESSION['user_id']) && $user_theme['brightness_auto'] === 1) {
+    $auto_lat = (isset($weather_prefs['latitude']) && is_numeric($weather_prefs['latitude'])) ? (float)$weather_prefs['latitude'] : null;
+    $auto_lon = (isset($weather_prefs['longitude']) && is_numeric($weather_prefs['longitude'])) ? (float)$weather_prefs['longitude'] : null;
+    // No coordinates means no way to place the sun, so the readout is left off and
+    // the page says so rather than inventing a number. The device gets its location
+    // from this very page (api.php?weatherLocation=...), so if it is empty here the
+    // device has none either and is running its own 07:00-19:00 placeholder.
+    if ($auto_lat !== null && $auto_lon !== null) {
+        $auto_sun = cron_sun_times($db, $auto_lat, $auto_lon);
+        if ($auto_sun !== null) {
+            [$auto_sunrise, $auto_sunset, $auto_offset] = $auto_sun;
+            $auto_sun_note = sprintf('sunrise %02d:%02d, sunset %02d:%02d',
+                intdiv($auto_sunrise, 60), $auto_sunrise % 60,
+                intdiv($auto_sunset, 60), $auto_sunset % 60);
+        } else {
+            // The firmware's own fallback until its first weather fetch lands, so a
+            // failed lookup still shows a sane value instead of a blank.
+            $auto_sunrise = 7 * 60;
+            $auto_sunset  = 19 * 60;
+            // The device's clock is Europe/London (see initTime() in main.cpp), so
+            // the offset has to be today's London offset - BST matters.
+            $auto_offset = (new DateTime('now', new DateTimeZone('Europe/London')))->getOffset();
+            $auto_brightness_estimated = true;
+            $auto_sun_note = 'sun times unavailable - using the device fallback 07:00-19:00';
+        }
+        // Solar noon is in LOCAL minutes, so shift it to UTC before comparing with
+        // gmdate(). Mixing the two would shift the answer by an hour through BST.
+        $auto_noon_utc = (((intdiv($auto_sunrise + $auto_sunset, 2) - intdiv($auto_offset, 60)) % 1440) + 1440) % 1440;
+        $auto_delta = (((int)gmdate('G')) * 60 + (int)gmdate('i')) - $auto_noon_utc;
+        if ($auto_delta < -720) $auto_delta += 1440;
+        if ($auto_delta >  720) $auto_delta -= 1440;
+        $auto_raw = 50.0 * (1.0 + cos(($auto_delta / 720.0) * M_PI));
+        // TWO steps, matching the device exactly: daylight_brightness() rounds the
+        // curve to a whole percent first, and only then does updateAutoBrightness()
+        // step THAT integer to 5%. Quantising the raw float in one go lands one
+        // step out whenever rounding crosses a boundary - a real off-by-5 that a
+        // cross-check against the compiled C++ caught.
+        $auto_percent = max(0, min(100, (int)round($auto_raw)));
+        $auto_brightness_now = max(0, min(100, intdiv($auto_percent + 2, 5) * 5));
+        $auto_brightness_step = 0;
+        $auto_best = PHP_INT_MAX;
+        foreach ([0, 25, 50, 75, 100] as $auto_step) {
+            $auto_dist = abs($auto_brightness_now - $auto_step);
+            if ($auto_dist < $auto_best) { $auto_best = $auto_dist; $auto_brightness_step = $auto_step; }
+        }
+    }
+}
+
 // Device fleet update policy. Everyone can SEE it; only the administrator can
 // change it, because one value drives every device.
 $policyPath = 'update/policy.json';
@@ -999,6 +1115,15 @@ if (!array_key_exists($active_tab, $TABS)) { $active_tab = 'themes'; }
             background:var(--primary); border-color:var(--primary); color:#111; }
         .step-choice input:focus-visible + .step-choice-box {
             outline:2px solid var(--primary); outline-offset:2px; }
+        /* Auto is on: the step the sun is currently nearest to takes the accent as
+           its TEXT colour and an underline, the same way the device's own row shows
+           it. The radio stays unchecked - Auto is the setting that is actually in
+           force, and checking two would break the "one choice" rule the group
+           relies on. An inset shadow rather than an extra line of text, so the
+           marked box keeps exactly the same height as its neighbours. */
+        .step-choice-auto .step-choice-box {
+            border-color:var(--primary); color:var(--primary);
+            box-shadow:inset 0 -3px 0 var(--primary); }
         /* Controls on these two panels save themselves, so the hint replaces the old button. */
         .autosave-hint { font-size:.82rem; color:var(--text-muted); text-align:center; margin:.9rem 0 .2rem; }
 </style>
@@ -1126,6 +1251,11 @@ if (!array_key_exists($active_tab, $TABS)) { $active_tab = 'themes'; }
                                 $__d = abs($brightness_now - $__step);
                                 if ($__d < $brightness_best) { $brightness_best = $__d; $brightness_sel = $__step; }
                             }
+                            // With Auto on, $brightness_sel is only the manual level
+                            // stored underneath it - not what the device is showing.
+                            // $auto_brightness_step is the step the sun has actually
+                            // picked, and that is the one worth marking.
+                            $auto_match_step = $brightness_auto ? $auto_brightness_step : null;
                             ?>
                             <label class="text-base">UI brightness (0 = dark, 100 = bright)</label>
                             <div class="step-choices">
@@ -1136,7 +1266,9 @@ if (!array_key_exists($active_tab, $TABS)) { $active_tab = 'themes'; }
                                     <span class="step-choice-box">Auto</span>
                                 </label>
                                 <?php foreach ($brightness_steps as $__step): ?>
-                                    <label class="step-choice" title="<?php echo $__step; ?>%">
+                                    <?php $__is_auto_match = ($auto_match_step !== null && $__step === $auto_match_step); ?>
+                                    <label class="step-choice<?php echo $__is_auto_match ? ' step-choice-auto' : ''; ?>"
+                                           title="<?php echo $__step; ?>%<?php echo $__is_auto_match ? ' - the step Auto is on now' : ''; ?>">
                                         <input type="radio" name="brightness"
                                                value="<?php echo $__step; ?>"
                                                <?php echo (!$brightness_auto && $__step === $brightness_sel) ? 'checked' : ''; ?>
@@ -1145,6 +1277,17 @@ if (!array_key_exists($active_tab, $TABS)) { $active_tab = 'themes'; }
                                     </label>
                                 <?php endforeach; ?>
                             </div>
+                            <?php if ($brightness_auto): ?>
+                                <p class="autosave-hint" title="<?php echo htmlspecialchars($auto_sun_note); ?>">
+                                    <?php if ($auto_brightness_step !== null): ?>
+                                        Auto is following the sun: <strong><?php echo $auto_brightness_now; ?>%</strong>
+                                        right now, so the <strong><?php echo $auto_brightness_step; ?></strong> step is the
+                                        one in use<?php echo $auto_brightness_estimated ? ' (estimated)' : ''; ?>.
+                                    <?php else: ?>
+                                        Auto is following the sun. Add a weather location (Other tab) to see the level it is using.
+                                    <?php endif; ?>
+                                </p>
+                            <?php endif; ?>
                             <p class="autosave-hint">Saves automatically.</p>
                         </form>
                     </div>
