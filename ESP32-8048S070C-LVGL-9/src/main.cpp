@@ -1261,7 +1261,7 @@ void updateWeatherDisplay() {
   // 68 * 170/256 = 45px.
   lv_obj_t *weather_img = lv_img_create(weather_sections[1]);
   lv_img_set_src(weather_img, getWeatherImage(next_weather.weather_code));
-  lv_img_set_zoom(weather_img, 170);
+  lv_img_set_zoom(weather_img, 196); // 15% up from 170
   lv_obj_center(weather_img);
   // Section 3: condition.
   lv_obj_t *desc_label = lv_label_create(weather_sections[2]);
@@ -1369,7 +1369,7 @@ make_chip_value(pressure_cont, "Pressure",
     lv_obj_set_style_text_color(day_label, main_text_color, 0);
     lv_obj_t *forecast_img = lv_img_create(day_cont);
     lv_img_set_src(forecast_img, getWeatherImage(forecast[i].weather_code));
-    lv_img_set_zoom(forecast_img, 128);
+    lv_img_set_zoom(forecast_img, 147); // 15% up from 128
     lv_obj_t *temp_label = lv_label_create(day_cont);
     // UPDATED: Format as "max°/min°" (e.g., "7°/-1°")
     String temp_text = String(forecast[i].temp_max + temp_adjust, 0) + "°/" + String(forecast[i].temp_min + temp_adjust, 0) + "°";
@@ -6894,17 +6894,25 @@ void fetchBackgroundFilename() {
 // ---- Background image: flash cache -----------------------------------------
 // The server serves an 800x480 blob of raw RGB565, little-endian, exactly 768,000
 // bytes - the same format the site's upload page writes, so neither end converts
-// anything at runtime and LVGL can be handed a pointer straight at it. It only
-// changes when backgroundFilename does, so the last one is kept in the LittleFS
-// partition - the "spiffs" partition from default_8MB.csv at 0x670000, 1.5MB,
-// which nothing else in this project uses. Later boots (and the hourly refresh)
-// read it from flash instead of re-downloading it, skipping a TLS handshake AND a
-// 768KB transfer every time.
+// anything at runtime and LVGL can be handed a pointer straight at it.
 //
-// The cache holds ONE picture, which is 49% of that partition. In weather mode a
-// change of conditions therefore re-downloads: a few seconds, and only when the
-// sky actually changes.
-#define BG_CACHE_PATH "/bg.rgb"
+// EVERY picture the device has seen is kept in the LittleFS partition (the
+// "spiffs" partition from default_8MB.csv), so going back to one - a weather
+// change, or the owner swapping backgrounds - is served from flash instead of a
+// TLS handshake and 768KB over the air. One picture is 768KB, so HOW MANY fit is
+// decided by that partition rather than by this code: with the stock 1.5MB table
+// it is one, and the cache behaves much as it always did. Give the partition more
+// room and it holds proportionally more with no change here - the budget is worked
+// out at runtime, and bgCacheReport() prints the answer at every boot.
+//
+// BG_CACHE_RESERVE bytes are held back for the filesystem itself. LittleFS needs
+// room to write metadata and to compact, and a cache that fills the partition
+// completely fails to write the very picture it is trying to store.
+#define BG_CACHE_DIR         "/bgcache"
+#define BG_CACHE_LEGACY_PATH "/bg.rgb"        // the old one-picture cache
+#define BG_CACHE_INDEX_KEY   "bg_mru"         // names, most recently used first
+#define BG_CACHE_RESERVE     (160 * 1024)     // kept free for the filesystem
+#define BG_CACHE_MAX         12               // index length cap
 #define BG_EXPECTED_SIZE (800 * 480 * 2)
 static bool bgFsReady = false;
 // lv_img_set_src() keeps the pointer it is handed, so this descriptor must
@@ -6915,13 +6923,39 @@ static lv_image_dsc_t bg_dsc;
 // background replaces it (the old code leaked one 1.1MB buffer per change).
 static uint8_t *bg_buffer = nullptr;
 
+// How much room there is, in pictures. Printed on every boot: "why is it fetching
+// that one again" is otherwise a question with no visible answer.
+static void bgCacheReport() {
+  const size_t total = LittleFS.totalBytes();
+  const size_t used  = LittleFS.usedBytes();
+  const size_t freeb = total > used ? total - used : 0;
+  const int fits = (freeb > BG_CACHE_RESERVE)
+                     ? (int)((freeb - BG_CACHE_RESERVE) / BG_EXPECTED_SIZE) : 0;
+  Serial.printf("[BG] Picture cache: %uKB partition, %uKB free - room for %d picture(s) of %uKB. Flash chip %uMB.\n",
+                (unsigned)(total / 1024), (unsigned)(freeb / 1024), fits,
+                (unsigned)(BG_EXPECTED_SIZE / 1024),
+                (unsigned)(ESP.getFlashChipSize() / (1024 * 1024)));
+}
 static bool bgCacheMount() {
   if (bgFsReady) return true;
   bgFsReady = LittleFS.begin(true); // format the partition on first ever use
-  if (!bgFsReady && debug == 1) {
-    Serial.println("[APP] LittleFS mount failed - background image will not be cached");
+  if (!bgFsReady) {
+    Serial.println("[BG] LittleFS mount failed - background pictures will not be cached");
+    return false;
   }
-  return bgFsReady;
+  // The old single-slot cache is dead weight now: its 768KB belongs to the
+  // multi-picture cache, and nothing can read it any more because the name it was
+  // matched against is no longer kept.
+  if (LittleFS.exists(BG_CACHE_LEGACY_PATH)) {
+    LittleFS.remove(BG_CACHE_LEGACY_PATH);
+    Serial.println("[BG] Removed the old one-picture cache");
+  }
+  if (!LittleFS.exists(BG_CACHE_DIR)) LittleFS.mkdir(BG_CACHE_DIR);
+  preferences.begin("ui", false);
+  if (preferences.isKey("bg_name")) preferences.remove("bg_name"); // superseded by the MRU list
+  preferences.end();
+  bgCacheReport();
+  return true;
 }
 // ---- progress card for the blocking background transfer ---------------------
 // Downloading 768KB over TLS and writing it to flash happens inside loop(), so
@@ -7018,53 +7052,139 @@ static void bgApply(uint8_t *buf, size_t len) {
   lv_obj_move_background(bg_img);
   lv_obj_invalidate(lv_scr_act());
 }
-// Load the cached copy, but only when it is for exactly the file we want now.
-static bool bgLoadFromCache() {
-  if (!bgCacheMount()) return false;
-  preferences.begin("ui", false);
-  String cachedName = preferences.getString("bg_name", "");
+// ---- picture cache: many files, least-recently-used eviction ----------------
+// The index is a newline-separated list of picture names, most recently used
+// first. It lives in preferences rather than in a file of its own: it is a few
+// hundred bytes, it is rewritten on every use, and NVS already survives reboots.
+static String bgCacheIndex() {
+  preferences.begin("ui", true);
+  const String idx = preferences.getString(BG_CACHE_INDEX_KEY, "");
   preferences.end();
-  if (cachedName.isEmpty() || cachedName != backgroundFilename) return false;
-  File f = LittleFS.open(BG_CACHE_PATH, "r");
+  return idx;
+}
+static void bgCacheSetIndex(const String &idx) {
+  preferences.begin("ui", false);
+  preferences.putString(BG_CACHE_INDEX_KEY, idx);
+  preferences.end();
+}
+/** Move `name` to the front of the index (adding it if it is new). */
+static String bgIndexAdd(const String &idx, const String &name) {
+  String out = "";
+  int start = 0;
+  int kept = 0;
+  while (start < (int)idx.length() && kept < BG_CACHE_MAX) {
+    const int nl = idx.indexOf('\n', start);
+    const String line = (nl < 0) ? idx.substring(start) : idx.substring(start, nl);
+    if (line.length() && line != name) {
+      if (out.length()) out += "\n";
+      out += line;
+      kept++;
+    }
+    if (nl < 0) break;
+    start = nl + 1;
+  }
+  return name + (out.length() ? "\n" + out : "");
+}
+/** A server-side picture name ("weather/rain.bin?v=12") as a safe file name. */
+static String bgCacheFileName(const String &name) {
+  String out = "";
+  for (int i = 0; i < (int)name.length() && out.length() < 64; i++) {
+    const char c = name[i];
+    const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                    (c >= '0' && c <= '9') || c == '.' || c == '-' || c == '_';
+    out += ok ? c : '_';
+  }
+  return out + ".rgb";
+}
+static String bgCachePath(const String &name) {
+  return String(BG_CACHE_DIR) + "/" + bgCacheFileName(name);
+}
+static size_t bgCacheFree() {
+  const size_t total = LittleFS.totalBytes();
+  const size_t used  = LittleFS.usedBytes();
+  return total > used ? total - used : 0;
+}
+/**
+ * Throw away least-recently-used pictures until `need` bytes will fit with the
+ * reserve intact. Returns false when even an empty cache is not enough, in which
+ * case the caller simply does not cache - a picture that cannot be held is still
+ * shown, it just has to be fetched again next time.
+ */
+static bool bgMakeRoom(size_t need) {
+  // Bounded: every pass either frees space or drops one index entry, and an entry
+  // whose file has already gone still has to be dropped, so counting passes is
+  // what stops a stale index from looping here for ever.
+  for (int guard = 0; guard <= BG_CACHE_MAX + 2; guard++) {
+    if (bgCacheFree() >= need + BG_CACHE_RESERVE) return true;
+    const String idx = bgCacheIndex();
+    if (idx.isEmpty()) return false;
+    const int cut = idx.lastIndexOf('\n');
+    const String victim = (cut < 0) ? idx : idx.substring(cut + 1);
+    if (victim.isEmpty()) return false;
+    LittleFS.remove(bgCachePath(victim));
+    bgCacheSetIndex(cut < 0 ? String("") : idx.substring(0, cut));
+    Serial.println("[BG] Cache full - dropped " + victim);
+  }
+  return bgCacheFree() >= need + BG_CACHE_RESERVE;
+}
+// Load the cached copy of exactly the picture wanted now, if it is on flash.
+static bool bgLoadFromCache() {
+  if (backgroundFilename.isEmpty()) return false;
+  if (!bgCacheMount()) return false;
+  const String path = bgCachePath(backgroundFilename);
+  if (!LittleFS.exists(path)) return false;
+  File f = LittleFS.open(path, "r");
   if (!f) return false;
   if ((int)f.size() != BG_EXPECTED_SIZE) {
     f.close();
-    if (debug == 1) Serial.println("[APP] Cached background is the wrong size, re-downloading");
+    LittleFS.remove(path);   // truncated, or written by the old single-slot code
+    Serial.println("[BG] Cached picture was the wrong size - dropped it");
     return false;
   }
   uint8_t *buf = (uint8_t *)ps_malloc(BG_EXPECTED_SIZE);
-  if (!buf) {
-    f.close();
-    return false;
-  }
-  size_t got = f.read(buf, BG_EXPECTED_SIZE);
+  if (!buf) { f.close(); return false; }
+  const size_t got = f.read(buf, BG_EXPECTED_SIZE);
   f.close();
   if (got != (size_t)BG_EXPECTED_SIZE) {
     free(buf);
-    if (debug == 1) Serial.println("[APP] Cached background read short, re-downloading");
+    LittleFS.remove(path);
+    Serial.println("[BG] Cached picture read short - dropped it");
     return false;
   }
-  if (debug == 1) Serial.println("[APP] Background restored from flash cache (no download)");
+  bgCacheSetIndex(bgIndexAdd(bgCacheIndex(), backgroundFilename));
+  Serial.println("[BG] " + backgroundFilename + " from flash cache (no download)");
   bgApply(buf, BG_EXPECTED_SIZE);
   return true;
 }
 static void bgSaveToCache(const uint8_t *buf, size_t len) {
+  if (backgroundFilename.isEmpty() || len != (size_t)BG_EXPECTED_SIZE) return;
   if (!bgCacheMount()) return;
-  File f = LittleFS.open(BG_CACHE_PATH, "w");
-  if (!f) {
-    if (debug == 1) Serial.println("[APP] Could not open the background cache for writing");
+  if (!bgMakeRoom(len)) {
+    Serial.printf("[BG] No room to cache this picture (%uKB partition, %uKB free) - "
+                  "it will be fetched again next time\n",
+                  (unsigned)(LittleFS.totalBytes() / 1024), (unsigned)(bgCacheFree() / 1024));
     return;
   }
-  size_t wrote = f.write(buf, len);
+  const String path = bgCachePath(backgroundFilename);
+  File f = LittleFS.open(path, "w");
+  if (!f) {
+    Serial.println("[BG] Could not open the cache file for writing");
+    return;
+  }
+  const size_t wrote = f.write(buf, len);
   f.close();
   if (wrote != len) {
-    if (debug == 1) Serial.println("[APP] Background cache write incomplete, will re-download next boot");
+    LittleFS.remove(path);   // never keep a half-written picture
+    Serial.printf("[BG] Cache write incomplete: %u of %u bytes\n", (unsigned)wrote, (unsigned)len);
     return;
   }
-  preferences.begin("ui", false);
-  preferences.putString("bg_name", backgroundFilename);
-  preferences.end();
-  if (debug == 1) Serial.println("[APP] Background cached to flash");
+  bgCacheSetIndex(bgIndexAdd(bgCacheIndex(), backgroundFilename));
+  const size_t freeb = bgCacheFree();
+  const int more = (freeb > BG_CACHE_RESERVE)
+                     ? (int)((freeb - BG_CACHE_RESERVE) / BG_EXPECTED_SIZE) : 0;
+  Serial.printf("[BG] Cached %s (%uKB); %uKB free - room for %d more\n",
+                backgroundFilename.c_str(), (unsigned)(len / 1024),
+                (unsigned)(freeb / 1024), more);
 }
 void fetchAndSetBackgroundImage() {
   if (backgroundFilename.isEmpty()) {

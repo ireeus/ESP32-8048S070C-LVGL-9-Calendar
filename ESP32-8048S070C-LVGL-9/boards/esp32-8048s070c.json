@@ -20,9 +20,9 @@
   ],
   "name": "ESP32-8048S070C",
   "upload": {
-    "flash_size": "8MB",
+    "flash_size": "16MB",
     "maximum_ram_size": 327680,
-    "maximum_size": 8388608
+    "maximum_size": 3145728
   },
   "url": "https://www.sunton-tech.com/product/esp32-s3-7-inch/",
   "vendor": "Sunton"
