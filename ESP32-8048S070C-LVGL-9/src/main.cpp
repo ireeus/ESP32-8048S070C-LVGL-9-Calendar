@@ -2857,9 +2857,17 @@ void show_settings_popup() {
     lv_obj_set_style_pad_row(right_col, 8, 0);
     lv_obj_set_flex_flow(right_col, LV_FLEX_FLOW_COLUMN);
 
-    // Left column: just the QR code now that brightness has moved across.
+    // Left column: the QR code on its own, then the memory meters and the version
+    // line UNDER it as siblings. The meters used to be inside this card, which made
+    // the QR box grow downwards towards the footer buttons; outside it, the card
+    // hugs the code and the column keeps its own spacing.
     lv_obj_t *qr_card = make_card(left_col, lv_color_hex(0x151515), lv_color_hex(0x151515));
     lv_obj_set_flex_align(qr_card, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    // Tighter than a default card: this box is almost entirely picture, and every
+    // pixel it gives back is one the popup does not have to find elsewhere.
+    lv_obj_set_style_pad_top(qr_card, 4, 0);
+    lv_obj_set_style_pad_bottom(qr_card, 4, 0);
+    lv_obj_set_style_pad_row(qr_card, 2, 0);
     lv_obj_t *qr_img = lv_img_create(qr_card);
     lv_img_set_src(qr_img, &qr);
     lv_img_set_zoom(qr_img, 132); // 20% up from 110; 298px source -> ~154px on screen
@@ -2867,12 +2875,9 @@ void show_settings_popup() {
     lv_label_set_text(qr_hint, "Scan to open the web app");
     lv_obj_set_style_text_font(qr_hint, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(qr_hint, lv_color_hex(0xFFFFFF), 0);
-    // ---- memory meters, side by side --------------------------------------
-    // Under the QR code, above the firmware version line. They used to sit at the
-    // bottom of the right column, but the panel-opacity row made that column tall
-    // enough to push them past the bottom of the popup, where the footer buttons
-    // covered them; the left column has room and nothing else competing for it.
-    lv_obj_t *mem_row = lv_obj_create(qr_card);
+
+    // ---- memory meters, side by side, below the QR box ----------------------
+    lv_obj_t *mem_row = lv_obj_create(left_col);
     lv_obj_set_width(mem_row, LV_PCT(100));
     lv_obj_set_height(mem_row, LV_SIZE_CONTENT);
     lv_obj_set_style_bg_opa(mem_row, LV_OPA_TRANSP, 0);
@@ -2922,13 +2927,15 @@ void show_settings_popup() {
     make_mem_meter("PSRAM", &settings_psram_bar, &settings_psram_val);
     update_settings_memory_meters(); // fill both before the first tick
 
-    // The firmware version lives under the QR code. It used to sit in the right
-    // column between the brightness card and the memory meters, where it read as
-    // though it belonged to whichever of the two was nearest.
-    lv_obj_t *version_settings_label = lv_label_create(qr_card);
+    // The firmware version sits under the meters, which is under the code. Full
+    // width and centred: left_col aligns its children to the left, while the card
+    // above centres everything inside itself.
+    lv_obj_t *version_settings_label = lv_label_create(left_col);
     lv_label_set_text(version_settings_label, ("Firmware: " + currentFirmwareVersion).c_str());
     lv_obj_set_style_text_font(version_settings_label, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(version_settings_label, lv_color_hex(0xBBBBBB), 0);
+    lv_obj_set_width(version_settings_label, LV_PCT(100));
+    lv_obj_set_style_text_align(version_settings_label, LV_TEXT_ALIGN_CENTER, 0);
 
     // Right column: weather location, ParcelBox, brightness.
     lv_obj_t *weather_cont = make_card(right_col, scheme_accent(), scheme_accent_dark());
