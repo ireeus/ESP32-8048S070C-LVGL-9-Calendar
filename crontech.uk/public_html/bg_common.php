@@ -130,3 +130,45 @@ function bg_weather_file_exists(string $group): bool
 {
     return is_file(__DIR__ . '/' . BG_WEATHER_DIR . '/' . $group . '.bin');
 }
+
+/**
+ * Per-user replacement for one weather group:
+ * uploads/weather/u<user_id>_<group>.bin
+ *
+ * Keyed on the user id rather than the access code on purpose: the finished file
+ * is fetched from a public URL, and the access code is the device's API key.
+ *
+ * It is a REPLACEMENT of that group only. Deleting it puts the generated default
+ * back, which is what the Reset button does.
+ */
+function bg_weather_override_base(int $userId, string $group): string
+{
+    return BG_WEATHER_DIR . '/u' . $userId . '_' . $group;
+}
+
+function bg_weather_override_exists(int $userId, string $group): bool
+{
+    return is_file(__DIR__ . '/' . bg_weather_override_base($userId, $group) . '.bin');
+}
+
+/** True for a group name the generator actually produces, so a posted value can
+ *  never be used to build a path. */
+function bg_weather_group_valid(string $group): bool
+{
+    return in_array($group, bg_weather_groups(), true);
+}
+
+/**
+ * The filename to hand the device, with a ?v=<mtime> cache-buster on the end.
+ *
+ * The firmware caches ONE picture and decides whether it has to download again by
+ * comparing the filename it is handed now against the one it cached. Replacing a
+ * picture writes to the SAME path, so without this the device would keep showing
+ * the old one from its flash cache and a new upload would appear to do nothing.
+ * The query string changes whenever the file does, and a static file ignores it.
+ */
+function bg_versioned(string $relative, string $absolutePath): string
+{
+    $mtime = @filemtime($absolutePath);
+    return $mtime ? ($relative . '?v=' . $mtime) : $relative;
+}

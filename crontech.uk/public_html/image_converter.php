@@ -93,15 +93,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $user = bg_load_user($db, $userId);
 
         } elseif (isset($_POST['save_bg'])) {
-            // The cropper sends exactly 800x480 as a data URL. It is re-encoded
-            // here rather than trusted: the size is what the firmware insists on,
-            // and a blob of the wrong length would be rejected on the device.
+            // Where it goes: "custom" is the owner's own background, and
+            // "weather:<group>" replaces ONE of the weather pictures for this
+            // account only. The cropper sends exactly 800x480 either way; it is
+            // re-encoded here rather than trusted, because the size is what the
+            // firmware insists on and the wrong length is rejected on the device.
+            $target = (string) ($_POST['target'] ?? 'custom');
+            $group = '';
+            if (strpos($target, 'weather:') === 0) {
+                $group = substr($target, 8);
+                if (!bg_weather_group_valid($group)) {
+                    $error = 'Unknown weather picture.';
+                }
+            }
             $data = (string) ($_POST['cropped'] ?? '');
-            if (!preg_match('#^data:image/(jpeg|png);base64,#', $data, $m)) {
+            if ($error === '' && !preg_match('#^data:image/(jpeg|png);base64,#', $data, $m)) {
                 $error = 'No cropped image arrived. Choose a picture and crop it first.';
-            } elseif (strlen($data) > 6 * 1024 * 1024) {
+            } elseif ($error === '' && strlen($data) > 6 * 1024 * 1024) {
                 $error = 'That image is too large to process. Try a smaller file.';
-            } else {
+            } elseif ($error === '') {
                 $raw = base64_decode(substr($data, strlen($m[0])), true);
                 $img = $raw !== false ? @imagecreatefromstring($raw) : false;
                 if ($img === false) {
@@ -112,7 +122,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if (!is_dir('uploads')) {
                         @mkdir('uploads', 0755, true);
                     }
-                    if (bg_write_pair($base, $img, $w, $h)) {
+                    if ($group !== '') {
+                        if (!is_dir(BG_WEATHER_DIR)) {
+                            @mkdir(BG_WEATHER_DIR, 0755, true);
+                        }
+                        if (bg_write_pair(bg_weather_override_base($userId, $group), $img, $w, $h)) {
+                            $message = 'Your picture is now the "' . bg_weather_label($group) . '" weather background. '
+                                     . 'It is used whenever the conditions call for it'
+                                     . ($user['mode'] === 'weather'
+                                            ? '.'
+                                            : ' - switch to "Weather pictures (automatic)" above to use it.');
+                        } else {
+                            $error = 'Could not write that picture. Check that uploads/weather/ is writable.';
+                        }
+                    } elseif (bg_write_pair($base, $img, $w, $h)) {
                         $st = $db->prepare("UPDATE users SET background_image = ?, background_mode = 'custom' WHERE user_id = ?");
                         $st->execute([basename($base) . '.bin', $userId]);
                         $message = 'Background saved (' . number_format(BG_BYTES) . ' bytes, 800x480 RGB565). '
@@ -124,6 +147,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     imagedestroy($img);
                 }
             }
+        } elseif (isset($_POST['reset_weather'])) {
+            // Puts one generated default back by deleting this account's copy.
+            $group = (string) $_POST['reset_weather'];
+            if (!bg_weather_group_valid($group)) {
+                $error = 'Unknown weather picture.';
+            } else {
+                $wbase = bg_weather_override_base($userId, $group);
+                @unlink($wbase . '.bin');
+                @unlink($wbase . '.png');
+                $message = 'The "' . bg_weather_label($group) . '" picture is back to the default.';
+            }
+        } elseif (isset($_POST['reset_all_weather'])) {
+            $n = 0;
+            foreach (bg_weather_groups() as $g) {
+                $wbase = bg_weather_override_base($userId, $g);
+                if (is_file($wbase . '.bin')) {
+                    @unlink($wbase . '.bin');
+                    @unlink($wbase . '.png');
+                    $n++;
+                }
+            }
+            $message = $n
+                ? ($n . ' weather picture' . ($n === 1 ? '' : 's') . ' restored to the default.')
+                : 'Nothing to reset - you are already using the default pictures.';
         }
         $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
     }
@@ -167,7 +214,20 @@ $hasPreview = $hasCustom && is_file($customPreview);
         .gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:.8rem;}
         .gallery figure{background:rgba(0,0,0,.22);border-radius:.6rem;overflow:hidden;margin:0;}
         .gallery img{width:100%;display:block;aspect-ratio:5/3;object-fit:cover;}
-        .gallery figcaption{font-size:.78rem;padding:.4rem .5rem;opacity:.9;}
+        .gallery figcaption{font-size:.78rem;padding:.4rem .5rem;opacity:.95;display:flex;align-items:center;gap:.4rem;flex-wrap:wrap;}
+        /* Clicking a tile points the uploader at that weather picture. */
+        .tile{cursor:pointer;border:2px solid transparent;transition:border-color .2s,transform .2s;}
+        .tile:hover{border-color:#34D399;transform:translateY(-2px);}
+        .tile-own{border-color:#34D399;}
+        .tile-label{font-weight:600;}
+        .badge{background:#34D399;color:#064e3b;border-radius:50px;padding:.05rem .4rem;font-size:.62rem;
+               font-weight:700;text-transform:uppercase;letter-spacing:.03em;}
+        .tile-actions{margin-left:auto;display:flex;gap:.3rem;align-items:center;}
+        .tile-actions form{margin:0;display:inline;}
+        .tile-btn{background:rgba(255,255,255,.22);border:none;color:#fff;font:inherit;font-size:.72rem;
+                  font-weight:600;padding:.2rem .55rem;border-radius:50px;cursor:pointer;}
+        .tile-btn:hover{background:rgba(255,255,255,.36);}
+        .tile-btn-reset{background:rgba(0,0,0,.32);}
         .modes{display:flex;gap:.6rem;flex-wrap:wrap;}
         .modes label{display:flex;gap:.45rem;align-items:center;background:rgba(0,0,0,.2);padding:.55rem .9rem;border-radius:50px;cursor:pointer;}
         .current{display:flex;gap:1rem;align-items:flex-start;flex-wrap:wrap;}
@@ -240,6 +300,14 @@ $hasPreview = $hasCustom && is_file($customPreview);
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf_token']); ?>">
                 <input type="hidden" name="save_bg" value="1">
                 <input type="hidden" name="cropped" id="cropped">
+                <!-- Which picture this upload replaces: "custom", or "weather:<group>"
+                     set by clicking a tile in the Weather pictures card below. -->
+                <input type="hidden" name="target" id="target" value="custom">
+                <p class="text-sm mb-2">
+                    Saving as: <strong id="targetLabel">my own background</strong>
+                    <button type="button" id="useCustom" class="tile-btn" style="display:none;"
+                            onclick="pickCustom()">use as my own background instead</button>
+                </p>
                 <input type="file" id="image" accept="image/jpeg,image/png,image/bmp"
                        class="mb-3 block w-full text-sm text-white/90">
                 <div class="crop-stage mb-3">
@@ -250,22 +318,60 @@ $hasPreview = $hasCustom && is_file($customPreview);
         </div>
 
         <!-- ---------------------------------------------- weather defaults -->
-        <div class="card">
+        <div class="card" id="weatherCard">
             <h2>Weather pictures</h2>
-            <p class="hint">The defaults the device chooses from when it is in weather mode.</p>
+            <p class="hint">
+                What the device shows when it is in weather mode. Click any picture to replace it with
+                your own &mdash; yours is then used whenever the conditions call for it. Reset puts the
+                default back.
+            </p>
             <div class="gallery">
                 <?php foreach (bg_weather_groups() as $g): ?>
-                    <?php $png = BG_WEATHER_DIR . '/' . $g . '.png'; ?>
-                    <figure>
-                        <?php if (is_file($png)): ?>
-                            <img src="<?php echo htmlspecialchars($png); ?>?v=<?php echo filemtime($png); ?>" alt="<?php echo htmlspecialchars(bg_weather_label($g)); ?>">
+                    <?php
+                    $hasOvr  = bg_weather_override_exists($userId, $g);
+                    $ovrPng  = bg_weather_override_base($userId, $g) . '.png';
+                    $defPng  = BG_WEATHER_DIR . '/' . $g . '.png';
+                    $prevPng = ($hasOvr && is_file($ovrPng)) ? $ovrPng : $defPng;
+                    ?>
+                    <figure class="tile<?php echo $hasOvr ? ' tile-own' : ''; ?>"
+                            onclick="pickWeather('<?php echo $g; ?>', '<?php echo htmlspecialchars(bg_weather_label($g), ENT_QUOTES); ?>')"
+                            title="Click to use your own picture for <?php echo htmlspecialchars(bg_weather_label($g)); ?>">
+                        <?php if (is_file($prevPng)): ?>
+                            <img src="<?php echo htmlspecialchars($prevPng); ?>?v=<?php echo (int) @filemtime($prevPng); ?>"
+                                 alt="<?php echo htmlspecialchars(bg_weather_label($g)); ?>">
                         <?php else: ?>
                             <div style="aspect-ratio:5/3;display:flex;align-items:center;justify-content:center;font-size:.8rem;opacity:.8;">not generated yet</div>
                         <?php endif; ?>
-                        <figcaption><?php echo htmlspecialchars(bg_weather_label($g)); ?></figcaption>
+                        <figcaption>
+                            <span class="tile-label"><?php echo htmlspecialchars(bg_weather_label($g)); ?></span>
+                            <?php if ($hasOvr): ?><span class="badge">your picture</span><?php endif; ?>
+                            <span class="tile-actions">
+                                <span class="tile-btn">Replace</span>
+                                <?php if ($hasOvr): ?>
+                                    <form method="POST" onclick="event.stopPropagation();"
+                                          onsubmit="return confirm('Put the default <?php echo htmlspecialchars(bg_weather_label($g), ENT_QUOTES); ?> picture back?');">
+                                        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf_token']); ?>">
+                                        <button type="submit" name="reset_weather" value="<?php echo $g; ?>" class="tile-btn tile-btn-reset">Reset</button>
+                                    </form>
+                                <?php endif; ?>
+                            </span>
+                        </figcaption>
                     </figure>
                 <?php endforeach; ?>
             </div>
+            <?php
+            $anyOverride = false;
+            foreach (bg_weather_groups() as $g) {
+                if (bg_weather_override_exists($userId, $g)) { $anyOverride = true; break; }
+            }
+            ?>
+            <?php if ($anyOverride): ?>
+                <form method="POST" class="mt-4"
+                      onsubmit="return confirm('Restore ALL the weather pictures to the defaults?');">
+                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf_token']); ?>">
+                    <button type="submit" name="reset_all_weather" value="1" class="btn btn-quiet">Reset all to defaults</button>
+                </form>
+            <?php endif; ?>
         </div>
     </div>
 
@@ -275,7 +381,26 @@ $hasPreview = $hasCustom && is_file($customPreview);
         const saveBtn   = document.getElementById('saveBtn');
         const form      = document.getElementById('uploadForm');
         const hidden    = document.getElementById('cropped');
+        const targetInput = document.getElementById('target');
+        const targetLabel = document.getElementById('targetLabel');
+        const useCustomBtn = document.getElementById('useCustom');
         let cropper = null;
+
+        // Point the uploader at one weather picture, or back at the owner's own
+        // background. The hidden "target" field is what the server branches on.
+        function pickWeather(group, label) {
+            targetInput.value = 'weather:' + group;
+            targetLabel.textContent = 'the ' + label + ' weather picture';
+            useCustomBtn.style.display = 'inline-block';
+            saveBtn.textContent = 'Save as the ' + label + ' picture';
+            form.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+        function pickCustom() {
+            targetInput.value = 'custom';
+            targetLabel.textContent = 'my own background';
+            useCustomBtn.style.display = 'none';
+            saveBtn.textContent = 'Save background';
+        }
 
         fileInput.addEventListener('change', function (e) {
             const file = e.target.files && e.target.files[0];

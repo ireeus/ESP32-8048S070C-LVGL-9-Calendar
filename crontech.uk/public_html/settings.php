@@ -106,11 +106,19 @@ $db->exec("CREATE TABLE IF NOT EXISTS persistent_sessions (
     // itself. SQLite allows NOT NULL here only because a default is supplied.
     $themeColumns = $db->query("PRAGMA table_info(user_theme)")->fetchAll(PDO::FETCH_ASSOC);
     $hasBrightnessAutoColumn = false;
+    $hasPanelOpaColumn = false;
     foreach ($themeColumns as $column) {
         if ($column['name'] === 'brightness_auto') $hasBrightnessAutoColumn = true;
+        if ($column['name'] === 'panel_opa')       $hasPanelOpaColumn = true;
     }
     if (!$hasBrightnessAutoColumn) {
         $db->exec("ALTER TABLE user_theme ADD COLUMN brightness_auto INTEGER NOT NULL DEFAULT 0");
+    }
+    // user_theme.panel_opa: how see-through the device's panels are, as a
+    // percentage of full opacity. 100 is the solid look the device has always
+    // had, so the default leaves every existing account exactly as it was.
+    if (!$hasPanelOpaColumn) {
+        $db->exec("ALTER TABLE user_theme ADD COLUMN panel_opa INTEGER NOT NULL DEFAULT 100");
     }
     // Today's sunrise/sunset, used to show which step Auto is currently on. The
     // device computes its level from those two, so the website has to ask the same
@@ -527,13 +535,26 @@ if (isset($_POST['save_theme']) && isset($_SESSION['user_id'])) {
     // stored values are left exactly as they are.
     $brightness_raw = isset($_POST['brightness']) ? (string)$_POST['brightness'] : null;
     $stored = null;
-    $stmtPrev = $db->prepare("SELECT darkness, brightness_auto FROM user_theme WHERE user_id = ?");
+    $stmtPrev = $db->prepare("SELECT darkness, brightness_auto, panel_opa FROM user_theme WHERE user_id = ?");
     $stmtPrev->execute([$_SESSION['user_id']]);
     $prev = $stmtPrev->fetch(PDO::FETCH_ASSOC);
     if ($prev) { $stored = $prev; }
 
     $brightness_auto = $stored ? (int)$stored['brightness_auto'] : 0;
     $darkness = $stored ? (int)$stored['darkness'] : 0;
+    // Panel opacity: five steps posted by its own autosave radio group. Absent -
+    // a page cached by the service worker, or a post that does not carry the
+    // field - leaves the stored value alone rather than resetting it to solid.
+    $panel_opa = $stored ? (int)$stored['panel_opa'] : 100;
+    $panel_error = '';
+    if (isset($_POST['panel_opa'])) {
+        $po = (int)$_POST['panel_opa'];
+        if ($po < 0 || $po > 100) {
+            $panel_error = 'Panel opacity must be between 0 and 100.';
+        } else {
+            $panel_opa = $po;
+        }
+    }
     $brightness_error = '';
 
     if ($brightness_raw !== null) {
@@ -559,16 +580,18 @@ if (isset($_POST['save_theme']) && isset($_SESSION['user_id'])) {
         $theme_message = 'Unknown colour scheme.'; $theme_error_flag = true;
     } elseif ($brightness_error !== '') {
         $theme_message = $brightness_error; $theme_error_flag = true;
+    } elseif ($panel_error !== '') {
+        $theme_message = $panel_error; $theme_error_flag = true;
     } else {
-        $stmt = $db->prepare("INSERT OR REPLACE INTO user_theme (user_id, scheme, darkness, brightness_auto, updated) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)");
-        $stmt->execute([$_SESSION['user_id'], $scheme, $darkness, $brightness_auto]);
+        $stmt = $db->prepare("INSERT OR REPLACE INTO user_theme (user_id, scheme, darkness, brightness_auto, panel_opa, updated) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)");
+        $stmt->execute([$_SESSION['user_id'], $scheme, $darkness, $brightness_auto, $panel_opa]);
         $theme_message = 'Theme saved - it applies to your Cron-Tab device only.';
     }
 }
 
-$user_theme = ['scheme' => 'Blue', 'darkness' => 0, 'brightness_auto' => 0];
+$user_theme = ['scheme' => 'Blue', 'darkness' => 0, 'brightness_auto' => 0, 'panel_opa' => 100];
 if (isset($_SESSION['user_id'])) {
-    $stmt = $db->prepare("SELECT scheme, darkness, brightness_auto FROM user_theme WHERE user_id = ?");
+    $stmt = $db->prepare("SELECT scheme, darkness, brightness_auto, panel_opa FROM user_theme WHERE user_id = ?");
     $stmt->execute([$_SESSION['user_id']]);
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
     if ($row) { $user_theme = $row; }
@@ -576,6 +599,7 @@ if (isset($_SESSION['user_id'])) {
 if (!array_key_exists((string)$user_theme['scheme'], $THEME_SCHEMES)) { $user_theme['scheme'] = 'Blue'; }
 $user_theme['darkness'] = max(0, min(100, (int)$user_theme['darkness']));
 $user_theme['brightness_auto'] = ((int)$user_theme['brightness_auto']) ? 1 : 0;
+$user_theme['panel_opa'] = max(0, min(100, (int)($user_theme['panel_opa'] ?? 100)));
 
 // ---- Which step Auto is on -------------------------------------------------
 // The device tells the site THAT Auto is on and what the MANUAL level underneath
@@ -678,6 +702,50 @@ if (isset($_SESSION['user_id']) && $user_theme['brightness_auto'] === 1) {
             if ($auto_dist < $auto_best) { $auto_best = $auto_dist; $auto_brightness_step = $auto_step; }
         }
     }
+}
+
+// ---- Background picture state (Themes tab) ---------------------------------
+// The device's background is either the picture its owner uploaded or one of the
+// weather defaults. background_mode is created by the background page itself, so
+// a site where that page has never been opened has no such column yet - hence the
+// two-step query instead of letting the PDOException blank the whole page.
+$user_background = ['mode' => 'custom', 'file' => ''];
+if (isset($_SESSION['user_id'])) {
+    try {
+        $stmt = $db->prepare("SELECT background_image, background_mode FROM users WHERE user_id = ?");
+        $stmt->execute([$_SESSION['user_id']]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row) {
+            $user_background['mode'] = (($row['background_mode'] ?? 'custom') === 'weather') ? 'weather' : 'custom';
+            $user_background['file'] = (string)($row['background_image'] ?? '');
+        }
+    } catch (PDOException $e) {
+        try {
+            $stmt = $db->prepare("SELECT background_image FROM users WHERE user_id = ?");
+            $stmt->execute([$_SESSION['user_id']]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($row) $user_background['file'] = (string)($row['background_image'] ?? '');
+        } catch (PDOException $e2) {
+            // Leave the defaults: the block below then just says "nothing yet".
+        }
+    }
+}
+// Preview: the PNG the background page writes beside the .bin. Only the ACTIVE
+// mode's picture is shown - a leftover custom file must not be displayed while
+// the device is actually following the weather. In weather mode there is no
+// single answer anyway (it depends on the device's conditions), so the neutral
+// overcast default stands in for "one of these".
+$bg_preview = '';
+$bg_has_custom = false;
+if ($user_background['mode'] === 'custom' && $user_background['file'] !== '') {
+    $candidate = 'uploads/' . pathinfo($user_background['file'], PATHINFO_FILENAME) . '.png';
+    if (is_file($candidate)) {
+        $bg_preview = $candidate;
+        $bg_has_custom = true;
+    }
+}
+if ($bg_preview === '' && is_file('uploads/weather/cloudy.png')) {
+    $bg_preview = 'uploads/weather/cloudy.png';
 }
 
 // Device fleet update policy. Everyone can SEE it; only the administrator can
@@ -1288,11 +1356,42 @@ if (!array_key_exists($active_tab, $TABS)) { $active_tab = 'themes'; }
                                     <?php endif; ?>
                                 </p>
                             <?php endif; ?>
+                            <?php
+                            // How see-through the device's panels are. 100 is the solid
+                            // look the device has always had, so it is the default and
+                            // the safe end of the range.
+                            $panel_steps = [100, 85, 70, 55, 40];
+                            ?>
+                            <label class="text-base mt-6">Panel opacity on the device (100 = solid, lower shows more of the background picture)</label>
+                            <div class="step-choices">
+                                <?php foreach ($panel_steps as $__po): ?>
+                                    <label class="step-choice" title="<?php echo $__po; ?>% opaque">
+                                        <input type="radio" name="panel_opa"
+                                               value="<?php echo $__po; ?>"
+                                               <?php echo (int)$user_theme['panel_opa'] === $__po ? 'checked' : ''; ?>
+                                               onchange="ctAutosave(this);">
+                                        <span class="step-choice-box"><?php echo $__po; ?></span>
+                                    </label>
+                                <?php endforeach; ?>
+                            </div>
+                            <p class="autosave-hint">Only matters while a background picture is showing.</p>
                             <p class="autosave-hint">Saves automatically.</p>
-                            <p class="autosave-hint">
-                                Background: <a href="image_converter.php" style="color:var(--primary);font-weight:600;">weather pictures, or upload your own &rarr;</a>
-                            </p>
                         </form>
+
+                        <h2 class="text-2xl font-bold mt-6 mb-4">Background picture</h2>
+                        <p class="text-base mb-4">
+                            Sits behind the calendar on your <strong>Cron-Tab device</strong>. Upload your own
+                            picture, or let the weather choose one for you.
+                        </p>
+                        <p class="text-base mb-3">
+                            Currently: <strong><?php echo $user_background['mode'] === 'weather' ? 'Weather pictures (automatic)' : 'My own picture'; ?></strong><?php if ($user_background['mode'] === 'custom' && !$bg_has_custom): ?> &mdash; nothing uploaded yet, so the device is using the weather pictures.<?php endif; ?>
+                        </p>
+                        <?php if ($bg_preview !== ''): ?>
+                            <img src="<?php echo htmlspecialchars($bg_preview); ?>?v=<?php echo (int) @filemtime($bg_preview); ?>"
+                                 alt="Current device background"
+                                 style="display:block;width:100%;max-width:300px;aspect-ratio:5/3;object-fit:cover;border-radius:10px;border:2px solid var(--border-light);margin-bottom:1rem;">
+                        <?php endif; ?>
+                        <a href="image_converter.php" class="cta-btn">Upload / change background picture</a>
                     </div>
 
                     <div class="settings-col">

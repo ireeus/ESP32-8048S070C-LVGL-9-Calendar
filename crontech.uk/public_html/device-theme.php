@@ -47,14 +47,24 @@ try {
         // PDOException reach the outer catch - that would report "no theme" and
         // silently reset the device to the legacy default scheme.
         $row = null;
-        try {
-            $stmt = $db->prepare("SELECT scheme, darkness, brightness_auto FROM user_theme WHERE user_id = ?");
-            $stmt->execute([$user_id]);
-            $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        } catch (PDOException $e) {
-            $stmt = $db->prepare("SELECT scheme, darkness FROM user_theme WHERE user_id = ?");
-            $stmt->execute([$user_id]);
-            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        // panel_opa arrived after brightness_auto, and both columns are created by
+        // settings.php. Fall back one step at a time rather than letting the
+        // PDOException reach the outer catch, which would report "no theme" and
+        // silently reset the device to the legacy default scheme.
+        $attempts = [
+            "SELECT scheme, darkness, brightness_auto, panel_opa FROM user_theme WHERE user_id = ?",
+            "SELECT scheme, darkness, brightness_auto FROM user_theme WHERE user_id = ?",
+            "SELECT scheme, darkness FROM user_theme WHERE user_id = ?",
+        ];
+        foreach ($attempts as $sql) {
+            try {
+                $stmt = $db->prepare($sql);
+                $stmt->execute([$user_id]);
+                $row = $stmt->fetch(PDO::FETCH_ASSOC);
+                break;
+            } catch (PDOException $e) {
+                $row = null;
+            }
         }
         if ($row) {
             $theme = [
@@ -63,6 +73,9 @@ try {
                 // True when the owner asked the device to follow daylight instead of
                 // a fixed level. Absent column means off.
                 'auto'     => isset($row['brightness_auto']) && (int)$row['brightness_auto'] === 1,
+                // How see-through the device's panels are, 0-100. 100 is the solid
+                // look it has always had; absent column means solid.
+                'panel_opa' => isset($row['panel_opa']) ? max(0, min(100, (int)$row['panel_opa'])) : 100,
                 'source'   => 'user',
             ];
         }
@@ -80,6 +93,7 @@ try {
             'scheme'   => (is_array($legacy) && !empty($legacy['scheme'])) ? (string)$legacy['scheme'] : 'Blue',
             'darkness' => (is_array($legacy) && isset($legacy['darkness'])) ? (int)$legacy['darkness'] : 0,
             'auto'     => false,
+            'panel_opa' => 100,   // solid, the look the device has always had
             'source'   => 'default',
         ];
     }

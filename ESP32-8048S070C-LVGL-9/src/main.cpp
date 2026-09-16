@@ -288,6 +288,18 @@ static lv_timer_t *notification_timer = NULL;
 static lv_timer_t *blink_timer = NULL;
 static lv_obj_t *bg_img = nullptr;  // Global for background image
 static int g_ui_darkness = 0; // Global darkness level (0: light, 100: dark)
+// Panel opacity, as a percentage, chosen on the website (Settings -> Themes).
+// 100 is the solid UI this app has always had, so an account that never touches
+// the new control sees no change at all. Lower values let the background picture
+// show through the calendar, the taskbar and the two panels, which are otherwise
+// opaque and hide almost all of it. Stored as a percentage because that is the
+// number settings.php shows; LVGL's 0-255 value is derived here.
+static int g_panel_opa_pct = 100;
+static lv_opa_t panel_opa() {
+  if (g_panel_opa_pct >= 100) return LV_OPA_COVER;
+  if (g_panel_opa_pct <= 0) return LV_OPA_TRANSP;
+  return (lv_opa_t)((g_panel_opa_pct * 255 + 50) / 100);
+}
 // UI brightness is five presets, not a slider. Nobody needs this value
 // continuously, and on this panel a tap is far more reliable than a drag: the
 // slider was a 1px-wide grab target that also wrote to flash on every
@@ -1138,7 +1150,7 @@ void updateWeatherDisplay() {
     // background showed through and tinted the panel, so the surface still moved
     // with the brightness slider. The events panel above is opaque too, so this
     // also stops the panel looking like a washed-out sibling of it.
-    lv_obj_set_style_bg_opa(weatherContainer, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_opa(weatherContainer, panel_opa(), 0);
     lv_obj_set_style_border_width(weatherContainer, 0, 0);
     lv_obj_set_style_radius(weatherContainer, UI_RADIUS, 0);
     lv_obj_set_style_shadow_color(weatherContainer, lv_color_hex(0x000000), 0);
@@ -1383,6 +1395,9 @@ void updateEventDisplay(lv_obj_t *calendar) {
     lv_obj_set_size(eventContainer, 400, 175);
     lv_obj_align(eventContainer, LV_ALIGN_TOP_RIGHT, -10, 50);
     lv_obj_set_style_bg_color(eventContainer, lv_color_hex(0x000000), 0);
+    // Follows the site's panel-opacity setting, like the weather panel and the
+    // taskbar, so the background picture shows through the whole card.
+    lv_obj_set_style_bg_opa(eventContainer, panel_opa(), 0);
     lv_obj_set_style_radius(eventContainer, UI_RADIUS, 0); // was the theme's ~6 card default
     lv_obj_set_style_border_width(eventContainer, 0, 0);
     // No padding, so the title bar below can span the full width. The cards are
@@ -4296,11 +4311,11 @@ void apply_calendar_theme(lv_obj_t *cal) {
   const lv_color_t text       = dark ? lv_color_hex(0xECEFF1) : lv_color_hex(0x2C3E50);
 
   lv_obj_set_style_bg_color(cal, card_bg, LV_PART_MAIN);
-  lv_obj_set_style_bg_opa(cal, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(cal, panel_opa(), LV_PART_MAIN);
   lv_obj_set_style_border_color(cal, card_line, LV_PART_MAIN);
   // Day cells
   lv_obj_set_style_bg_color(cal, cell_bg, LV_PART_ITEMS);
-  lv_obj_set_style_bg_opa(cal, LV_OPA_COVER, LV_PART_ITEMS);
+  lv_obj_set_style_bg_opa(cal, panel_opa(), LV_PART_ITEMS);
   lv_obj_set_style_bg_color(cal, cell_press, LV_PART_ITEMS | LV_STATE_PRESSED);
   lv_obj_set_style_text_color(cal, text, LV_PART_ITEMS);
   // The 1px item border must stay opaque and be the same colour as the cell:
@@ -4532,6 +4547,18 @@ void fetchUpdatePolicy() {
 //     { "revision": 1, "scheme": "Teal", "darkness": 0 }
 // The server sets the DEFAULT. The value is re-applied only when it actually
 // changes, so a scheme picked on the device's own selector in between is kept.
+// Re-apply the site's panel opacity to the surfaces that already exist. The build
+// paths pass panel_opa() at creation time, so this only has to catch a change made
+// while the UI is up. The calendar goes through apply_calendar_theme(), which is
+// where its MAIN and ITEMS opacity is set.
+static void apply_panel_opacity() {
+  const lv_opa_t opa = panel_opa();
+  if (taskbar)          lv_obj_set_style_bg_opa(taskbar, opa, 0);
+  if (weatherContainer) lv_obj_set_style_bg_opa(weatherContainer, opa, 0);
+  if (eventContainer)   lv_obj_set_style_bg_opa(eventContainer, opa, 0);
+  if (calendar)         apply_calendar_theme(calendar);
+  if (lv_scr_act())     lv_obj_invalidate(lv_scr_act());
+}
 void fetchThemeConfig() {
   if (WiFi.status() != WL_CONNECTED) return;
   if (apiCode.isEmpty()) {
@@ -4560,6 +4587,10 @@ void fetchThemeConfig() {
   // Whether the website asked for Auto brightness. Absent (an older
   // device-theme.php) reads as false, which leaves the device's own choice alone.
   const bool web_auto = doc["auto"] | false;
+  // Panel opacity for the calendar, taskbar and the two panels. -1 means the
+  // endpoint did not send one (an older device-theme.php), which must leave the
+  // device's current value alone rather than resetting it to solid.
+  const int panel_opa_pct = doc["panel_opa"] | -1;
   String scheme = doc["scheme"].as<String>();
   scheme.trim();
 
@@ -4568,7 +4599,8 @@ void fetchThemeConfig() {
   // the same values on the site must not overwrite a colour picked on the device.
   // A "backlight" key may still be present in the response; it is ignored on
   // purpose, because the panel cannot be dimmed (see display.h).
-  String sig = scheme + "|" + String(darkness) + "|" + (web_auto ? "1" : "0");
+  String sig = scheme + "|" + String(darkness) + "|" + (web_auto ? "1" : "0") +
+               "|" + String(panel_opa_pct);
 
   // A local choice that has not reached the site yet is the newest thing there is:
   // the site's copy is about to be overwritten by our own push, so leave the device
@@ -4651,6 +4683,19 @@ void fetchThemeConfig() {
       Serial.println("[THEME] brightness set from server: " + String(darkness));
     }
   }
+  // Panel opacity. Applied AFTER the brightness block on purpose: a brightness
+  // change rebuilds the calendar and the weather panel, and those builds take
+  // their opacity from g_panel_opa_pct - so setting it afterwards is what makes
+  // the new value stick instead of being overwritten by the old one.
+  if (panel_opa_pct >= 0 && panel_opa_pct <= 100 && panel_opa_pct != g_panel_opa_pct) {
+    g_panel_opa_pct = panel_opa_pct;
+    preferences.begin("ui", false);
+    preferences.putInt("ui_panel_opa", g_panel_opa_pct);
+    preferences.end();
+    apply_panel_opacity();
+    Serial.println("[THEME] panel opacity set from server: " + String(g_panel_opa_pct) + "%");
+  }
+
   // Written only on a real change of the site's value. The guard above no longer
   // returns whenever the signature matches, so this block is now reached on every
   // poll - and an unconditional write here would burn a flash sector a minute.
@@ -5219,7 +5264,7 @@ void setup_calendar() {
   lv_obj_set_size(taskbar, LV_PCT(100), TASKBAR_H);
   lv_obj_align(taskbar, LV_ALIGN_TOP_MID, 0, 0);
   lv_obj_set_style_bg_color(taskbar, taskbar_bg(), 0);
-  lv_obj_set_style_bg_opa(taskbar, LV_OPA_COVER, 0);
+  lv_obj_set_style_bg_opa(taskbar, panel_opa(), 0);
   lv_obj_set_style_radius(taskbar, 0, 0); // a strip, not a rounded card
   // No border. The accent line under the strip ate 2px of the bar's height and
   // only separated it from a background it already contrasts with, so the strip
@@ -5807,6 +5852,8 @@ void setup() {
   // -1 means "the website has never sent one", so the first value it does send is
   // treated as a change.
   g_web_darkness = preferences.getInt("ui_web_darkness", -1);
+  g_panel_opa_pct = preferences.getInt("ui_panel_opa", 100);
+  if (g_panel_opa_pct < 0 || g_panel_opa_pct > 100) g_panel_opa_pct = 100;
   themeSignature = preferences.getString("theme_sig", "");
   g_autoFirmwareUpdate = preferences.getBool("auto_upd", false);
   g_quietStartHour = preferences.getInt("quiet_start", 2);
@@ -6761,6 +6808,66 @@ static bool bgCacheMount() {
   }
   return bgFsReady;
 }
+// ---- progress card for the blocking background transfer ---------------------
+// Downloading 768KB over TLS and writing it to flash happens inside loop(), so
+// nothing else runs while it does and the panel used to sit frozen for about ten
+// seconds with no sign of why. This paints a small card first and repaints it as
+// the bytes arrive.
+//
+// lv_refr_now() only REDRAWS - it does not run timers - so no timer can re-enter
+// the network code from inside the transfer. That is what makes it safe here;
+// fetchAndSetBackgroundImage() always runs from loop(), never from inside
+// lv_timer_handler(), which is why calling it directly is allowed at all.
+static lv_obj_t *bg_progress = nullptr;
+static lv_obj_t *bg_progress_bar = nullptr;
+
+static void bgProgressHide() {
+  if (bg_progress) {
+    lv_obj_del(bg_progress);
+    bg_progress = nullptr;
+    bg_progress_bar = nullptr;
+    lv_obj_invalidate(lv_scr_act());
+  }
+}
+
+static void bgProgressShow(const char *text) {
+  bgProgressHide();
+  bg_progress = lv_obj_create(lv_scr_act());
+  if (!bg_progress) return;
+  lv_obj_set_size(bg_progress, 380, 118);
+  lv_obj_align(bg_progress, LV_ALIGN_CENTER, 0, 0);
+  lv_obj_set_style_bg_color(bg_progress, lv_color_hex(0x000000), 0);
+  lv_obj_set_style_bg_opa(bg_progress, LV_OPA_90, 0);
+  lv_obj_set_style_border_color(bg_progress, scheme_accent(), 0);
+  lv_obj_set_style_border_width(bg_progress, 2, 0);
+  lv_obj_set_style_radius(bg_progress, UI_RADIUS, 0);
+  lv_obj_set_style_pad_all(bg_progress, 12, 0);
+  lv_obj_clear_flag(bg_progress, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_t *lbl = lv_label_create(bg_progress);
+  lv_label_set_text(lbl, text);
+  lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(lbl, lv_color_white(), 0);
+  lv_obj_align(lbl, LV_ALIGN_TOP_MID, 0, 0);
+  bg_progress_bar = lv_bar_create(bg_progress);
+  lv_obj_set_size(bg_progress_bar, 340, 14);
+  lv_obj_align(bg_progress_bar, LV_ALIGN_BOTTOM_MID, 0, 0);
+  lv_bar_set_range(bg_progress_bar, 0, 100);
+  lv_bar_set_value(bg_progress_bar, 0, LV_ANIM_OFF);
+  lv_obj_set_style_bg_color(bg_progress_bar, scheme_accent(), LV_PART_INDICATOR);
+  lv_refr_now(NULL);   // paint it BEFORE the blocking part starts
+}
+
+static void bgProgressSet(int pct) {
+  if (!bg_progress_bar) return;
+  if (pct < 0) pct = 0;
+  if (pct > 100) pct = 100;
+  // Repaint only when the whole percent changes: the download loop runs hundreds
+  // of times and each repaint costs a render.
+  if (pct == (int)lv_bar_get_value(bg_progress_bar)) return;
+  lv_bar_set_value(bg_progress_bar, pct, LV_ANIM_OFF);
+  lv_refr_now(NULL);
+}
+
 static void bgApply(uint8_t *buf, size_t len) {
   if (bg_img) {
     lv_obj_del(bg_img);
@@ -6878,10 +6985,14 @@ void fetchAndSetBackgroundImage() {
                 contentLength,
                 (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024),
                 (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) / 1024));
+  // Put something on screen before the blocking part: this function holds loop()
+  // for the whole transfer, so without it the panel just froze.
+  bgProgressShow("Downloading background picture");
   uint8_t* imageBuffer = (uint8_t*)ps_malloc(contentLength);
   if (!imageBuffer) {
     Serial.printf("[BG] FAILED to allocate %d bytes of PSRAM for the background (free: %uKB)\n",
                   contentLength, (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
+    bgProgressHide();
     http.end();
     return;
   }
@@ -6899,17 +7010,26 @@ void fetchAndSetBackgroundImage() {
       // data was flowing; a bare spin would instead starve the WiFi task.
       delay(1);
     }
+    // Show the transfer advancing instead of leaving a dead screen. Only the
+    // whole-percent changes repaint, so this costs a render at most 100 times.
+    bgProgressSet((int)((totalRead * 100) / (size_t)contentLength));
   }
   if (totalRead != contentLength) {
     Serial.printf("[BG] Incomplete background download: %u/%d bytes\n", (unsigned)totalRead, contentLength);
+    bgProgressHide();
     free(imageBuffer);
     http.end();
     return;
   }
   if (debug == 1) Serial.println("[APP] Download complete: " + String(totalRead) + " bytes");
-  // Cache before applying, so a rendering problem cannot lose the download.
-  bgSaveToCache(imageBuffer, contentLength);
+  bgProgressSet(100);
+  // Apply BEFORE caching. The flash write blocks for another second or two, and
+  // doing it first kept the screen frozen for that long after the download had
+  // already finished. A power cut mid-write now costs the cached copy rather than
+  // the picture: the size check simply re-downloads it on the next boot.
   bgApply(imageBuffer, contentLength);
+  bgProgressHide();
+  bgSaveToCache(imageBuffer, contentLength);
   if (debug == 1) Serial.println("[APP] Background image set successfully via LVGL");
   http.end();
 }
