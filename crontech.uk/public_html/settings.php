@@ -1403,8 +1403,10 @@ if (!array_key_exists($active_tab, $TABS)) { $active_tab = 'themes'; }
                             <p class="autosave-hint">Only matters while a background picture is showing.</p>
                             <p class="autosave-hint">Saves automatically.</p>
                         </form>
+                    </div>
 
-                        <h2 class="text-2xl font-bold mt-6 mb-4">Background picture</h2>
+                    <div class="settings-col">
+                        <h2 class="text-2xl font-bold mb-4">Background picture</h2>
                         <p class="text-base mb-4">
                             Sits behind the calendar on your <strong>Cron-Tab device</strong>. Upload your own
                             picture, or let the weather choose one for you.
@@ -1421,49 +1423,6 @@ if (!array_key_exists($active_tab, $TABS)) { $active_tab = 'themes'; }
                                  style="display:block;width:100%;max-width:300px;aspect-ratio:5/3;object-fit:cover;border-radius:10px;border:2px solid var(--border-light);margin-bottom:1rem;">
                         <?php endif; ?>
                         <a href="image_converter.php" class="cta-btn">Upload / change background picture</a>
-                    </div>
-
-                    <div class="settings-col">
-                        <h2 class="text-2xl font-bold mb-4">Device updates</h2>
-                        <p class="text-base mb-4">Applies to the CronTab device, not to this website.</p>
-                        <?php if ($policy_message): ?>
-                            <p class="<?php echo $policy_error_flag ? 'error-msg' : 'text-green-500'; ?> mb-4"><?php echo htmlspecialchars($policy_message); ?></p>
-                        <?php endif; ?>
-                        <form method="POST" class="form">
-                            <input type="hidden" name="tab" value="themes">
-                            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf_token']); ?>">
-                            <?php if ($is_admin): ?>
-                                <!-- form.submit() omits the clicked button's name, so the controls below
-                                     need this to reach the save_update_policy handler at all. -->
-                                <input type="hidden" name="save_update_policy" value="1">
-                            <?php endif; ?>
-                            <div class="flex items-center justify-center">
-                                <input type="checkbox" name="auto_firmware_update" id="autoUpd" value="1" class="mr-2 h-5 w-5"
-                                       <?php echo $policy['auto_firmware_update'] ? 'checked' : ''; ?>
-                                       <?php echo $is_admin ? 'onchange="ctAutosave(this);"' : 'disabled'; ?>>
-                                <label for="autoUpd" class="text-base">Install firmware updates automatically</label>
-                            </div>
-                            <label class="text-base">Quiet window</label>
-                            <div class="flex items-center justify-center gap-3">
-                                <select name="quiet_start" class="form-select" <?php echo $is_admin ? 'onchange="ctAutosave(this);"' : 'disabled'; ?>>
-                                    <?php for ($h = 0; $h < 24; $h++): ?>
-                                        <option value="<?php echo $h; ?>" <?php echo (int)$policy['quiet_start'] === $h ? 'selected' : ''; ?>><?php printf('%02d:00', $h); ?></option>
-                                    <?php endfor; ?>
-                                </select>
-                                <span>to</span>
-                                <select name="quiet_end" class="form-select" <?php echo $is_admin ? 'onchange="ctAutosave(this);"' : 'disabled'; ?>>
-                                    <?php for ($h = 0; $h < 24; $h++): ?>
-                                        <option value="<?php echo $h; ?>" <?php echo (int)$policy['quiet_end'] === $h ? 'selected' : ''; ?>><?php printf('%02d:00', $h); ?></option>
-                                    <?php endfor; ?>
-                                </select>
-                            </div>
-                            <?php if ($is_admin): ?>
-                                <p class="autosave-hint">Saves automatically.</p>
-                                <a href="firmware.php" class="cta-btn" style="background:#111827;">Upload firmware</a>
-                            <?php else: ?>
-                                <p class="text-base">Only the administrator can change these.</p>
-                            <?php endif; ?>
-                        </form>
                     </div>
                 </div>
             </div>
@@ -1516,6 +1475,48 @@ if (!array_key_exists($active_tab, $TABS)) { $active_tab = 'themes'; }
                 <?php else: ?>
                     <p class="text-base mb-4">Enable session lock to stay logged in after closing the app.</p>
                     <button type="submit" name="enable_session_lock" class="cta-btn">Enable Session Lock</button>
+                <?php endif; ?>
+            </form>
+            <h2 class="text-2xl font-bold mt-6 mb-4">Device updates</h2>
+            <p class="text-base mb-4">Applies to the CronTab device, not to this website.</p>
+            <?php if ($policy_message): ?>
+                <p class="<?php echo $policy_error_flag ? 'error-msg' : 'text-green-500'; ?> mb-4"><?php echo htmlspecialchars($policy_message); ?></p>
+            <?php endif; ?>
+            <form method="POST" class="form">
+                <!-- Saves under the Other tab: this section moved here from Themes, and
+                     the hidden tab decides which tab comes back after the autosave. -->
+                <input type="hidden" name="tab" value="other">
+                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf_token']); ?>">
+                <?php if ($is_admin): ?>
+                    <!-- form.submit() omits the clicked button's name, so the controls below
+                         need this to reach the save_update_policy handler at all. -->
+                    <input type="hidden" name="save_update_policy" value="1">
+                <?php endif; ?>
+                <div class="flex items-center justify-center">
+                    <input type="checkbox" name="auto_firmware_update" id="autoUpd" value="1" class="mr-2 h-5 w-5"
+                           <?php echo $policy['auto_firmware_update'] ? 'checked' : ''; ?>
+                           <?php echo $is_admin ? 'onchange="ctAutosave(this);"' : 'disabled'; ?>>
+                    <label for="autoUpd" class="text-base">Install firmware updates automatically</label>
+                </div>
+                <label class="text-base">Quiet window</label>
+                <div class="flex items-center justify-center gap-3">
+                    <select name="quiet_start" class="form-select" <?php echo $is_admin ? 'onchange="ctAutosave(this);"' : 'disabled'; ?>>
+                        <?php for ($h = 0; $h < 24; $h++): ?>
+                            <option value="<?php echo $h; ?>" <?php echo (int)$policy['quiet_start'] === $h ? 'selected' : ''; ?>><?php printf('%02d:00', $h); ?></option>
+                        <?php endfor; ?>
+                    </select>
+                    <span>to</span>
+                    <select name="quiet_end" class="form-select" <?php echo $is_admin ? 'onchange="ctAutosave(this);"' : 'disabled'; ?>>
+                        <?php for ($h = 0; $h < 24; $h++): ?>
+                            <option value="<?php echo $h; ?>" <?php echo (int)$policy['quiet_end'] === $h ? 'selected' : ''; ?>><?php printf('%02d:00', $h); ?></option>
+                        <?php endfor; ?>
+                    </select>
+                </div>
+                <?php if ($is_admin): ?>
+                    <p class="autosave-hint">Saves automatically.</p>
+                    <a href="firmware.php" class="cta-btn" style="background:#111827;">Upload firmware</a>
+                <?php else: ?>
+                    <p class="text-base">Only the administrator can change these.</p>
                 <?php endif; ?>
             </form>
                         <p class="link-text mt-6"><a href="calendar.php" class="link-text">Back to Calendar</a></p>
