@@ -2,11 +2,16 @@
 /**
  * bg_common.php - shared helpers for the device background picture.
  *
- * The device blits one fixed thing: an 800x480 image in raw RGB565,
- * little-endian, exactly 768000 bytes, with no header. LVGL is handed a pointer
- * straight at it, and the ESP32-S3 is little-endian, so the file on the server is
- * byte-for-byte what the panel shows. Nothing on either side has to convert
- * anything at runtime.
+ * The device blits one fixed thing: an 800x480 image in raw RGB565, little-endian,
+ * with no header. LVGL is handed a pointer straight at it, and the ESP32-S3 is
+ * little-endian, so the file on the server is byte-for-byte what the panel shows.
+ *
+ * The file is STORED and SENT at half the panel resolution. A quarter of the bytes
+ * means a quarter of the download, a quarter of the flash write on the device (the
+ * slow part, which has to happen behind a blacked-out screen), and room for about
+ * fifty cached pictures instead of thirteen. The firmware stretches it back to
+ * 800x480 once on arrival, so nothing else changes. Keep BG_STORE_W/H in step with
+ * the same constants in main.cpp.
  *
  * Both the upload page and the device-facing background.php include this, so the
  * size and the weather mapping live in exactly one place.
@@ -19,9 +24,11 @@ if (isset($_SERVER['SCRIPT_FILENAME']) && realpath($_SERVER['SCRIPT_FILENAME']) 
     exit('This file is included by other pages; it is not meant to be opened directly.');
 }
 
-define('BG_W', 800);
+define('BG_W', 800);                          // the panel, and the preview size
 define('BG_H', 480);
-define('BG_BYTES', BG_W * BG_H * 2);          // 768000
+define('BG_STORE_W', 400);                    // what is downloaded and cached
+define('BG_STORE_H', 240);
+define('BG_BYTES', BG_STORE_W * BG_STORE_H * 2);  // 192000
 define('BG_WEATHER_DIR', 'uploads/weather');  // holds <group>.bin and <group>.png
 
 /**
@@ -87,12 +94,14 @@ function bg_rgb565_bytes($img, int $srcW, int $srcH): string
     // has no alpha, so flatten onto black deliberately rather than by accident.
     imagealphablending($canvas, false);
     imagefill($canvas, 0, 0, imagecolorallocate($canvas, 0, 0, 0));
-    imagecopyresampled($canvas, $img, 0, 0, 0, 0, BG_W, BG_H, $srcW, $srcH);
+    // Down to the stored size, with resampling (not nearest) so the reduction is
+    // anti-aliased rather than picking every other pixel.
+    imagecopyresampled($canvas, $img, 0, 0, 0, 0, BG_STORE_W, BG_STORE_H, $srcW, $srcH);
 
     $out = '';
-    for ($y = 0; $y < BG_H; $y++) {
+    for ($y = 0; $y < BG_STORE_H; $y++) {
         $row = '';
-        for ($x = 0; $x < BG_W; $x++) {
+        for ($x = 0; $x < BG_STORE_W; $x++) {
             $c = imagecolorat($canvas, $x, $y);
             $v = ((($c >> 16) & 0xF8) << 8) | ((($c >> 8) & 0xFC) << 3) | (($c & 0xFF) >> 3);
             $row .= chr($v & 0xFF) . chr(($v >> 8) & 0xFF);   // low byte first
@@ -107,6 +116,10 @@ function bg_rgb565_bytes($img, int $srcW, int $srcH): string
  * Write <base>.bin (the device blob) and <base>.png (the web preview).
  * Returns false if either write fails, so callers can report it honestly rather
  * than leaving the database pointing at a file that is not there.
+ *
+ * The preview is kept at the FULL panel size: it is only ever shown in a browser,
+ * and it is the master the .bin can be rebuilt from if the stored size ever
+ * changes again (see bg_heal_bin).
  */
 function bg_write_pair(string $base, $img, int $srcW, int $srcH): bool
 {
@@ -122,6 +135,35 @@ function bg_write_pair(string $base, $img, int $srcW, int $srcH): bool
     $ok = imagepng($preview, $base . '.png');
     imagedestroy($preview);
     return (bool) $ok;
+}
+
+/**
+ * Make sure a .bin exists at the CURRENT size, rebuilding it from its preview PNG
+ * if not.
+ *
+ * The stored size has changed once already (full panel -> half), and a stale .bin
+ * is worse than useless: the device would reject it and show nothing. The preview
+ * beside it is the full-quality master, so the fix is a re-encode rather than
+ * asking the owner to upload again.
+ *
+ * @param string $base  path WITHOUT the extension, relative to this directory.
+ */
+function bg_heal_bin(string $base): bool
+{
+    $abs = __DIR__ . '/' . $base;
+    if (is_file($abs . '.bin') && filesize($abs . '.bin') === BG_BYTES) {
+        return true;
+    }
+    if (!is_file($abs . '.png')) {
+        return false;
+    }
+    $img = @imagecreatefrompng($abs . '.png');
+    if ($img === false) {
+        return false;
+    }
+    $ok = bg_write_pair($abs, $img, imagesx($img), imagesy($img));
+    imagedestroy($img);
+    return $ok && is_file($abs . '.bin') && filesize($abs . '.bin') === BG_BYTES;
 }
 
 /** True when the group's generated default exists on disk. Anchored on __DIR__

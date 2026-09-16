@@ -82,13 +82,12 @@ $userId = (int) ($row['user_id'] ?? 0);
 // The owner's own picture, when that is the mode and the file is really there.
 if ($mode === 'custom' && $custom !== '') {
     $safe = basename($custom);
-    $path = __DIR__ . '/uploads/' . $safe;
-    // The size is checked, not just existence. Anything left over from the old
-    // converter is a 200x90 RGB565 file of about 36KB, which this firmware cannot
-    // read at all; serving it would just make the device log "Invalid background
-    // size" and show nothing. Falling through to the weather set instead means an
-    // old account keeps a working background until its owner uploads a new one.
-    if (is_file($path) && filesize($path) === BG_BYTES) {
+    // bg_heal_bin() re-encodes the .bin from its preview PNG when the stored one
+    // is missing or was written at an older size - the stored size has changed
+    // once already (full panel -> half), and a stale file would simply be refused
+    // by the device. It is a no-op when the .bin is already correct.
+    if (bg_heal_bin('uploads/' . pathinfo($safe, PATHINFO_FILENAME))) {
+        $path = __DIR__ . '/uploads/' . $safe;
         echo json_encode(['filename' => bg_versioned($safe, $path), 'mode' => 'custom', 'group' => null]);
         exit;
     }
@@ -108,11 +107,14 @@ if ($group === null) {
 }
 
 // This account's own replacement for the chosen group wins over the generated
-// default. Same size check as the custom background: a half-written or wrong
-// format file must never be handed to the device.
+// default. Same size check as the custom background, and the same repair: only a
+// file of exactly the right size is ever handed to the device.
 $overrideRel = 'weather/' . basename(bg_weather_override_base($userId, $group)) . '.bin';
-$overrideAbs = __DIR__ . '/uploads/' . $overrideRel;
-if ($userId > 0 && is_file($overrideAbs) && filesize($overrideAbs) === BG_BYTES) {
+// BG_WEATHER_DIR + the bare name: bg_heal_bin() wants a path without the extension,
+// and taking pathinfo() of the "weather/..." relative name dropped the directory.
+$overrideBase = BG_WEATHER_DIR . '/' . basename(bg_weather_override_base($userId, $group));
+if ($userId > 0 && bg_heal_bin($overrideBase)) {
+    $overrideAbs = __DIR__ . '/uploads/' . $overrideRel;
     echo json_encode([
         'filename' => bg_versioned($overrideRel, $overrideAbs),
         'mode'     => 'weather',
@@ -122,6 +124,9 @@ if ($userId > 0 && is_file($overrideAbs) && filesize($overrideAbs) === BG_BYTES)
 }
 
 $defaultRel = bg_weather_filename($group);
+// Same repair for the shipped default: if the deployed .bin predates the current
+// stored size, rebuild it from the preview PNG beside it.
+bg_heal_bin(BG_WEATHER_DIR . '/' . $group);
 echo json_encode([
     'filename' => bg_versioned($defaultRel, __DIR__ . '/uploads/' . $defaultRel),
     'mode'     => 'weather',

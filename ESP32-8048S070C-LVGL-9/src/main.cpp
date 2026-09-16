@@ -1143,7 +1143,7 @@ if (httpCode == HTTP_CODE_OK) {
   // ---- keep a weather background in step with the sky ------------------------
   // In weather mode the picture is chosen from the current conditions, so rain
   // turning to clear needs a different file. Only the small JSON name lookup runs
-  // here; the 768KB picture is pulled down only when the name actually changed,
+  // here; the picture itself is pulled down only when the name actually changed,
   // which is what keeps a 15-minute weather refresh cheap. Custom mode is skipped
   // entirely - that picture belongs to the owner, not to the weather.
   if (bg_mode == "weather") {
@@ -6892,18 +6892,24 @@ void fetchBackgroundFilename() {
 }
 // New function to fetch and set background image if filename exists
 // ---- Background image: flash cache -----------------------------------------
-// The server serves an 800x480 blob of raw RGB565, little-endian, exactly 768,000
-// bytes - the same format the site's upload page writes, so neither end converts
-// anything at runtime and LVGL can be handed a pointer straight at it.
+// The server serves a raw RGB565, little-endian blob - the same format the site's
+// upload page writes, so neither end converts anything at runtime and LVGL can be
+// handed a pointer straight at it.
 //
-// EVERY picture the device has seen is kept in the LittleFS partition (the
-// "spiffs" partition from default_8MB.csv), so going back to one - a weather
-// change, or the owner swapping backgrounds - is served from flash instead of a
-// TLS handshake and 768KB over the air. One picture is 768KB, so HOW MANY fit is
-// decided by that partition rather than by this code: with the stock 1.5MB table
-// it is one, and the cache behaves much as it always did. Give the partition more
-// room and it holds proportionally more with no change here - the budget is worked
-// out at runtime, and bgCacheReport() prints the answer at every boot.
+// It travels and is cached at HALF the panel resolution (400x240 = 192,000 bytes
+// instead of 800x480 = 768,000). Halving each axis is a quarter of the bytes, and
+// that pays three times over: a quarter of the download, a quarter of the flash
+// erase+program job that has to happen behind the blackout, and room for about
+// fifty pictures in the cache instead of thirteen. The price is a softer picture,
+// which behind a full-screen UI is hard to notice; bgUpscale() stretches it back
+// to 800x480 once per change so LVGL still blits a full-size image and the render
+// path is exactly what it was.
+//
+// EVERY picture the device has seen is kept in the LittleFS partition, so going
+// back to one - a weather change, or the owner swapping backgrounds - is served
+// from flash instead of a TLS handshake and a download. How many fit is decided by
+// that partition rather than by this code; bgCacheReport() prints the answer at
+// every boot.
 //
 // BG_CACHE_RESERVE bytes are held back for the filesystem itself. LittleFS needs
 // room to write metadata and to compact, and a cache that fills the partition
@@ -6912,8 +6918,12 @@ void fetchBackgroundFilename() {
 #define BG_CACHE_LEGACY_PATH "/bg.rgb"        // the old one-picture cache
 #define BG_CACHE_INDEX_KEY   "bg_mru"         // names, most recently used first
 #define BG_CACHE_RESERVE     (160 * 1024)     // kept free for the filesystem
-#define BG_CACHE_MAX         12               // index length cap
-#define BG_EXPECTED_SIZE (800 * 480 * 2)
+#define BG_CACHE_MAX         32               // index length cap
+#define BG_STORE_W 400                        // what is downloaded and cached
+#define BG_STORE_H 240
+#define BG_PANEL_W 800                        // what LVGL is handed
+#define BG_PANEL_H 480
+#define BG_EXPECTED_SIZE (BG_STORE_W * BG_STORE_H * 2)   // 192000
 static bool bgFsReady = false;
 // lv_img_set_src() keeps the pointer it is handed, so this descriptor must
 // outlive the call. It used to be a local, which left LVGL reading a stale stack
@@ -6958,7 +6968,7 @@ static bool bgCacheMount() {
   return true;
 }
 // ---- progress card for the blocking background transfer ---------------------
-// Downloading 768KB over TLS and writing it to flash happens inside loop(), so
+// Downloading the picture over TLS and writing it to flash happens inside loop(), so
 // nothing else runs while it does and the panel used to sit frozen for about ten
 // seconds with no sign of why. This paints a small card first and repaints it as
 // the bytes arrive.
@@ -7019,8 +7029,8 @@ static void bgProgressSet(int pct) {
 
 // ---- hiding the cache write -------------------------------------------------
 // Putting a picture INTO the flash is the part that cannot be shown on screen.
-// 768KB means erasing and programming roughly 190 sectors, and on this board the
-// flash shares its bus with the RGB panel's DMA, so every one of those writes
+// 192KB still means erasing and programming roughly 48 sectors, and on this board
+// the flash shares its bus with the RGB panel's DMA, so every one of those writes
 // starves the panel and the picture tears or drops sync. loop() is blocked for the
 // whole write as well, so LVGL cannot repaint over the damage - which is why it
 // looks like a crash rather than a pause.
@@ -7038,34 +7048,86 @@ static void bgWriteScreenUp() {
   ota_backlight(true);
   if (lv_scr_act()) lv_obj_invalidate(lv_scr_act());
 }
+// Stretch the stored picture up to the panel size. Bilinear, and it runs ONCE per
+// change rather than per frame: handing LVGL the half-size image and letting it
+// scale on every blit would put a per-pixel transform in the hottest draw path in
+// the app, because the background is repainted underneath anything that redraws.
+static uint16_t *bgUpscale(const uint16_t *src) {
+  uint16_t *dst = (uint16_t *)ps_malloc((size_t)BG_PANEL_W * BG_PANEL_H * 2);
+  if (!dst) return nullptr;
+  const float stepX = (float)BG_STORE_W / (float)BG_PANEL_W;
+  const float stepY = (float)BG_STORE_H / (float)BG_PANEL_H;
+  for (int y = 0; y < BG_PANEL_H; y++) {
+    float fy = (y + 0.5f) * stepY - 0.5f;
+    if (fy < 0.0f) fy = 0.0f;
+    const int y0 = (int)fy;
+    const int y1 = (y0 + 1 < BG_STORE_H) ? y0 + 1 : BG_STORE_H - 1;
+    const float wy = fy - (float)y0;
+    const uint16_t *row0 = src + (size_t)y0 * BG_STORE_W;
+    const uint16_t *row1 = src + (size_t)y1 * BG_STORE_W;
+    uint16_t *out = dst + (size_t)y * BG_PANEL_W;
+    for (int x = 0; x < BG_PANEL_W; x++) {
+      float fx = (x + 0.5f) * stepX - 0.5f;
+      if (fx < 0.0f) fx = 0.0f;
+      const int x0 = (int)fx;
+      const int x1 = (x0 + 1 < BG_STORE_W) ? x0 + 1 : BG_STORE_W - 1;
+      const float wx = fx - (float)x0;
+      const float w00 = (1.0f - wx) * (1.0f - wy);
+      const float w01 = wx * (1.0f - wy);
+      const float w10 = (1.0f - wx) * wy;
+      const float w11 = wx * wy;
+      const uint16_t p00 = row0[x0], p01 = row0[x1], p10 = row1[x0], p11 = row1[x1];
+      // Blend in RGB565's own channel widths, then repack. Staying in 565 avoids
+      // expanding to RGB888 and back for 384,000 pixels.
+      const float r = ((p00 >> 11) & 0x1F) * w00 + ((p01 >> 11) & 0x1F) * w01 +
+                      ((p10 >> 11) & 0x1F) * w10 + ((p11 >> 11) & 0x1F) * w11;
+      const float g = ((p00 >> 5) & 0x3F) * w00 + ((p01 >> 5) & 0x3F) * w01 +
+                      ((p10 >> 5) & 0x3F) * w10 + ((p11 >> 5) & 0x3F) * w11;
+      const float b = (p00 & 0x1F) * w00 + (p01 & 0x1F) * w01 +
+                      (p10 & 0x1F) * w10 + (p11 & 0x1F) * w11;
+      out[x] = (uint16_t)(((int)(r + 0.5f) << 11) | ((int)(g + 0.5f) << 5) | (int)(b + 0.5f));
+    }
+  }
+  return dst;
+}
 static void bgApply(uint8_t *buf, size_t len) {
+  if (len != (size_t)BG_EXPECTED_SIZE) {
+    Serial.printf("[BG] Refusing a %u-byte picture (expected %u)\n",
+                  (unsigned)len, (unsigned)BG_EXPECTED_SIZE);
+    free(buf);
+    return;
+  }
+  // Stretch first: if this fails the current picture is left alone rather than
+  // tearing down something that is working.
+  uint16_t *full = bgUpscale((const uint16_t *)buf);
+  if (!full) {
+    Serial.println("[BG] No PSRAM for the full-size background - keeping the current one");
+    free(buf);
+    return;
+  }
   if (bg_img) {
     lv_obj_del(bg_img);
     bg_img = nullptr;
   }
   // Safe to release the old buffer only now: the object that referenced it is
   // gone and LVGL is not mid-render here (this runs from loop()).
-  if (bg_buffer && bg_buffer != buf) free(bg_buffer);
-  bg_buffer = buf;
+  if (bg_buffer) free(bg_buffer);
+  free(buf);                    // the half-size copy has done its job
+  bg_buffer = (uint8_t *)full;
   memset(&bg_dsc, 0, sizeof(bg_dsc));
-  bg_dsc.header.w = 800;
-  bg_dsc.header.h = 480;
-  // The file is already 800x480 RGB565 little-endian, which is exactly what LVGL
-  // wants as a variable image source, so the buffer is handed over unchanged.
-  //
-  // The RGB888 -> RGB565 conversion that used to sit here is gone. It allocated a
-  // SECOND 768KB buffer while the first was still alive, so a background change
-  // peaked at 1.8MB of PSRAM and then freed the original - and it duplicated work
-  // the server can do once instead of the panel doing it on every change. LVGL
-  // does not copy the pixels either (lv_bin_decoder.c wraps a variable source and
-  // sets use_directly), so nothing is allocated per blit.
+  bg_dsc.header.w = BG_PANEL_W;
+  bg_dsc.header.h = BG_PANEL_H;
+  // Full-size RGB565 little-endian: exactly what LVGL wants as a variable image
+  // source, so the buffer is handed over unchanged and nothing is allocated per
+  // blit (lv_bin_decoder.c wraps a variable source and sets use_directly).
   bg_dsc.header.cf = LV_COLOR_FORMAT_RGB565;
-  bg_dsc.data_size = len;
-  bg_dsc.data = (const uint8_t *)buf;
+  bg_dsc.data_size = (size_t)BG_PANEL_W * BG_PANEL_H * 2;
+  bg_dsc.data = (const uint8_t *)full;
   // Printed unconditionally, not only with debug on: this is the one line that
-  // says the picture is actually up, and how much PSRAM was left when it landed.
-  Serial.printf("[BG] Applied 800x480 RGB565, %u bytes, free PSRAM %uKB\n",
-                (unsigned)len, (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
+  // says the picture is actually up.
+  Serial.printf("[BG] Applied %dx%d RGB565 from a %dx%d source, free PSRAM %uKB\n",
+                BG_PANEL_W, BG_PANEL_H, BG_STORE_W, BG_STORE_H,
+                (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
   bg_img = lv_img_create(lv_scr_act());
   lv_img_set_src(bg_img, &bg_dsc);
   lv_obj_set_size(bg_img, LV_PCT(100), LV_PCT(100));
@@ -7284,7 +7346,7 @@ void fetchAndSetBackgroundImage() {
   if (debug == 1) Serial.println("[APP] Download complete: " + String(totalRead) + " bytes");
   bgProgressSet(100);
   // The picture is in PSRAM. Getting it INTO the flash is the part that cannot be
-  // shown: 768KB means erasing and programming ~190 sectors, the ESP32-S3 shares
+  // shown: even at half resolution that is ~48 flash sectors, the ESP32-S3 shares
   // the flash bus with the RGB panel's DMA so every one of those writes starves the
   // panel, and loop() is blocked for the whole thing so LVGL cannot repaint over
   // the damage. That is what made a weather change look like a crash.

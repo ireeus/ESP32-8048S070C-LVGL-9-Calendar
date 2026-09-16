@@ -31,6 +31,10 @@ if (PHP_SAPI !== 'cli') {
     exit("This generator is a command-line tool.\n");
 }
 
+// The stored size and the RGB565 packing live here, so this script cannot drift
+// from what the upload page writes or what the firmware expects.
+require __DIR__ . '/../bg_common.php';
+
 $root = dirname(__DIR__);
 $iconDir = $root . '/img/weather-bg';
 $outDir = $root . '/uploads/weather';
@@ -174,20 +178,14 @@ foreach ($groups as $name => $cfg) {
     }
 
     // ---- write the PNG preview -------------------------------------------
+    // Full panel size: this is only ever shown in a browser, and it doubles as the
+    // master the .bin can be rebuilt from (see bg_heal_bin).
     imagepng($img, $outDir . '/' . $name . '.png');
 
-    // ---- write the RGB565 little-endian blob ------------------------------
-    $bin = '';
-    for ($y = 0; $y < $H; $y++) {
-        for ($x = 0; $x < $W; $x++) {
-            $c = imagecolorat($img, $x, $y);
-            $r = ($c >> 16) & 0xFF;
-            $g = ($c >> 8) & 0xFF;
-            $b = $c & 0xFF;
-            $v = (($r & 0xF8) << 8) | (($g & 0xFC) << 3) | ($b >> 3);
-            $bin .= chr($v & 0xFF) . chr(($v >> 8) & 0xFF);   // low byte first
-        }
-    }
+    // ---- write the device blob at the STORED size -------------------------
+    // Through bg_common.php, so the stored resolution and the byte order are
+    // defined in exactly one place and cannot drift from what the firmware wants.
+    $bin = bg_rgb565_bytes($img, $W, $H);
     file_put_contents($outDir . '/' . $name . '.bin', $bin);
 
     printf(
@@ -195,8 +193,8 @@ foreach ($groups as $name => $cfg) {
         $name,
         $name,
         strlen($bin),
-        $W * $H * 2,
-        strlen($bin) === $W * $H * 2 ? 'OK' : '*** WRONG SIZE ***'
+        BG_BYTES,
+        strlen($bin) === BG_BYTES ? 'OK' : '*** WRONG SIZE ***'
     );
 
     imagedestroy($img);
