@@ -18,8 +18,8 @@ extern const lv_font_t lv_font_montserrat_14_bold;
 // Build version
 // Must be HIGHER than whatever update/version.json currently advertises, or the
 // device will keep offering (and auto-installing) a build that is not actually
-// newer. The site was on 2.2.6 when this was written.
-const String build_version = "2.3.0";
+// newer. The site advertised 2.3.1 when this was bumped to 2.3.2.
+const String build_version = "2.3.2";
 int debug =0; // Change to 1 to enable serial prints
 // Firmware check interval variable
 // Was 100000UL, which is 100 SECONDS, not the 5 minutes the comment claimed - so
@@ -502,7 +502,7 @@ static String bg_mode = "";
 // download a second one the moment the weather arrived.
 static bool g_weather_known = false;
 // OTA variables
-String currentFirmwareVersion = "2.3.0"; // replaced by build_version in setup()
+String currentFirmwareVersion = "2.3.2"; // replaced by build_version in setup()
 String latestFirmwareVersion = "";
 String firmwareUrl = "";
 WiFiClientSecure client;
@@ -2811,10 +2811,15 @@ void show_settings_popup() {
       lv_obj_set_user_data(ta, (void*)numeric);
       lv_obj_add_event_cb(ta, keyboard_event_cb, LV_EVENT_FOCUSED, ta);
       lv_obj_add_event_cb(ta, keyboard_event_cb, LV_EVENT_DEFOCUSED, ta);
-      lv_obj_t *label = lv_label_create(col); // description below the input
-      lv_label_set_text(label, label_text);
-      lv_obj_set_style_text_font(label, &lv_font_montserrat_14, 0);
-      lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), 0);
+      // The description under the input is optional: an empty label_text means the
+      // card title above already says what the field is, so no blank label is
+      // created. The City field uses this - its wording moved into the title.
+      if (label_text && label_text[0]) {
+        lv_obj_t *label = lv_label_create(col); // description below the input
+        lv_label_set_text(label, label_text);
+        lv_obj_set_style_text_font(label, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), 0);
+      }
       return ta;
     };
     auto make_button = [](lv_obj_t *parent, const char *text, uint32_t color, lv_coord_t w) {
@@ -2862,6 +2867,61 @@ void show_settings_popup() {
     lv_label_set_text(qr_hint, "Scan to open the web app");
     lv_obj_set_style_text_font(qr_hint, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(qr_hint, lv_color_hex(0xFFFFFF), 0);
+    // ---- memory meters, side by side --------------------------------------
+    // Under the QR code, above the firmware version line. They used to sit at the
+    // bottom of the right column, but the panel-opacity row made that column tall
+    // enough to push them past the bottom of the popup, where the footer buttons
+    // covered them; the left column has room and nothing else competing for it.
+    lv_obj_t *mem_row = lv_obj_create(qr_card);
+    lv_obj_set_width(mem_row, LV_PCT(100));
+    lv_obj_set_height(mem_row, LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(mem_row, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(mem_row, 0, 0);
+    lv_obj_set_style_pad_all(mem_row, 0, 0);
+    lv_obj_set_style_pad_column(mem_row, 16, 0);
+    lv_obj_set_flex_flow(mem_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(mem_row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_START,
+                          LV_FLEX_ALIGN_START);
+    lv_obj_clear_flag(mem_row, LV_OBJ_FLAG_SCROLLABLE);
+
+    // One meter: pool name, the bar itself, then the numbers underneath.
+    auto make_mem_meter = [&](const char *name, lv_obj_t **bar_out, lv_obj_t **val_out) {
+      lv_obj_t *col = lv_obj_create(mem_row);
+      lv_obj_set_width(col, 0);
+      lv_obj_set_height(col, LV_SIZE_CONTENT);
+      lv_obj_set_flex_grow(col, 1); // the two meters share the width evenly
+      lv_obj_set_style_bg_opa(col, LV_OPA_TRANSP, 0);
+      lv_obj_set_style_border_width(col, 0, 0);
+      lv_obj_set_style_pad_all(col, 0, 0);
+      lv_obj_set_style_pad_row(col, 4, 0);
+      lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
+      lv_obj_clear_flag(col, LV_OBJ_FLAG_SCROLLABLE);
+
+      lv_obj_t *title = lv_label_create(col);
+      lv_label_set_text(title, name);
+      lv_obj_set_style_text_font(title, &lv_font_montserrat_14, 0);
+      lv_obj_set_style_text_color(title, lv_color_hex(0xDDDDDD), 0);
+
+      lv_obj_t *bar = lv_bar_create(col);
+      lv_obj_set_width(bar, LV_PCT(100));
+      lv_obj_set_height(bar, 14);
+      lv_bar_set_range(bar, 0, 100);
+      lv_bar_set_value(bar, 0, LV_ANIM_OFF);
+      lv_obj_set_style_bg_color(bar, lv_color_hex(0x333333), LV_PART_MAIN);
+      lv_obj_set_style_radius(bar, UI_RADIUS, LV_PART_MAIN);
+      lv_obj_set_style_radius(bar, UI_RADIUS, LV_PART_INDICATOR);
+
+      lv_obj_t *val = lv_label_create(col);
+      lv_obj_set_style_text_font(val, &lv_font_montserrat_14, 0);
+      lv_obj_set_style_text_color(val, lv_color_hex(0xAAAAAA), 0);
+
+      *bar_out = bar;
+      *val_out = val;
+    };
+    make_mem_meter("RAM", &settings_ram_bar, &settings_ram_val);
+    make_mem_meter("PSRAM", &settings_psram_bar, &settings_psram_val);
+    update_settings_memory_meters(); // fill both before the first tick
+
     // The firmware version lives under the QR code. It used to sit in the right
     // column between the brightness card and the memory meters, where it read as
     // though it belonged to whichever of the two was nearest.
@@ -2872,8 +2932,10 @@ void show_settings_popup() {
 
     // Right column: weather location, ParcelBox, brightness.
     lv_obj_t *weather_cont = make_card(right_col, scheme_accent(), scheme_accent_dark());
-    make_card_title(weather_cont, "Weather Location");
-    lv_obj_t *location_ta = make_field(weather_cont, "City", "City", location, 0, LV_PCT(100), 0);
+    make_card_title(weather_cont, "Weather Location (City)");
+    // No label under the input: "(City)" in the title above carries the wording
+    // that used to sit down here, so it is not said twice.
+    lv_obj_t *location_ta = make_field(weather_cont, "", "City", location, 0, LV_PCT(100), 0);
 
     lv_obj_t *parcelbox_cont = make_card(right_col, scheme_accent_dark(), scheme_accent_deep());
     make_card_title(parcelbox_cont, "ParcelBox");
@@ -2957,57 +3019,6 @@ void show_settings_popup() {
     }
     opa_steps_highlight(opa_active_step());
 
-
-    // ---- memory meters, side by side --------------------------------------
-    lv_obj_t *mem_row = lv_obj_create(right_col);
-    lv_obj_set_width(mem_row, LV_PCT(100));
-    lv_obj_set_height(mem_row, LV_SIZE_CONTENT);
-    lv_obj_set_style_bg_opa(mem_row, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(mem_row, 0, 0);
-    lv_obj_set_style_pad_all(mem_row, 0, 0);
-    lv_obj_set_style_pad_column(mem_row, 16, 0);
-    lv_obj_set_flex_flow(mem_row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(mem_row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_START,
-                          LV_FLEX_ALIGN_START);
-    lv_obj_clear_flag(mem_row, LV_OBJ_FLAG_SCROLLABLE);
-
-    // One meter: pool name, the bar itself, then the numbers underneath.
-    auto make_mem_meter = [&](const char *name, lv_obj_t **bar_out, lv_obj_t **val_out) {
-      lv_obj_t *col = lv_obj_create(mem_row);
-      lv_obj_set_width(col, 0);
-      lv_obj_set_height(col, LV_SIZE_CONTENT);
-      lv_obj_set_flex_grow(col, 1); // the two meters share the width evenly
-      lv_obj_set_style_bg_opa(col, LV_OPA_TRANSP, 0);
-      lv_obj_set_style_border_width(col, 0, 0);
-      lv_obj_set_style_pad_all(col, 0, 0);
-      lv_obj_set_style_pad_row(col, 4, 0);
-      lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
-      lv_obj_clear_flag(col, LV_OBJ_FLAG_SCROLLABLE);
-
-      lv_obj_t *title = lv_label_create(col);
-      lv_label_set_text(title, name);
-      lv_obj_set_style_text_font(title, &lv_font_montserrat_14, 0);
-      lv_obj_set_style_text_color(title, lv_color_hex(0xDDDDDD), 0);
-
-      lv_obj_t *bar = lv_bar_create(col);
-      lv_obj_set_width(bar, LV_PCT(100));
-      lv_obj_set_height(bar, 14);
-      lv_bar_set_range(bar, 0, 100);
-      lv_bar_set_value(bar, 0, LV_ANIM_OFF);
-      lv_obj_set_style_bg_color(bar, lv_color_hex(0x333333), LV_PART_MAIN);
-      lv_obj_set_style_radius(bar, UI_RADIUS, LV_PART_MAIN);
-      lv_obj_set_style_radius(bar, UI_RADIUS, LV_PART_INDICATOR);
-
-      lv_obj_t *val = lv_label_create(col);
-      lv_obj_set_style_text_font(val, &lv_font_montserrat_14, 0);
-      lv_obj_set_style_text_color(val, lv_color_hex(0xAAAAAA), 0);
-
-      *bar_out = bar;
-      *val_out = val;
-    };
-    make_mem_meter("RAM", &settings_ram_bar, &settings_ram_val);
-    make_mem_meter("PSRAM", &settings_psram_bar, &settings_psram_val);
-    update_settings_memory_meters(); // fill both before the first tick
 
     // ---- footer buttons ---------------------------------------------------
     lv_obj_t *settings_footer = make_panel(settings_popup);

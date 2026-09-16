@@ -38,11 +38,8 @@ try {
     // Last known weather at a location, so marking "which picture is in use right
     // now" costs one upstream request per ten minutes rather than one per page
     // view. Keyed on the coordinates, so accounts in the same place share a row.
-    $db->exec("CREATE TABLE IF NOT EXISTS wx_cache (
-        cache_key TEXT PRIMARY KEY,
-        code INTEGER NOT NULL,
-        fetched_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )");
+    // bg_current_weather() creates it if this has not run yet.
+    bg_ensure_wx_cache($db);
 } catch (PDOException $e) {
     die('Database Error: ' . htmlspecialchars($e->getMessage()));
 }

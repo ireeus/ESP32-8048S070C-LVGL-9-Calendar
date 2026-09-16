@@ -194,6 +194,30 @@ function bg_weather_description(int $code): string
 }
 
 /**
+ * Make sure the little weather cache exists.
+ *
+ * Called by bg_current_weather() itself rather than left to one page's migration:
+ * settings.php shows the same "what is on the panel right now" preview and never
+ * runs the background page's setup, so the table has to follow the lookup.
+ */
+function bg_ensure_wx_cache(PDO $db): void
+{
+    static $done = false;
+    if ($done) return;
+    try {
+        $db->exec("CREATE TABLE IF NOT EXISTS wx_cache (
+            cache_key TEXT PRIMARY KEY,
+            code INTEGER NOT NULL,
+            fetched_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )");
+        $done = true;
+    } catch (PDOException $e) {
+        // Read-only database: the lookup below still works, it just is not cached.
+        $done = true;
+    }
+}
+
+/**
  * The weather group in force RIGHT NOW at a location, for the "showing now"
  * marker on the background page.
  *
@@ -207,6 +231,8 @@ function bg_weather_description(int $code): string
  */
 function bg_current_weather(PDO $db, float $lat, float $lon): ?array
 {
+    bg_ensure_wx_cache($db);
+
     $finish = function (int $code): array {
         return [
             'group'       => bg_weather_group($code),

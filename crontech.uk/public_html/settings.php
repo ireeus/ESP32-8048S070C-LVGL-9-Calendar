@@ -137,6 +137,9 @@ $db->exec("CREATE TABLE IF NOT EXISTS persistent_sessions (
     error_log("Database Error: " . $e->getMessage());
     die("Database Error: Unable to connect to the database.");
 }
+// Shared with the background page: the weather-code grouping, this account's
+// replacement pictures, and the right-now weather lookup the preview below needs.
+require_once __DIR__ . '/bg_common.php';
 // Auto-login with session lock
 if (!isset($_SESSION['user_id']) && isset($_COOKIE['session_lock'])) {
     $session_id = $_COOKIE['session_lock'];
@@ -730,13 +733,15 @@ if (isset($_SESSION['user_id'])) {
         }
     }
 }
-// Preview: the PNG the background page writes beside the .bin. Only the ACTIVE
-// mode's picture is shown - a leftover custom file must not be displayed while
-// the device is actually following the weather. In weather mode there is no
-// single answer anyway (it depends on the device's conditions), so the neutral
-// overcast default stands in for "one of these".
+// Preview: the PNG the background page writes beside the .bin. When the device is
+// following the weather there is no single answer - it depends on the conditions -
+// so ask what is in force right now and show THAT picture, including this
+// account's own replacement for it. The neutral overcast default is only used when
+// the weather cannot be worked out at all.
 $bg_preview = '';
 $bg_has_custom = false;
+$bg_now_group = null;
+$bg_now_note = '';
 if ($user_background['mode'] === 'custom' && $user_background['file'] !== '') {
     $candidate = 'uploads/' . pathinfo($user_background['file'], PATHINFO_FILENAME) . '.png';
     if (is_file($candidate)) {
@@ -744,8 +749,29 @@ if ($user_background['mode'] === 'custom' && $user_background['file'] !== '') {
         $bg_has_custom = true;
     }
 }
-if ($bg_preview === '' && is_file('uploads/weather/cloudy.png')) {
-    $bg_preview = 'uploads/weather/cloudy.png';
+if (!$bg_has_custom) {
+    $bg_now = null;
+    $bg_place = trim((string) ($weather_prefs['city_name'] ?? ''));
+    if (isset($weather_prefs['latitude'], $weather_prefs['longitude'])
+        && is_numeric($weather_prefs['latitude']) && is_numeric($weather_prefs['longitude'])) {
+        $bg_now = bg_current_weather($db, (float) $weather_prefs['latitude'], (float) $weather_prefs['longitude']);
+    }
+    if ($bg_now !== null) {
+        $bg_now_group = $bg_now['group'];
+        // This account's own replacement for that group wins, exactly as
+        // background.php decides it for the device - so the thumbnail shows the
+        // picture the panel is actually displaying, not the shipped default.
+        $ovr = bg_weather_override_base((int) $_SESSION['user_id'], $bg_now_group) . '.png';
+        if (is_file($ovr)) {
+            $bg_preview = $ovr;
+        } elseif (is_file(BG_WEATHER_DIR . '/' . $bg_now_group . '.png')) {
+            $bg_preview = BG_WEATHER_DIR . '/' . $bg_now_group . '.png';
+        }
+        $bg_now_note = ($bg_place !== '' ? $bg_place . ': ' : '') . $bg_now['description'];
+    }
+    if ($bg_preview === '' && is_file(BG_WEATHER_DIR . '/cloudy.png')) {
+        $bg_preview = BG_WEATHER_DIR . '/cloudy.png';
+    }
 }
 
 // Device fleet update policy. Everyone can SEE it; only the administrator can
@@ -1384,7 +1410,10 @@ if (!array_key_exists($active_tab, $TABS)) { $active_tab = 'themes'; }
                             picture, or let the weather choose one for you.
                         </p>
                         <p class="text-base mb-3">
-                            Currently: <strong><?php echo $user_background['mode'] === 'weather' ? 'Weather pictures (automatic)' : 'My own picture'; ?></strong><?php if ($user_background['mode'] === 'custom' && !$bg_has_custom): ?> &mdash; nothing uploaded yet, so the device is using the weather pictures.<?php endif; ?>
+                            Currently: <strong><?php echo $user_background['mode'] === 'weather' ? 'Weather pictures (automatic)' : 'My own picture'; ?></strong><?php
+                                if ($bg_now_note !== '' && $bg_now_group !== null): ?> &mdash; <?php echo htmlspecialchars($bg_now_note); ?>, so the <?php echo htmlspecialchars(bg_weather_label($bg_now_group)); ?> picture is showing.<?php
+                                elseif ($user_background['mode'] === 'custom' && !$bg_has_custom): ?> &mdash; nothing uploaded yet, so the device is using the weather pictures.<?php
+                                endif; ?>
                         </p>
                         <?php if ($bg_preview !== ''): ?>
                             <img src="<?php echo htmlspecialchars($bg_preview); ?>?v=<?php echo (int) @filemtime($bg_preview); ?>"
