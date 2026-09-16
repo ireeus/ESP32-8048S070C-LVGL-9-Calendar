@@ -18,8 +18,9 @@ extern const lv_font_t lv_font_montserrat_14_bold;
 // Build version
 // Must be HIGHER than whatever update/version.json currently advertises, or the
 // device will keep offering (and auto-installing) a build that is not actually
-// newer. The site advertised 2.3.4 when this was bumped to 2.3.5.
-const String build_version = "2.3.5";
+// newer. The site advertised 2.3.1 when this was bumped past it; this one carries
+// the multi-picture background gallery and the rotation interval it obeys.
+const String build_version = "2.3.6";
 int debug =0; // Change to 1 to enable serial prints
 // Firmware check interval variable
 // Was 100000UL, which is 100 SECONDS, not the 5 minutes the comment claimed - so
@@ -506,7 +507,7 @@ static String bg_mode = "";
 // download a second one the moment the weather arrived.
 static bool g_weather_known = false;
 // OTA variables
-String currentFirmwareVersion = "2.3.2"; // replaced by build_version in setup()
+String currentFirmwareVersion = "2.3.6"; // replaced by build_version in setup()
 String latestFirmwareVersion = "";
 String firmwareUrl = "";
 WiFiClientSecure client;
@@ -543,9 +544,14 @@ const unsigned long credentialsInterval = 1800000UL; // 30 minutes
 // Debounce for touch events
 static unsigned long lastEventTime = 0;
 const unsigned long debounceDelay = 200;
-// New: Timer for background image update (e.g., every hour)
+// How long between background polls. The site sets this: how often the owner's
+// own pictures rotate is chosen on the upload page and nowhere else, and the
+// device is told how long to wait (refresh_s in background.php). It is clamped on
+// arrival, so a missing or silly value cannot become a poll storm.
 static unsigned long lastBackgroundUpdate = 0;
-const unsigned long backgroundUpdateInterval = 3600000UL; // 1 hour
+#define BG_REFRESH_MIN_MS 60000UL      // 1 minute - the shortest rotation offered
+#define BG_REFRESH_MAX_MS 3600000UL    // 1 hour - and the longest wait the device uses
+static unsigned long backgroundUpdateInterval = BG_REFRESH_MAX_MS;
 static unsigned long lastWeatherLocationCheck = 0;
 // Remote theme (colours controlled from crontech.uk). Re-applied only when the
 // server's value actually changes, so a colour picked on the device is not
@@ -6894,6 +6900,22 @@ void fetchBackgroundFilename() {
       if (bg_mode == "null") bg_mode = "";
       Serial.println("[BG] " + bg_mode + " background: " +
                      (backgroundFilename.isEmpty() ? String("(none)") : backgroundFilename));
+      // How long until the next look. The rotation interval is set on the website
+      // (image_converter.php) rather than on the panel, so the device only has to
+      // obey what it is told here. Clamped both ways: too small would mean a TLS
+      // request every few seconds, too large - or a value missing because the site
+      // is older than this firmware - would leave a changed picture unseen.
+      const long refreshS = doc["refresh_s"] | 0L;
+      unsigned long want = BG_REFRESH_MAX_MS;
+      if (refreshS > 0) {
+        want = (unsigned long)refreshS * 1000UL;
+        if (want < BG_REFRESH_MIN_MS) want = BG_REFRESH_MIN_MS;
+        if (want > BG_REFRESH_MAX_MS) want = BG_REFRESH_MAX_MS;
+      }
+      if (want != backgroundUpdateInterval) {
+        backgroundUpdateInterval = want;
+        Serial.printf("[BG] Next background check in %lus (server)\n", backgroundUpdateInterval / 1000UL);
+      }
     } else {
       if (debug == 1) Serial.println("[APP] JSON parsing failed: " + String(error.c_str()));
     }
