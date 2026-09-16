@@ -5,9 +5,9 @@
  * Tells the device which background picture to show.
  *
  *   GET background.php?background_img=<access_code>&wx=<weather_code>
- *   -> { "filename": "weather/rain.bin", "mode": "weather", "group": "rain", "refresh_s": 3600 }
- *   -> { "filename": "bg_ABC123.bin",    "mode": "custom",  "group": null,   "refresh_s": 300 }
- *   -> { "filename": null,               "mode": "none",    "group": null,   "refresh_s": 3600 }
+ *   -> { "filename": "weather/rain.bin", "mode": "weather", "group": "rain" }
+ *   -> { "filename": "bg_ABC123.bin",    "mode": "custom",  "group": null }
+ *   -> { "filename": null,               "mode": "none",    "group": null }
  *
  * `filename` is relative to uploads/, which is where the device looks. `mode`
  * lets the firmware tell "you are on your own picture" from "you are on the
@@ -15,11 +15,6 @@
  * pull a new picture down. `wx` is the device's current WMO weather code; the
  * code-to-group mapping lives in bg_common.php so the artwork can be re-grouped
  * without reflashing anything.
- *
- * `refresh_s` is how many seconds the device should wait before asking again.
- * It is set on the website (the rotation interval for the owner's own pictures)
- * and simply obeyed here, so the cadence is never under the control of whatever
- * has the upload password.
  *
  * Read-only, so the device can poll it safely, and it never 500s over a missing
  * picture: an absent file reports filename:null and the device keeps whatever it
@@ -84,32 +79,20 @@ $userId = (int) ($row['user_id'] ?? 0);
 // and re-downloads only when the NAME changes, and a replacement is written to
 // the same path. See bg_versioned().
 //
-// The owner's own pictures. bg_custom_choice() picks one from the gallery for the
-// current rotation slot - or falls back to the old single-picture column for an
-// account that has not opened the upload page since the gallery arrived - and says
-// how long the device should wait before asking again.
-if ($mode === 'custom') {
-    $choice = bg_custom_choice($db, $userId, $custom);
-    if ($choice !== null) {
-        $safe = (string) $choice['file'];
-        // bg_heal_bin() re-encodes the .bin from its preview PNG when the stored one
-        // is missing or was written at an older size - the stored size has changed
-        // once already (full panel -> half), and a stale file would simply be refused
-        // by the device. It is a no-op when the .bin is already correct.
-        if (bg_heal_bin('uploads/' . pathinfo($safe, PATHINFO_FILENAME))) {
-            $path = __DIR__ . '/uploads/' . $safe;
-            echo json_encode([
-                'filename'  => bg_versioned($safe, $path),
-                'mode'      => 'custom',
-                'group'     => null,
-                // Obeyed by the device, so the cadence is set entirely from here.
-                'refresh_s' => (int) $choice['refresh'],
-            ]);
-            exit;
-        }
+// The owner's own picture, when that is the mode and the file is really there.
+if ($mode === 'custom' && $custom !== '') {
+    $safe = basename($custom);
+    // bg_heal_bin() re-encodes the .bin from its preview PNG when the stored one
+    // is missing or was written at an older size - the stored size has changed
+    // once already (full panel -> half), and a stale file would simply be refused
+    // by the device. It is a no-op when the .bin is already correct.
+    if (bg_heal_bin('uploads/' . pathinfo($safe, PATHINFO_FILENAME))) {
+        $path = __DIR__ . '/uploads/' . $safe;
+        echo json_encode(['filename' => bg_versioned($safe, $path), 'mode' => 'custom', 'group' => null]);
+        exit;
     }
-    // Nothing usable on the account: fall through to the weather set rather than
-    // leaving the device with no background.
+    // Pointed at a file that is gone or is the wrong format: fall through to the
+    // weather set rather than leaving the device with no background.
 }
 
 // Weather set. No wx (an older firmware) means the neutral cloud picture.
@@ -119,7 +102,7 @@ if (!bg_weather_file_exists($group)) {
 }
 
 if ($group === null) {
-    echo json_encode(['filename' => null, 'mode' => 'none', 'group' => null, 'refresh_s' => BG_REFRESH_DEFAULT]);
+    echo json_encode(['filename' => null, 'mode' => 'none', 'group' => null]);
     exit;
 }
 
@@ -133,11 +116,9 @@ $overrideBase = BG_WEATHER_DIR . '/' . basename(bg_weather_override_base($userId
 if ($userId > 0 && bg_heal_bin($overrideBase)) {
     $overrideAbs = __DIR__ . '/uploads/' . $overrideRel;
     echo json_encode([
-        'filename'  => bg_versioned($overrideRel, $overrideAbs),
-        'mode'      => 'weather',
-        'group'     => $group,
-        // The weather set does not rotate, so this is just the standard poll.
-        'refresh_s' => BG_REFRESH_DEFAULT,
+        'filename' => bg_versioned($overrideRel, $overrideAbs),
+        'mode'     => 'weather',
+        'group'    => $group,
     ]);
     exit;
 }
@@ -147,8 +128,7 @@ $defaultRel = bg_weather_filename($group);
 // stored size, rebuild it from the preview PNG beside it.
 bg_heal_bin(BG_WEATHER_DIR . '/' . $group);
 echo json_encode([
-    'filename'  => bg_versioned($defaultRel, __DIR__ . '/uploads/' . $defaultRel),
-    'mode'      => 'weather',
-    'group'     => $group,
-    'refresh_s' => BG_REFRESH_DEFAULT,
+    'filename' => bg_versioned($defaultRel, __DIR__ . '/uploads/' . $defaultRel),
+    'mode'     => 'weather',
+    'group'    => $group,
 ]);

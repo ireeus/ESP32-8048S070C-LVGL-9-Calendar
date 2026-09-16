@@ -329,14 +329,6 @@ void setup_display()
   // so what is lost is only per-flush overhead and what is gained is every render
   // pass.
   //
-  // DRAW_BUF_RAM_RESERVE is what stops that trade going wrong. It used to be 128KB,
-  // which was not enough: the network stack then failed to allocate small
-  // DMA-capable blocks ("esp-sha: Failed to allocate buf memory" during a TLS
-  // handshake) and eventually the WiFi driver crashed in ppTask while recycling a
-  // buffer. 160KB leaves the radio and mbedTLS the room they actually need. The
-  // effect is only to skip the SRAM buffer and use the PSRAM one when internal RAM
-  // is not comfortable - see the boot line "Draw buffer: ... in PSRAM".
-  //
   //  * THE TRAP: size the buffer with DRAW_BUF_BYTES_PER_PX, NOT sizeof(lv_color_t).
   //    In LVGL 9 a lv_color_t is a depth-INDEPENDENT colour *value*, laid out as
   //    RGB888 and therefore always 3 bytes (lv_color.h:109):
@@ -362,7 +354,7 @@ void setup_display()
                                                       // before, so flush chunking is
                                                       // unchanged; 240 was really 360 rows
                                                       // once LVGL divided out the stride.
-#define DRAW_BUF_RAM_RESERVE     (160 * 1024)         // left for WiFi/TLS afterwards
+#define DRAW_BUF_RAM_RESERVE     (128 * 1024)         // left for WiFi/TLS afterwards
   bufSize = screenWidth * DRAW_BUF_PSRAM_ROWS; // pixels
 #if DRAW_BUF_PREFER_INTERNAL
   {

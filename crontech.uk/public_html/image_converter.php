@@ -3,19 +3,15 @@
  * image_converter.php - the device background page.
  *
  * Upload a picture, crop it to the panel's 5:3 shape, and it is stored as the
- * exact blob the ESP32 blits: raw RGB565, little-endian, downscaled to
- * BG_STORE_W x BG_STORE_H and upscaled again on the device (see bg_common.php
- * for why that format).
+ * exact blob the ESP32 blits: 800x480 raw RGB565, little-endian, 768000 bytes
+ * (see bg_common.php for why that format).
  *
- * Three sorts of background exist:
- *   custom  - the pictures uploaded here; several per account, walked on the
- *             rotation interval set on this page
+ * Two sorts of background exist:
+ *   custom  - the picture uploaded here
  *   weather - one of the generated defaults in uploads/weather/, chosen on the
  *             device from its current conditions
- *   none    - nothing usable, and the device keeps whatever it already has
  *
- * The mode is stored per user; background.php hands the device whichever applies,
- * along with how long to wait before asking again (refresh_s).
+ * The mode is stored per user; background.php hands the device whichever applies.
  */
 session_start();
 date_default_timezone_set('Europe/London');
@@ -39,11 +35,6 @@ try {
     if (!$have['background_image']) $db->exec("ALTER TABLE users ADD COLUMN background_image TEXT");
     if (!$have['background_mode'])  $db->exec("ALTER TABLE users ADD COLUMN background_mode TEXT NOT NULL DEFAULT 'custom'");
 
-    // The gallery of the owner's own pictures, plus the rotation interval column.
-    // Several uploads replace the single background_image column, which is kept
-    // and imported (see below) so nothing an account already uploaded is lost.
-    bg_gallery_ensure($db);
-
     // Last known weather at a location, so marking "which picture is in use right
     // now" costs one upstream request per ten minutes rather than one per page
     // view. Keyed on the coordinates, so accounts in the same place share a row.
@@ -62,30 +53,11 @@ if (!isset($_SESSION['csrf_token'])) {
 }
 $userId = (int) $_SESSION['user_id'];
 
-/** The original single background is stored under a name derived from the access
- *  code. It is still used as the import source for accounts that uploaded before
- *  the gallery existed. */
+/** The custom background is stored under a name derived from the access code, so
+ *  re-uploading replaces the old file instead of leaving orphans behind. */
 function bg_custom_base(string $accessCode): string
 {
     return 'uploads/bg_' . preg_replace('/[^A-Za-z0-9_-]/', '', $accessCode);
-}
-
-/** A fresh name for one picture in the gallery. Each upload gets its own file -
- *  the point of the gallery is that adding a picture does not replace the last
- *  one - so the name carries a short random token. Returns a base path, i.e.
- *  what bg_write_pair() appends .bin and .png to. */
-function bg_custom_new_base(string $accessCode): string
-{
-    $stem = 'uploads/bg_' . preg_replace('/[^A-Za-z0-9_-]/', '', $accessCode) . '_';
-    for ($i = 0; $i < 8; $i++) {
-        $cand = $stem . bin2hex(random_bytes(4));
-        if (!is_file($cand . '.bin') && !is_file($cand . '.png')) {
-            return $cand;
-        }
-    }
-    // Vanishingly unlikely; a timestamp keeps the page working rather than
-    // overwriting a picture the owner still has in the gallery.
-    return $stem . time();
 }
 
 function bg_load_user(PDO $db, int $userId): array
@@ -97,17 +69,10 @@ function bg_load_user(PDO $db, int $userId): array
         'access_code'    => (string) ($row['access_code'] ?? ''),
         'background'     => (string) ($row['background_image'] ?? ''),
         'mode'           => ($row['background_mode'] ?? 'custom') === 'weather' ? 'weather' : 'custom',
-        'rotate'         => bg_rotate_seconds($db, $userId),
     ];
 }
 
 $user = bg_load_user($db, $userId);
-
-// An account from before the gallery: its one picture becomes the first entry,
-// so it keeps rotating (as a set of one) instead of being stranded in the old
-// column. Runs once - after this the gallery is non-empty.
-bg_gallery_import_legacy($db, $userId, $user['background']);
-$gallery = bg_gallery_list($db, $userId);
 
 // Where this account's device is, and what the sky is doing there. This is the
 // same location the device itself fetches (api.php?weatherLocation=...), so the
@@ -141,64 +106,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 : 'Background set to your own picture.';
             $user = bg_load_user($db, $userId);
 
-        } elseif (isset($_POST['set_rotate'])) {
-            // How often the device swaps between the pictures below. Deliberately
-            // set here and nowhere else: the device is only told how long to wait
-            // (see bg_custom_choice), so whoever holds the upload password is the
-            // one who decides the cadence.
-            $want = (int) $_POST['set_rotate'];
-            if (!bg_rotate_valid($want)) {
-                $error = 'Unknown rotation interval.';
-            } else {
-                $st = $db->prepare("UPDATE users SET bg_rotate_s = ? WHERE user_id = ?");
-                $st->execute([$want, $userId]);
-                $opts = bg_rotate_options();
-                $message = $want === 0
-                    ? 'Rotation off - the most recently added picture stays up.'
-                    : 'Pictures now rotate ' . strtolower($opts[$want]) . '.';
-                $user = bg_load_user($db, $userId);
-            }
-
-        } elseif (isset($_POST['del_bg'])) {
-            // One picture out of the gallery. Files are unlinked with it, so the
-            // next upload reuses the space on the device rather than the server.
-            $id = (int) $_POST['del_bg'];
-            $file = bg_gallery_remove($db, $userId, $id);
-            if ($file === null) {
-                $error = 'That picture is no longer there.';
-            } else {
-                bg_delete_pair('uploads', $file);
-                if ($gallery = bg_gallery_list($db, $userId)) {
-                    // Keep background_image pointing at something real, so an
-                    // older background.php still finds a picture.
-                    $st = $db->prepare("UPDATE users SET background_image = ? WHERE user_id = ?");
-                    $st->execute([(string) $gallery[count($gallery) - 1]['filename'], $userId]);
-                    $message = 'Picture deleted.';
-                } else {
-                    $st = $db->prepare("UPDATE users SET background_image = NULL, background_mode = 'weather' WHERE user_id = ?");
-                    $st->execute([$userId]);
-                    $message = 'Last picture deleted; the device is back on the weather pictures.';
-                }
-                $user = bg_load_user($db, $userId);
-            }
-
         } elseif (isset($_POST['remove_bg'])) {
-            // Everything: the gallery and the pre-gallery file, in case this
-            // account still has one. The device falls back to the weather set.
-            $n = 0;
-            foreach (bg_gallery_list($db, $userId) as $g) {
-                bg_delete_pair('uploads', (string) $g['filename']);
-                $n++;
-            }
-            $st = $db->prepare("DELETE FROM user_backgrounds WHERE user_id = ?");
-            $st->execute([$userId]);
             @unlink($base . '.bin');
             @unlink($base . '.png');
             $st = $db->prepare("UPDATE users SET background_image = NULL, background_mode = 'weather' WHERE user_id = ?");
             $st->execute([$userId]);
-            $message = $n > 1
-                ? ($n . ' pictures removed; the device is back on the weather pictures.')
-                : 'Your background picture was removed; the device is back on the weather pictures.';
+            $message = 'Your background picture was removed; the device is back on the weather pictures.';
             $user = bg_load_user($db, $userId);
 
         } elseif (isset($_POST['save_bg'])) {
@@ -216,12 +129,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
             $data = (string) ($_POST['cropped'] ?? '');
-            // The gallery is capped well below what the device can cache (see
-            // BG_MAX_CUSTOM), so refuse before spending time decoding a picture
-            // that could not be stored.
-            if ($error === '' && $group === '' && bg_gallery_count($db, $userId) >= BG_MAX_CUSTOM) {
-                $error = 'You already have the maximum of ' . BG_MAX_CUSTOM . ' pictures. Delete one first.';
-            }
             if ($error === '' && !preg_match('#^data:image/(jpeg|png);base64,#', $data, $m)) {
                 $error = 'No cropped image arrived. Choose a picture and crop it first.';
             } elseif ($error === '' && strlen($data) > 6 * 1024 * 1024) {
@@ -250,26 +157,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         } else {
                             $error = 'Could not write that picture. Check that uploads/weather/ is writable.';
                         }
+                    } elseif (bg_write_pair($base, $img, $w, $h)) {
+                        $st = $db->prepare("UPDATE users SET background_image = ?, background_mode = 'custom' WHERE user_id = ?");
+                        $st->execute([basename($base) . '.bin', $userId]);
+                        $message = 'Background saved (' . number_format(BG_BYTES) . ' bytes, 800x480 RGB565). '
+                                 . 'The device picks it up on its next background refresh.';
+                        $user = bg_load_user($db, $userId);
                     } else {
-                        // A brand new file each time: adding a picture must not
-                        // replace the ones already in the gallery.
-                        $newBase = bg_custom_new_base($user['access_code']);
-                        if (bg_write_pair($newBase, $img, $w, $h) && bg_gallery_add($db, $userId, basename($newBase) . '.bin')) {
-                            $st = $db->prepare("UPDATE users SET background_image = ?, background_mode = 'custom' WHERE user_id = ?");
-                            $st->execute([basename($newBase) . '.bin', $userId]);
-                            $count = bg_gallery_count($db, $userId);
-                            $message = 'Picture added - you now have ' . $count
-                                     . ' (' . number_format(BG_BYTES) . ' bytes each on the device). '
-                                     . ($user['rotate'] > 0
-                                            ? 'It joins the rotation on the device\'s next background refresh.'
-                                            : 'The newest picture is the one shown; set a rotation interval below to cycle through them.');
-                            $user = bg_load_user($db, $userId);
-                        } else {
-                            // Either the write or the insert failed; do not leave a
-                            // file behind that nothing points at.
-                            bg_delete_pair('uploads', basename($newBase) . '.bin');
-                            $error = 'Could not store that picture. Check that uploads/ is writable.';
-                        }
+                        $error = 'Could not write the background file. Check that uploads/ is writable.';
                     }
                     imagedestroy($img);
                 }
@@ -303,23 +198,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// Re-read after the actions above so the page always shows the state that was
-// just saved, whichever branch ran.
-$user = bg_load_user($db, $userId);
-$gallery = bg_gallery_list($db, $userId);
-
-// Which of the owner's pictures the device is being shown at this moment.
-// bg_custom_choice() is the very function background.php answers with, so the
-// tile marked "now" here is the one the panel really has, rather than a second
-// guess at the same clock arithmetic.
-$choice = bg_custom_choice($db, $userId, $user['background']);
-$activeFile = $choice !== null ? (string) $choice['file'] : '';
-
 $customBin = 'uploads/' . $user['background'];
-$hasCustom = $activeFile !== '' && is_file('uploads/' . $activeFile);
-$customPreview = 'uploads/' . pathinfo($activeFile, PATHINFO_FILENAME) . '.png';
+$hasCustom = $user['background'] !== '' && is_file($customBin);
+$customPreview = 'uploads/' . pathinfo($user['background'], PATHINFO_FILENAME) . '.png';
 $hasPreview = $hasCustom && is_file($customPreview);
-$galleryFull = count($gallery) >= BG_MAX_CUSTOM;
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -395,10 +277,8 @@ $galleryFull = count($gallery) >= BG_MAX_CUSTOM;
     <div class="wrap">
         <h1 class="text-4xl font-bold mb-2">Device background</h1>
         <p class="mb-6 opacity-90">
-            The picture behind the calendar on your Cron-Tab. Upload as many as you like &mdash; the device
-            caches them on its own flash and swaps between them on the interval you set below. Each one is
-            stored as raw RGB565 (<?php echo number_format(BG_BYTES); ?> bytes, <?php echo BG_STORE_W; ?>&times;<?php echo BG_STORE_H; ?>,
-            scaled up to the panel) &mdash; exactly the format the device blits.
+            The picture behind the calendar on your Cron-Tab. It is stored as 800&times;480 raw RGB565
+            (<?php echo number_format(BG_BYTES); ?> bytes) &mdash; exactly what the panel displays, so the device does no conversion.
         </p>
 
         <?php if ($message !== ''): ?>
@@ -412,28 +292,17 @@ $galleryFull = count($gallery) >= BG_MAX_CUSTOM;
         <div class="card">
             <h2>Currently showing</h2>
             <p class="hint">
-                Mode: <strong><?php echo $user['mode'] === 'weather' ? 'Weather pictures' : 'My own pictures'; ?></strong>
-                <?php if ($user['mode'] === 'custom' && count($gallery) > 0): ?>
-                    &mdash; <?php echo count($gallery); ?> picture<?php echo count($gallery) === 1 ? '' : 's'; ?>,
-                    <?php if ($user['rotate'] > 0): ?>
-                        rotating <?php echo strtolower(bg_rotate_options()[$user['rotate']]); ?>.
-                    <?php else: ?>
-                        showing the newest one (rotation off).
-                    <?php endif; ?>
-                <?php endif; ?>
+                Mode: <strong><?php echo $user['mode'] === 'weather' ? 'Weather pictures' : 'My own picture'; ?></strong>
             </p>
             <div class="current">
                 <?php if ($user['mode'] === 'custom' && $hasCustom): ?>
                     <?php if ($hasPreview): ?>
                         <img src="<?php echo htmlspecialchars($customPreview); ?>?v=<?php echo filemtime($customPreview); ?>" alt="Current background">
                     <?php endif; ?>
-                    <div>
-                        <p class="opacity-90 mb-3">This is the one the device has right now.</p>
-                        <form method="POST" onsubmit="return confirm('Remove ALL your background pictures and go back to the weather pictures?');">
-                            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf_token']); ?>">
-                            <button type="submit" name="remove_bg" value="1" class="btn btn-quiet">Remove all my pictures</button>
-                        </form>
-                    </div>
+                    <form method="POST" onsubmit="return confirm('Remove your background picture and go back to the weather pictures?');">
+                        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf_token']); ?>">
+                        <button type="submit" name="remove_bg" value="1" class="btn btn-quiet">Remove my picture</button>
+                    </form>
                 <?php elseif ($user['mode'] === 'custom'): ?>
                     <p class="opacity-90">No picture uploaded yet &mdash; the device falls back to the weather pictures until you add one.</p>
                 <?php else: ?>
@@ -444,7 +313,7 @@ $galleryFull = count($gallery) >= BG_MAX_CUSTOM;
             <form method="POST" class="mt-4">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf_token']); ?>">
                 <div class="modes">
-                    <label><input type="radio" name="set_mode" value="custom" <?php echo $user['mode'] === 'custom' ? 'checked' : ''; ?> onchange="this.form.submit();"> My own pictures</label>
+                    <label><input type="radio" name="set_mode" value="custom" <?php echo $user['mode'] === 'custom' ? 'checked' : ''; ?> onchange="this.form.submit();"> My own picture</label>
                     <label><input type="radio" name="set_mode" value="weather" <?php echo $user['mode'] === 'weather' ? 'checked' : ''; ?> onchange="this.form.submit();"> Weather pictures (automatic)</label>
                 </div>
             </form>
@@ -455,12 +324,8 @@ $galleryFull = count($gallery) >= BG_MAX_CUSTOM;
             <h2>Upload a picture</h2>
             <p class="hint">
                 Any JPEG, PNG or BMP up to 5&nbsp;MB. Crop it to the panel's 5:3 shape &mdash; drag to move,
-                scroll or pinch to zoom &mdash; then save. Each upload is <strong>added</strong> to your pictures;
-                it does not replace the last one.
+                scroll or pinch to zoom &mdash; then save. It is resized to 800&times;480 for you.
             </p>
-            <?php if ($galleryFull): ?>
-                <p class="msg-error">You have the maximum of <?php echo BG_MAX_CUSTOM; ?> pictures. Delete one below to free a slot.</p>
-            <?php endif; ?>
             <form id="uploadForm" method="POST">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf_token']); ?>">
                 <input type="hidden" name="save_bg" value="1">
@@ -469,75 +334,17 @@ $galleryFull = count($gallery) >= BG_MAX_CUSTOM;
                      set by clicking a tile in the Weather pictures card below. -->
                 <input type="hidden" name="target" id="target" value="custom">
                 <p class="text-sm mb-2">
-                    Saving as: <strong id="targetLabel">a new picture of mine</strong>
+                    Saving as: <strong id="targetLabel">my own background</strong>
                     <button type="button" id="useCustom" class="tile-btn" style="display:none;"
-                            onclick="pickCustom()">use as one of my own pictures instead</button>
+                            onclick="pickCustom()">use as my own background instead</button>
                 </p>
                 <input type="file" id="image" accept="image/jpeg,image/png,image/bmp"
                        class="mb-3 block w-full text-sm text-white/90">
                 <div class="crop-stage mb-3">
                     <img id="cropImage" alt="Crop preview" style="display:none;">
                 </div>
-                <button type="submit" id="saveBtn" class="btn" disabled>Add picture</button>
+                <button type="submit" id="saveBtn" class="btn" disabled>Save background</button>
             </form>
-        </div>
-
-        <!-- ------------------------------------------------- my pictures -->
-        <div class="card" id="myPictures">
-            <h2>My pictures</h2>
-            <p class="hint">
-                The device downloads and caches these, then swaps between them on the interval below. The
-                interval is kept here rather than on the device, so it stays with whoever can log in.
-            </p>
-            <?php if (!$gallery): ?>
-                <p class="opacity-90">Nothing uploaded yet. The first picture you add appears here.</p>
-            <?php else: ?>
-                <form method="POST" class="mb-4">
-                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf_token']); ?>">
-                    <label class="block mb-2 text-sm opacity-95" for="rotateSel">
-                        <strong>Rotate between them:</strong>
-                    </label>
-                    <select id="rotateSel" name="set_rotate" onchange="this.form.submit();"
-                            style="background:rgba(0,0,0,.28);color:#fff;border:none;border-radius:.5rem;padding:.55rem .9rem;font:inherit;">
-                        <?php foreach (bg_rotate_options() as $secs => $label): ?>
-                            <option value="<?php echo (int) $secs; ?>" <?php echo $user['rotate'] === (int) $secs ? 'selected' : ''; ?>>
-                                <?php echo htmlspecialchars($label); ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
-                    <p class="hint mt-2" style="margin-bottom:0;">
-                        The device asks for the next picture when the interval is up. Short intervals mean it
-                        polls more often; "every minute" is the busiest and may make the panel hitch briefly.
-                    </p>
-                </form>
-                <div class="gallery">
-                    <?php foreach ($gallery as $g): ?>
-                        <?php
-                        $gFile  = (string) $g['filename'];
-                        $gPng   = 'uploads/' . pathinfo($gFile, PATHINFO_FILENAME) . '.png';
-                        $isNow  = ($gFile === $activeFile && $user['mode'] === 'custom');
-                        ?>
-                        <figure class="tile tile-own<?php echo $isNow ? ' tile-current' : ''; ?>"
-                                title="<?php echo $isNow ? 'In use on the device right now' : 'Stored on the server'; ?>">
-                            <?php if (is_file($gPng)): ?>
-                                <img src="<?php echo htmlspecialchars($gPng); ?>?v=<?php echo (int) @filemtime($gPng); ?>" alt="Your picture">
-                            <?php else: ?>
-                                <div style="aspect-ratio:5/3;display:flex;align-items:center;justify-content:center;font-size:.8rem;opacity:.8;">preview missing</div>
-                            <?php endif; ?>
-                            <figcaption>
-                                <span class="tile-label"><?php echo htmlspecialchars($gFile); ?></span>
-                                <?php if ($isNow): ?><span class="badge badge-now">now</span><?php endif; ?>
-                                <span class="tile-actions">
-                                    <form method="POST" onsubmit="return confirm('Delete this picture?');">
-                                        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf_token']); ?>">
-                                        <button type="submit" name="del_bg" value="<?php echo (int) $g['id']; ?>" class="tile-btn tile-btn-reset">Delete</button>
-                                    </form>
-                                </span>
-                            </figcaption>
-                        </figure>
-                    <?php endforeach; ?>
-                </div>
-            <?php endif; ?>
         </div>
 
         <!-- ---------------------------------------------- weather defaults -->
@@ -632,7 +439,7 @@ $galleryFull = count($gallery) >= BG_MAX_CUSTOM;
         let cropper = null;
 
         // Point the uploader at one weather picture, or back at the owner's own
-        // gallery. The hidden "target" field is what the server branches on.
+        // background. The hidden "target" field is what the server branches on.
         function pickWeather(group, label) {
             targetInput.value = 'weather:' + group;
             targetLabel.textContent = 'the ' + label + ' weather picture';
@@ -642,9 +449,9 @@ $galleryFull = count($gallery) >= BG_MAX_CUSTOM;
         }
         function pickCustom() {
             targetInput.value = 'custom';
-            targetLabel.textContent = 'a new picture of mine';
+            targetLabel.textContent = 'my own background';
             useCustomBtn.style.display = 'none';
-            saveBtn.textContent = 'Add picture';
+            saveBtn.textContent = 'Save background';
         }
 
         fileInput.addEventListener('change', function (e) {

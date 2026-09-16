@@ -18,11 +18,8 @@ extern const lv_font_t lv_font_montserrat_14_bold;
 // Build version
 // Must be HIGHER than whatever update/version.json currently advertises, or the
 // device will keep offering (and auto-installing) a build that is not actually
-// newer. The site advertised 2.3.1 when this was bumped to 2.3.2, and still did
-// when this was bumped to 2.3.3 (one handshake at a time), 2.3.4 (internal-RAM
-// watchdog, LVGL no longer taking 75KB of internal SRAM unless there is room) and
-// 2.3.5 (the background picture is double-buffered, so a change allocates nothing).
-const String build_version = "2.3.5";
+// newer. The site advertised 2.3.1 when this was bumped to 2.3.2.
+const String build_version = "2.3.2";
 int debug =0; // Change to 1 to enable serial prints
 // Firmware check interval variable
 // Was 100000UL, which is 100 SECONDS, not the 5 minutes the comment claimed - so
@@ -112,8 +109,6 @@ static int  opa_active_step();                  // nearest step to the current v
 static void apply_panel_opacity();              // push opacity onto the surfaces
 static void bgFetchService();                   // one slice of a picture transfer
 static void bgFetchAbort(const char *why);      // drop a picture transfer in flight
-static bool bgTransferInFlight();               // is a picture transfer holding TLS?
-static void bgHeapReport(const char *when);     // internal/PSRAM free + low-water mark
 static void updateAutoBrightness(bool force);   // recompute the level from the sun
 static void apply_ui_darkness_ex(int value, bool persist);
 // Send a local theme choice to the site. `fromSync` is true when a manual Sync
@@ -362,9 +357,7 @@ static lv_obj_t *brightness_step_labels[UI_BRIGHTNESS_BUTTON_COUNT] =
 // panels. The website can set the same value, and this is where the device reads
 // it from at boot.
 #define UI_OPA_PRESET_COUNT 5
-// Ascending, left to right, to match the brightness row above it: most see-through
-// on the left, solid on the right.
-static const int UI_OPA_STEPS[UI_OPA_PRESET_COUNT] = {40, 55, 70, 85, 100};
+static const int UI_OPA_STEPS[UI_OPA_PRESET_COUNT] = {100, 85, 70, 55, 40};
 // Same lifetime rule as brightness_step_btns: these point into the settings popup.
 static lv_obj_t *opa_step_btns[UI_OPA_PRESET_COUNT] =
     {nullptr, nullptr, nullptr, nullptr, nullptr};
@@ -511,7 +504,7 @@ static String bg_mode = "";
 // download a second one the moment the weather arrived.
 static bool g_weather_known = false;
 // OTA variables
-String currentFirmwareVersion = "2.3.5"; // replaced by build_version in setup()
+String currentFirmwareVersion = "2.3.2"; // replaced by build_version in setup()
 String latestFirmwareVersion = "";
 String firmwareUrl = "";
 WiFiClientSecure client;
@@ -548,14 +541,9 @@ const unsigned long credentialsInterval = 1800000UL; // 30 minutes
 // Debounce for touch events
 static unsigned long lastEventTime = 0;
 const unsigned long debounceDelay = 200;
-// How long between background polls. The site sets this: how often the owner's
-// own pictures rotate is chosen on the upload page and nowhere else, and the
-// device is told how long to wait (refresh_s in background.php). It is clamped on
-// arrival, so a missing or silly value cannot become a poll storm.
+// New: Timer for background image update (e.g., every hour)
 static unsigned long lastBackgroundUpdate = 0;
-#define BG_REFRESH_MIN_MS 60000UL      // 1 minute - the shortest rotation offered
-#define BG_REFRESH_MAX_MS 3600000UL    // 1 hour - and the longest wait the device uses
-static unsigned long backgroundUpdateInterval = BG_REFRESH_MAX_MS;
+const unsigned long backgroundUpdateInterval = 3600000UL; // 1 hour
 static unsigned long lastWeatherLocationCheck = 0;
 // Remote theme (colours controlled from crontech.uk). Re-applied only when the
 // server's value actually changes, so a colour picked on the device is not
@@ -2871,8 +2859,16 @@ void show_settings_popup() {
     lv_obj_set_style_pad_row(right_col, 8, 0);
     lv_obj_set_flex_flow(right_col, LV_FLEX_FLOW_COLUMN);
 
-    // Left column: the QR box, then the memory meters. Nothing sits above the box -
-    // anything added there pushes the whole column down.
+    // Left column, top to bottom: the firmware version, the QR box, the memory
+    // meters. The version is a SIBLING of the card rather than a child of it, so
+    // moving it above the code cannot make the box itself any taller.
+    lv_obj_t *version_settings_label = lv_label_create(left_col);
+    lv_label_set_text(version_settings_label, ("Firmware: " + currentFirmwareVersion).c_str());
+    lv_obj_set_style_text_font(version_settings_label, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(version_settings_label, lv_color_hex(0xBBBBBB), 0);
+    lv_obj_set_width(version_settings_label, LV_PCT(100));
+    lv_obj_set_style_text_align(version_settings_label, LV_TEXT_ALIGN_CENTER, 0);
+
     lv_obj_t *qr_card = make_card(left_col, lv_color_hex(0x151515), lv_color_hex(0x151515));
     lv_obj_set_flex_align(qr_card, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     // Pinned to its content, explicitly: the box hugs the code and its caption and
@@ -2972,7 +2968,7 @@ void show_settings_popup() {
     //   button 0      = Auto (follows daylight)
     //   buttons 1..5  = 0, 25, 50, 75, 100 % brightness, darkest to brightest
     lv_obj_t *brightness_card = make_card(right_col, lv_color_hex(0x1e1e1e), lv_color_hex(0x1e1e1e));
-    make_card_title(brightness_card, "UI Brightness");
+    make_card_title(brightness_card, "UI Brightness  (0 = dark, 100 = bright)");
     lv_obj_t *step_row = make_panel(brightness_card);
     lv_obj_set_width(step_row, LV_PCT(100));
     lv_obj_set_height(step_row, LV_SIZE_CONTENT);
@@ -3007,7 +3003,7 @@ void show_settings_popup() {
     // a background picture; this is how much of it shows through. 100 keeps the
     // existing solid look.
     lv_obj_t *opa_card = make_card(right_col, lv_color_hex(0x1e1e1e), lv_color_hex(0x1e1e1e));
-    make_card_title(opa_card, "Panel Opacity");
+    make_card_title(opa_card, "Panel Opacity  (100 = solid, lower = see-through)");
     lv_obj_t *opa_row = make_panel(opa_card);
     lv_obj_set_width(opa_row, LV_PCT(100));
     lv_obj_set_height(opa_row, LV_SIZE_CONTENT);
@@ -3030,16 +3026,6 @@ void show_settings_popup() {
       opa_step_btns[i] = opa_btn;
     }
     opa_steps_highlight(opa_active_step());
-
-    // The firmware version sits at the bottom of the right column, under the
-    // opacity card. It used to live under the QR code, where putting it above the
-    // box pushed the whole left column down the popup.
-    lv_obj_t *version_settings_label = lv_label_create(right_col);
-    lv_label_set_text(version_settings_label, ("Firmware: " + currentFirmwareVersion).c_str());
-    lv_obj_set_style_text_font(version_settings_label, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(version_settings_label, lv_color_hex(0xBBBBBB), 0);
-    lv_obj_set_width(version_settings_label, LV_PCT(100));
-    lv_obj_set_style_text_align(version_settings_label, LV_TEXT_ALIGN_CENTER, 0);
 
 
     // ---- footer buttons ---------------------------------------------------
@@ -5884,51 +5870,32 @@ static unsigned long lastBootFetchStep = 0;
 // between two blocking requests.
 #define BOOT_FETCH_GAP_MS 50
 
-// One boot-queue step. Each one is a single blocking request; loop() runs one per
-// pass so LVGL draws in between.
-//
-// Every step also stamps the periodic timer that would otherwise run the SAME
-// request again moments later. Without that, the boot queue finished at ~15s and
-// then the periodic block fired theme, events, notifications and the rest a second
-// time back to back - one long burst of TLS handshakes, which is the pressure that
-// makes the IDF SHA driver fail to find DMA-capable internal RAM ("esp-sha: Failed
-// to allocate buf memory") and costs a whole polling interval. Now each subject is
-// refreshed once and not looked at again until its own interval is up.
 static void runBootFetchStep(int step) {
   switch (step) {
     case BOOT_STEP_THEME:
       fetchThemeConfig();
-      lastThemeCheck = millis();
       break;
     case BOOT_STEP_PARCELBOX:
       fetchParcelBoxCredentials();
-      lastCredentialsCheck = millis();
       break;
     case BOOT_STEP_WEATHER_LOCATION:
       fetchWeatherLocation();
-      lastWeatherLocationCheck = millis();
       break;
     case BOOT_STEP_EVENTS:
       fetchEvents();
       updateEventDisplay(calendar);
-      lastRefreshTime = millis();
       break;
     case BOOT_STEP_WEATHER:
       fetchWeather();
       updateWeatherDisplay();
-      lastWeatherUpdate = millis();
       break;
     case BOOT_STEP_FIRMWARE:
       checkFirmwareUpdate();
       fetchUpdatePolicy();
       updateFirmwareButton();
-      lastFirmwareCheck = millis();
       break;
     case BOOT_STEP_BACKGROUND_NAME:
       fetchBackgroundFilename();
-      // The step below downloads the picture straight away, so this is the moment
-      // the hourly clock starts rather than the moment its step first ran.
-      lastBackgroundUpdate = millis();
       break;
     case BOOT_STEP_BACKGROUND_IMAGE:
       fetchAndSetBackgroundImage();
@@ -5946,10 +5913,6 @@ static void runBootFetchStep(int step) {
 static void serviceBootFetchQueue() {
   if (bootFetchStep >= BOOT_STEP_COUNT) return;
   if (is_ota_updating) return;
-  // A picture transfer owns one TLS session for as long as it runs (see
-  // bgTransferInFlight). Waiting for it here keeps the boot sequence to one
-  // handshake at a time instead of stacking the next step on top of it.
-  if (bgTransferInFlight()) return;
   if (millis() - lastBootFetchStep < BOOT_FETCH_GAP_MS) return;
   // Never start a request that blocks for a second or more while a finger is
   // down: the tap would be swallowed and the screen would look dead. Wait for
@@ -6161,32 +6124,26 @@ void loop() {
   // Post-UI fetch queue: one blocking request per iteration, with LVGL drawing
   // in between, instead of the whole sequence in one go.
   { StallTimerSlow st("boot queue");  serviceBootFetchQueue(); }
-  // One TLS session at a time. A picture transfer holds its connection open across
-  // loop passes; starting a handshake for anything else on top of it means two sets
-  // of mbedTLS buffers in internal RAM at once, which is what makes the SHA driver
-  // fail to allocate and loses the request for a whole polling interval. Read after
-  // the boot queue, because that is what may just have started a transfer.
-  const bool netBusy = bgTransferInFlight();
   // A theme picked on the device, on its way to the site. Not done inside the tap
   // callback because the request blocks for about a second.
-  if (!netBusy) { StallTimerSlow st("theme push");  pushThemeToServer(); }
+  { StallTimerSlow st("theme push");  pushThemeToServer(); }
   // A manual Sync from the settings popup: push the theme, then pull theme, parcel
   // box and location back. One request per pass, for the same reason.
-  if (!netBusy) { StallTimerSlow st("sync queue");  serviceSyncQueue(); }
+  { StallTimerSlow st("sync queue");  serviceSyncQueue(); }
   // WiFi wizard: finishes the async scan and the in-progress connection attempt.
   serviceWifiSetup();
 
   unsigned long currentTime = millis();
-  if (!netBusy && currentTime - lastRefreshTime >= refreshInterval && calendar && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
+  if (currentTime - lastRefreshTime >= refreshInterval && calendar && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
     { StallTimer st("events fetch");  fetchEvents(); }
     { StallTimer st("events redraw"); updateEventDisplay(calendar); updateMonthLabel(calendar); }
     lastRefreshTime = currentTime;
   }
-  if (!netBusy && currentTime - lastThemeCheck >= themeUpdateInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
+  if (currentTime - lastThemeCheck >= themeUpdateInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
     { StallTimer st("theme fetch"); fetchThemeConfig(); }
     lastThemeCheck = currentTime;
   }
-  if (!netBusy && currentTime - lastFirmwareCheck >= firmwareCheckInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
+  if (currentTime - lastFirmwareCheck >= firmwareCheckInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
     { StallTimer st("firmware check"); checkFirmwareUpdate(); fetchUpdatePolicy(); updateFirmwareButton(); maybeAutoUpdate(); }
     lastFirmwareCheck = currentTime;
   }
@@ -6210,7 +6167,7 @@ void loop() {
     lastAutoBrightnessCheck = currentTime;
     updateAutoBrightness(false);
   }
-  if (!netBusy && currentTime - lastNotificationCheck >= notificationInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
+  if (currentTime - lastNotificationCheck >= notificationInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
     { StallTimer st("notify fetch"); fetchNotifications(); }
     lastNotificationCheck = currentTime;
   }
@@ -6220,11 +6177,11 @@ void loop() {
     }
     lastWifiUpdate = currentTime;
   }
-  if (!netBusy && currentTime - lastCredentialsCheck >= credentialsInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
+  if (currentTime - lastCredentialsCheck >= credentialsInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
     { StallTimer st("parcel creds"); fetchParcelBoxCredentials(); }
     lastCredentialsCheck = currentTime;
   }
-  if (!netBusy && currentTime - lastWeatherLocationCheck >= weatherLocationInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
+  if (currentTime - lastWeatherLocationCheck >= weatherLocationInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
     { StallTimer st("location fetch"); fetchWeatherLocation(); }
     lastWeatherLocationCheck = currentTime;
   }
@@ -6236,29 +6193,6 @@ void loop() {
   if (settings_ram_bar && currentTime - lastRamLabelUpdate >= ramLabelUpdateInterval) {
     update_settings_memory_meters();
     lastRamLabelUpdate = currentTime;
-  }
-  // Internal-RAM watch. Two things this is here to catch, both of which show up
-  // first as "the theme fetch failed" or as a crash in the WiFi driver:
-  //   * a slow leak - internal free walking downwards over an hour;
-  //   * a single deep dip - the low-water mark dropping, which the current reading
-  //     alone would never reveal.
-  // A line is only printed when the free figure actually moved by 4KB, so a healthy
-  // device is silent and a drifting one leaves a trail. The integrity check walks
-  // the internal heap a minute, cheap at this size, and prints CORRUPT HEAP the
-  // moment the damage exists rather than whenever the WiFi task next touches it.
-  static unsigned long lastHeapWatch = 0;
-  static unsigned long heapWatchFree = 0;
-  if (currentTime - lastHeapWatch >= 60000UL) {
-    lastHeapWatch = currentTime;
-    const unsigned long nowFree = heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024;
-    const long delta = (long)nowFree - (long)heapWatchFree;
-    if (heapWatchFree == 0 || delta <= -4 || delta >= 4) {
-      heapWatchFree = nowFree;
-      bgHeapReport("minutely");
-      if (!heap_caps_check_integrity(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA, true)) {
-        Serial.println("[MEM] INTERNAL HEAP FAILED ITS INTEGRITY CHECK - see the error above");
-      }
-    }
   }
   if (currentTime - lastDateTimeUpdate >= dateTimeUpdateInterval && !is_ota_updating) {
     time_t now;
@@ -6278,19 +6212,19 @@ void loop() {
     }
     lastDateTimeUpdate = currentTime;
   }
-  if (!netBusy && currentTime - lastWeatherUpdate >= weatherUpdateInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
+  if (currentTime - lastWeatherUpdate >= weatherUpdateInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
     { StallTimer st("weather fetch");  fetchWeather(); }
     { StallTimer st("weather redraw"); updateWeatherDisplay(); }
     lastWeatherUpdate = currentTime;
   }
-  if (!netBusy && currentTime - lastBackgroundUpdate >= backgroundUpdateInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
+  if (currentTime - lastBackgroundUpdate >= backgroundUpdateInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
     { StallTimer st("background fetch"); fetchBackgroundFilename(); }
     // Named for what it now is: this only opens the connection. The transfer itself
     // is carried on by bgFetchService() across later loop() passes.
     { StallTimer st("background fetch start"); fetchAndSetBackgroundImage(); }
     lastBackgroundUpdate = currentTime;
   }
-  if (!netBusy && currentTime - lastHolidayUpdate >= holidayUpdateInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
+  if (currentTime - lastHolidayUpdate >= holidayUpdateInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
     { StallTimer st("holidays fetch");  fetchBankHolidays(); }
     { StallTimer st("holidays redraw"); updateHolidayLabel(); }
     lastHolidayUpdate = currentTime;
@@ -6956,22 +6890,6 @@ void fetchBackgroundFilename() {
       if (bg_mode == "null") bg_mode = "";
       Serial.println("[BG] " + bg_mode + " background: " +
                      (backgroundFilename.isEmpty() ? String("(none)") : backgroundFilename));
-      // How long until the next look. The rotation interval is set on the website
-      // (image_converter.php) rather than on the panel, so the device only has to
-      // obey what it is told here. Clamped both ways: too small would mean a TLS
-      // request every few seconds, too large - or a value missing because the site
-      // is older than this firmware - would leave a changed picture unseen.
-      const long refreshS = doc["refresh_s"] | 0L;
-      unsigned long want = BG_REFRESH_MAX_MS;
-      if (refreshS > 0) {
-        want = (unsigned long)refreshS * 1000UL;
-        if (want < BG_REFRESH_MIN_MS) want = BG_REFRESH_MIN_MS;
-        if (want > BG_REFRESH_MAX_MS) want = BG_REFRESH_MAX_MS;
-      }
-      if (want != backgroundUpdateInterval) {
-        backgroundUpdateInterval = want;
-        Serial.printf("[BG] Next background check in %lus (server)\n", backgroundUpdateInterval / 1000UL);
-      }
     } else {
       if (debug == 1) Serial.println("[APP] JSON parsing failed: " + String(error.c_str()));
     }
@@ -6993,8 +6911,7 @@ void fetchBackgroundFilename() {
 // that pays three times over: a quarter of the download, a quarter of the flash
 // erase+program job that has to happen behind the blackout, and room for about
 // fifty pictures in the cache instead of thirteen. The price is a softer picture,
-// which behind a full-screen UI is hard to notice; bgUpscaleInto() stretches it
-// back
+// which behind a full-screen UI is hard to notice; bgUpscale() stretches it back
 // to 800x480 once per change so LVGL still blits a full-size image and the render
 // path is exactly what it was.
 //
@@ -7022,43 +6939,12 @@ static bool bgFsReady = false;
 // outlive the call. It used to be a local, which left LVGL reading a stale stack
 // frame as soon as the function returned.
 static lv_image_dsc_t bg_dsc;
-// The two full-size pictures LVGL is handed, allocated once and then written into
-// alternately. This used to be a single buffer that was ps_malloc()'d and free()'d
-// on every change - 750KB in and 750KB out, each operation walking the PSRAM heap
-// with the global heap spinlock held. That lock is shared with core 0, where the
-// WiFi task lives, and holding it long enough starves core 0's idle task: the
-// watchdog then panics inside ppTask with a PC in spinlock_acquire, which is
-// exactly the "Core 0 ... esf_buf_recycle ... multi_heap_free" dump. Two buffers
-// held for the life of the program mean a picture change allocates nothing at all.
-// The cost is 1.5MB of PSRAM, of which 6MB is free. bg_full_now is -1 until the
-// first picture, so both are NULL at boot.
-static uint8_t *bg_full[2] = { nullptr, nullptr };
-static int bg_full_now = -1;
-#define BG_FULL_BYTES ((size_t)BG_PANEL_W * BG_PANEL_H * 2)
+// The buffer LVGL is currently drawing from, so it can be released when a new
+// background replaces it (the old code leaked one 1.1MB buffer per change).
+static uint8_t *bg_buffer = nullptr;
 
 // How much room there is, in pictures. Printed on every boot: "why is it fetching
 // that one again" is otherwise a question with no visible answer.
-// Where the memory that keeps a TLS handshake alive actually is. Every large
-// buffer this firmware owns is deliberately in PSRAM, so the number that decides
-// whether a connection can be made is the INTERNAL heap, and in particular the
-// largest free block of DMA-capable internal RAM: mbedTLS allocates there, and the
-// IDF SHA driver needs a small DMA buffer of its own, which is the allocation that
-// fails as "esp-sha: Failed to allocate buf memory" when internal RAM is tight.
-//
-// "low" is the lowest the internal heap has EVER been since boot. Free space that
-// looks healthy now can still hide a moment - a burst of requests, a big JSON
-// payload - where it nearly hit zero, and that moment is what kills a handshake or
-// the WiFi driver's own buffers. Printed as internal KB (low KB, largest DMA KB)
-// and PSRAM KB.
-static void bgHeapReport(const char *when) {
-  Serial.printf("[MEM] %-22s internal %uKB (low %uKB, largest DMA %uKB), PSRAM %uKB free\n",
-                when,
-                (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
-                (unsigned)(heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL) / 1024),
-                (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_DMA) / 1024),
-                (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
-}
-
 static void bgCacheReport() {
   const size_t total = LittleFS.totalBytes();
   const size_t used  = LittleFS.usedBytes();
@@ -7069,7 +6955,6 @@ static void bgCacheReport() {
                 (unsigned)(total / 1024), (unsigned)(freeb / 1024), fits,
                 (unsigned)(BG_EXPECTED_SIZE / 1024),
                 (unsigned)(ESP.getFlashChipSize() / (1024 * 1024)));
-  bgHeapReport("at boot");
 }
 static bool bgCacheMount() {
   if (bgFsReady) return true;
@@ -7102,12 +6987,7 @@ static bool bgCacheMount() {
 // the TLS handshake in a single call that cannot be split. That is a second or so,
 // once per picture change, rather than the ten the whole transfer used to take.
 #define BG_FETCH_SLICE      8192          // bytes read per loop() pass
-// Give up if the transfer stalls. Kept well below the 20s it first was: while a
-// picture is in flight every other network fetch is held off (see bgTransferInFlight
-// and the netBusy guard in loop()), so this timeout is also the longest the calendar,
-// the theme and the notifications can go unrefreshed. Data arrives continuously even
-// on a slow link, so a gap this long means the connection is dead.
-#define BG_FETCH_TIMEOUT_MS 8000UL
+#define BG_FETCH_TIMEOUT_MS 20000UL       // give up if the transfer stalls
 enum BgFetchState { BG_FETCH_IDLE, BG_FETCH_RUNNING, BG_FETCH_STORE };
 static BgFetchState bgFetchState = BG_FETCH_IDLE;
 static HTTPClient    bgFetchHttp;         // kept alive across loop() passes
@@ -7161,10 +7041,9 @@ static void bgWriteScreenUp() {
 // change rather than per frame: handing LVGL the half-size image and letting it
 // scale on every blit would put a per-pixel transform in the hottest draw path in
 // the app, because the background is repainted underneath anything that redraws.
-//
-// Writes INTO a caller-supplied buffer (see bg_full[]) so that a picture change
-// performs no allocation: see the note on bg_full for why that matters.
-static void bgUpscaleInto(uint16_t *dst, const uint16_t *src) {
+static uint16_t *bgUpscale(const uint16_t *src) {
+  uint16_t *dst = (uint16_t *)ps_malloc((size_t)BG_PANEL_W * BG_PANEL_H * 2);
+  if (!dst) return nullptr;
   const float stepX = (float)BG_STORE_W / (float)BG_PANEL_W;
   const float stepY = (float)BG_STORE_H / (float)BG_PANEL_H;
   for (int y = 0; y < BG_PANEL_H; y++) {
@@ -7198,6 +7077,7 @@ static void bgUpscaleInto(uint16_t *dst, const uint16_t *src) {
       out[x] = (uint16_t)(((int)(r + 0.5f) << 11) | ((int)(g + 0.5f) << 5) | (int)(b + 0.5f));
     }
   }
+  return dst;
 }
 static void bgApply(uint8_t *buf, size_t len) {
   if (len != (size_t)BG_EXPECTED_SIZE) {
@@ -7206,26 +7086,23 @@ static void bgApply(uint8_t *buf, size_t len) {
     free(buf);
     return;
   }
-  // Stretch into whichever full-size buffer is NOT the one on screen. If this
-  // fails the picture already showing is left alone rather than tearing down
-  // something that is working.
-  const int next = (bg_full_now == 0) ? 1 : 0;
-  if (!bg_full[next]) {
-    bg_full[next] = (uint8_t *)ps_malloc(BG_FULL_BYTES);
-    if (!bg_full[next]) {
-      Serial.printf("[BG] No PSRAM for the full-size background (%uKB free) - keeping the current one\n",
-                    (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
-      free(buf);
-      return;
-    }
+  // Stretch first: if this fails the current picture is left alone rather than
+  // tearing down something that is working.
+  uint16_t *full = bgUpscale((const uint16_t *)buf);
+  if (!full) {
+    Serial.println("[BG] No PSRAM for the full-size background - keeping the current one");
+    free(buf);
+    return;
   }
-  bgUpscaleInto((uint16_t *)bg_full[next], (const uint16_t *)buf);
   if (bg_img) {
     lv_obj_del(bg_img);
     bg_img = nullptr;
   }
+  // Safe to release the old buffer only now: the object that referenced it is
+  // gone and LVGL is not mid-render here (this runs from loop()).
+  if (bg_buffer) free(bg_buffer);
   free(buf);                    // the half-size copy has done its job
-  bg_full_now = next;
+  bg_buffer = (uint8_t *)full;
   memset(&bg_dsc, 0, sizeof(bg_dsc));
   bg_dsc.header.w = BG_PANEL_W;
   bg_dsc.header.h = BG_PANEL_H;
@@ -7233,8 +7110,8 @@ static void bgApply(uint8_t *buf, size_t len) {
   // source, so the buffer is handed over unchanged and nothing is allocated per
   // blit (lv_bin_decoder.c wraps a variable source and sets use_directly).
   bg_dsc.header.cf = LV_COLOR_FORMAT_RGB565;
-  bg_dsc.data_size = BG_FULL_BYTES;
-  bg_dsc.data = (const uint8_t *)bg_full[next];
+  bg_dsc.data_size = (size_t)BG_PANEL_W * BG_PANEL_H * 2;
+  bg_dsc.data = (const uint8_t *)full;
   // Printed unconditionally, not only with debug on: this is the one line that
   // says the picture is actually up.
   Serial.printf("[BG] Applied %dx%d RGB565 from a %dx%d source, free PSRAM %uKB\n",
@@ -7404,7 +7281,6 @@ void fetchAndSetBackgroundImage() {
 
   const String url = "https://crontech.uk/uploads/" + backgroundFilename;
   Serial.println("[BG] Fetching " + backgroundFilename + " in the background");
-  bgHeapReport("before picture fetch");
   bgFetchHttp.begin(url);
   // The only blocking part left: DNS, TCP and the TLS handshake in one call. There
   // is no way to split it with this client, and it is a second rather than ten.
@@ -7445,16 +7321,6 @@ void fetchAndSetBackgroundImage() {
   bgFetchName = backgroundFilename;
   bgFetchState = BG_FETCH_RUNNING;   // the rest happens in bgFetchService()
 }
-// True while a picture transfer owns a TLS session. Its connection is held open
-// across many loop() passes, so anything else that opens one at the same time is a
-// second full set of mbedTLS buffers in internal RAM - the state in which the IDF
-// SHA driver fails ("esp-sha: Failed to allocate buf memory") and the handshake,
-// and with it the whole polling interval, is lost. Callers use this to keep to one
-// handshake at a time; a picture takes about a second, so nothing waits long.
-static bool bgTransferInFlight() {
-  return bgFetchState != BG_FETCH_IDLE;
-}
-
 // Carry the transfer on a slice at a time. Called from loop(), so LVGL runs between
 // passes and the UI stays live for the whole download.
 static void bgFetchService() {
@@ -7512,7 +7378,6 @@ static void bgFetchService() {
     bgWriteScreenUp();
     Serial.printf("[BG] %s ready: %u bytes, stored in %lums\n",
                   name.c_str(), (unsigned)total, millis() - storeStart);
-    bgHeapReport("after a picture");
     bgFetchTotal = 0;
     bgFetchGot = 0;
     bgFetchName = "";

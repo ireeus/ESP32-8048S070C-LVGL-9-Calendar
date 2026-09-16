@@ -742,17 +742,11 @@ $bg_preview = '';
 $bg_has_custom = false;
 $bg_now_group = null;
 $bg_now_note = '';
-if ($user_background['mode'] === 'custom') {
-    // Which of the owner's pictures is on the panel at this moment - the same
-    // choice background.php makes for the device, so this thumbnail walks the
-    // rotation with it rather than always showing the most recently added one.
-    $bg_pick = bg_custom_choice($db, (int) ($_SESSION['user_id'] ?? 0), $user_background['file']);
-    if ($bg_pick !== null) {
-        $candidate = 'uploads/' . pathinfo((string) $bg_pick['file'], PATHINFO_FILENAME) . '.png';
-        if (is_file($candidate)) {
-            $bg_preview = $candidate;
-            $bg_has_custom = true;
-        }
+if ($user_background['mode'] === 'custom' && $user_background['file'] !== '') {
+    $candidate = 'uploads/' . pathinfo($user_background['file'], PATHINFO_FILENAME) . '.png';
+    if (is_file($candidate)) {
+        $bg_preview = $candidate;
+        $bg_has_custom = true;
     }
 }
 if (!$bg_has_custom) {
@@ -778,21 +772,6 @@ if (!$bg_has_custom) {
     if ($bg_preview === '' && is_file(BG_WEATHER_DIR . '/cloudy.png')) {
         $bg_preview = BG_WEATHER_DIR . '/cloudy.png';
     }
-}
-
-// How many of the owner's own pictures there are, and how often they rotate.
-// An account that uploaded before the gallery existed still has its one picture
-// in the old column and an empty gallery until the upload page is next opened,
-// so it counts as one here rather than reading as "none".
-$bg_count = 0;
-$bg_rotate_s = 0;
-if (isset($_SESSION['user_id'])) {
-    $bg_count = bg_gallery_count($db, (int) $_SESSION['user_id']);
-    $bg_rotate_s = bg_rotate_seconds($db, (int) $_SESSION['user_id']);
-}
-if ($bg_count === 0 && $user_background['file'] !== ''
-    && is_file('uploads/' . basename($user_background['file']))) {
-    $bg_count = 1;
 }
 
 // Device fleet update policy. Everyone can SEE it; only the administrator can
@@ -1407,9 +1386,7 @@ if (!array_key_exists($active_tab, $TABS)) { $active_tab = 'themes'; }
                             // How see-through the device's panels are. 100 is the solid
                             // look the device has always had, so it is the default and
                             // the safe end of the range.
-                            // Ascending left to right, matching the device's own row:
-                            // most see-through on the left, solid on the right.
-                            $panel_steps = [40, 55, 70, 85, 100];
+                            $panel_steps = [100, 85, 70, 55, 40];
                             ?>
                             <label class="text-base mt-6">Panel opacity on the device (100 = solid, lower shows more of the background picture)</label>
                             <div class="step-choices">
@@ -1435,18 +1412,7 @@ if (!array_key_exists($active_tab, $TABS)) { $active_tab = 'themes'; }
                             picture, or let the weather choose one for you.
                         </p>
                         <p class="text-base mb-3">
-                            Currently: <strong><?php
-                                if ($user_background['mode'] === 'weather') {
-                                    echo 'Weather pictures (automatic)';
-                                } elseif ($bg_count > 1) {
-                                    echo $bg_count . ' of my own pictures';
-                                    echo $bg_rotate_s > 0
-                                        ? ', rotating ' . htmlspecialchars(strtolower(bg_rotate_options()[$bg_rotate_s]))
-                                        : ', showing the newest';
-                                } else {
-                                    echo 'My own picture';
-                                }
-                            ?></strong><?php
+                            Currently: <strong><?php echo $user_background['mode'] === 'weather' ? 'Weather pictures (automatic)' : 'My own picture'; ?></strong><?php
                                 if ($bg_now_note !== '' && $bg_now_group !== null): ?> &mdash; <?php echo htmlspecialchars($bg_now_note); ?>, so the <?php echo htmlspecialchars(bg_weather_label($bg_now_group)); ?> picture is showing.<?php
                                 elseif ($user_background['mode'] === 'custom' && !$bg_has_custom): ?> &mdash; nothing uploaded yet, so the device is using the weather pictures.<?php
                                 endif; ?>
