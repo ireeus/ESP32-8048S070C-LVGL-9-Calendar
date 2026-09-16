@@ -19,8 +19,9 @@ extern const lv_font_t lv_font_montserrat_14_bold;
 // Must be HIGHER than whatever update/version.json currently advertises, or the
 // device will keep offering (and auto-installing) a build that is not actually
 // newer. The site advertised 2.3.1 when this was bumped to 2.3.2, and still did
-// when this was bumped to 2.3.3 (the one-handshake-at-a-time boot/poll changes).
-const String build_version = "2.3.3";
+// when this was bumped to 2.3.3 (one handshake at a time) and to 2.3.4 (internal-RAM
+// watchdog, and LVGL no longer taking 75KB of internal SRAM unless there is room).
+const String build_version = "2.3.4";
 int debug =0; // Change to 1 to enable serial prints
 // Firmware check interval variable
 // Was 100000UL, which is 100 SECONDS, not the 5 minutes the comment claimed - so
@@ -111,6 +112,7 @@ static void apply_panel_opacity();              // push opacity onto the surface
 static void bgFetchService();                   // one slice of a picture transfer
 static void bgFetchAbort(const char *why);      // drop a picture transfer in flight
 static bool bgTransferInFlight();               // is a picture transfer holding TLS?
+static void bgHeapReport(const char *when);     // internal/PSRAM free + low-water mark
 static void updateAutoBrightness(bool force);   // recompute the level from the sun
 static void apply_ui_darkness_ex(int value, bool persist);
 // Send a local theme choice to the site. `fromSync` is true when a manual Sync
@@ -508,7 +510,7 @@ static String bg_mode = "";
 // download a second one the moment the weather arrived.
 static bool g_weather_known = false;
 // OTA variables
-String currentFirmwareVersion = "2.3.3"; // replaced by build_version in setup()
+String currentFirmwareVersion = "2.3.4"; // replaced by build_version in setup()
 String latestFirmwareVersion = "";
 String firmwareUrl = "";
 WiFiClientSecure client;
@@ -6234,6 +6236,29 @@ void loop() {
     update_settings_memory_meters();
     lastRamLabelUpdate = currentTime;
   }
+  // Internal-RAM watch. Two things this is here to catch, both of which show up
+  // first as "the theme fetch failed" or as a crash in the WiFi driver:
+  //   * a slow leak - internal free walking downwards over an hour;
+  //   * a single deep dip - the low-water mark dropping, which the current reading
+  //     alone would never reveal.
+  // A line is only printed when the free figure actually moved by 4KB, so a healthy
+  // device is silent and a drifting one leaves a trail. The integrity check walks
+  // the internal heap a minute, cheap at this size, and prints CORRUPT HEAP the
+  // moment the damage exists rather than whenever the WiFi task next touches it.
+  static unsigned long lastHeapWatch = 0;
+  static unsigned long heapWatchFree = 0;
+  if (currentTime - lastHeapWatch >= 60000UL) {
+    lastHeapWatch = currentTime;
+    const unsigned long nowFree = heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024;
+    const long delta = (long)nowFree - (long)heapWatchFree;
+    if (heapWatchFree == 0 || delta <= -4 || delta >= 4) {
+      heapWatchFree = nowFree;
+      bgHeapReport("minutely");
+      if (!heap_caps_check_integrity(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA, true)) {
+        Serial.println("[MEM] INTERNAL HEAP FAILED ITS INTEGRITY CHECK - see the error above");
+      }
+    }
+  }
   if (currentTime - lastDateTimeUpdate >= dateTimeUpdateInterval && !is_ota_updating) {
     time_t now;
     time(&now);
@@ -7007,11 +7032,17 @@ static uint8_t *bg_buffer = nullptr;
 // largest free block of DMA-capable internal RAM: mbedTLS allocates there, and the
 // IDF SHA driver needs a small DMA buffer of its own, which is the allocation that
 // fails as "esp-sha: Failed to allocate buf memory" when internal RAM is tight.
-// Printed as internal KB (largest DMA block KB) / PSRAM KB.
+//
+// "low" is the lowest the internal heap has EVER been since boot. Free space that
+// looks healthy now can still hide a moment - a burst of requests, a big JSON
+// payload - where it nearly hit zero, and that moment is what kills a handshake or
+// the WiFi driver's own buffers. Printed as internal KB (low KB, largest DMA KB)
+// and PSRAM KB.
 static void bgHeapReport(const char *when) {
-  Serial.printf("[MEM] %-22s internal %uKB (largest DMA %uKB), PSRAM %uKB free\n",
+  Serial.printf("[MEM] %-22s internal %uKB (low %uKB, largest DMA %uKB), PSRAM %uKB free\n",
                 when,
                 (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
+                (unsigned)(heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL) / 1024),
                 (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_DMA) / 1024),
                 (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
 }
