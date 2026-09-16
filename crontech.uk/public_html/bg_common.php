@@ -172,3 +172,75 @@ function bg_versioned(string $relative, string $absolutePath): string
     $mtime = @filemtime($absolutePath);
     return $mtime ? ($relative . '?v=' . $mtime) : $relative;
 }
+
+/** WMO weather code -> short description, matching the wording the device uses. */
+function bg_weather_description(int $code): string
+{
+    static $c = [
+        0 => 'Clear sky', 1 => 'Mainly clear', 2 => 'Partly cloudy', 3 => 'Overcast',
+        45 => 'Fog', 48 => 'Depositing rime fog',
+        51 => 'Light drizzle', 53 => 'Moderate drizzle', 55 => 'Dense drizzle',
+        56 => 'Light freezing drizzle', 57 => 'Dense freezing drizzle',
+        61 => 'Slight rain', 63 => 'Moderate rain', 65 => 'Heavy rain',
+        66 => 'Light freezing rain', 67 => 'Heavy freezing rain',
+        71 => 'Slight snow fall', 73 => 'Moderate snow fall', 75 => 'Heavy snow fall',
+        77 => 'Snow grains',
+        80 => 'Slight rain showers', 81 => 'Moderate rain showers', 82 => 'Violent rain showers',
+        85 => 'Slight snow showers', 86 => 'Heavy snow showers',
+        95 => 'Thunderstorm', 96 => 'Thunderstorm with slight hail',
+        99 => 'Thunderstorm with heavy hail',
+    ];
+    return $c[$code] ?? 'Unknown';
+}
+
+/**
+ * The weather group in force RIGHT NOW at a location, for the "showing now"
+ * marker on the background page.
+ *
+ * It asks the same Open-Meteo endpoint for the same `current=weather_code` that
+ * the firmware requests, so the marker agrees with what the panel is showing
+ * rather than with a guess. Cached for ten minutes in wx_cache: opening the page
+ * should not mean an upstream request every time.
+ *
+ * @return array{group:string,code:int,description:string}|null  null when the
+ *         coordinates are unusable or the lookup fails.
+ */
+function bg_current_weather(PDO $db, float $lat, float $lon): ?array
+{
+    $finish = function (int $code): array {
+        return [
+            'group'       => bg_weather_group($code),
+            'code'        => $code,
+            'description' => bg_weather_description($code),
+        ];
+    };
+
+    $key = round($lat, 4) . '|' . round($lon, 4);
+    try {
+        $stmt = $db->prepare("SELECT code, fetched_at FROM wx_cache WHERE cache_key = ?");
+        $stmt->execute([$key]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row && (time() - (int) strtotime((string) $row['fetched_at'] . ' UTC')) < 600) {
+            return $finish((int) $row['code']);
+        }
+    } catch (PDOException $e) {
+        // No cache table yet, or the read failed: fall through and just fetch.
+    }
+
+    $url = 'https://api.open-meteo.com/v1/forecast?latitude=' . $lat . '&longitude=' . $lon
+         . '&current=weather_code&timezone=auto';
+    $raw = @file_get_contents($url, false, stream_context_create(['http' => ['timeout' => 5]]));
+    $data = $raw ? json_decode($raw, true) : null;
+    if (!is_array($data) || !isset($data['current']['weather_code'])) {
+        return null;   // offline, rate limited, or no location: the page copes
+    }
+    $code = (int) $data['current']['weather_code'];
+
+    try {
+        $stmt = $db->prepare("INSERT OR REPLACE INTO wx_cache (cache_key, code, fetched_at) VALUES (?, ?, CURRENT_TIMESTAMP)");
+        $stmt->execute([$key, $code]);
+    } catch (PDOException $e) {
+        // Caching is best effort; the answer above is still good.
+    }
+    return $finish($code);
+}

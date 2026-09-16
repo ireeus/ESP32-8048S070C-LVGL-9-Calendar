@@ -495,7 +495,7 @@ if (isset($_GET['code'])) {
         }
     }
 /* Fetch or update the device theme
- * URL request (update): api.php?theme={access_code}&scheme={name}&darkness={0-100}&auto={0|1}
+ * URL request (update): api.php?theme={access_code}&scheme={name}&darkness={0-100}&auto={0|1}&panel_opa={0-100}
  * Description: Saves the theme the DEVICE is actually using, so the website's
  *   Themes tab shows the same values on the next refresh. Until this existed the
  *   theme only ever flowed one way - the device read it and never wrote it - so a
@@ -507,6 +507,10 @@ if (isset($_GET['code'])) {
     $scheme = trim(urldecode($_GET['scheme'] ?? ''));
     $darkness = (int)($_GET['darkness'] ?? 0);
     $auto = ((int)($_GET['auto'] ?? 0)) ? 1 : 0;
+    // Panel opacity from the device's own settings row. -1 means it did not send
+    // one (older firmware), which must leave the stored value alone rather than
+    // resetting the panels to solid.
+    $panel_opa = isset($_GET['panel_opa']) ? (int)$_GET['panel_opa'] : -1;
     if (empty($access_code)) {
         http_response_code(400);
         echo json_encode(['error' => 'theme parameter is required']);
@@ -527,37 +531,49 @@ if (isset($_GET['code'])) {
     // displaying, and a 400 would only make it retry forever.
     if ($darkness < 0) $darkness = 0;
     if ($darkness > 100) $darkness = 100;
+    if ($panel_opa > 100) $panel_opa = 100;
+    if ($panel_opa < -1) $panel_opa = -1;
     if (strlen($scheme) > 32) $scheme = substr($scheme, 0, 32);
 
     try {
-        // brightness_auto is added by settings.php's migration and may not exist on
-        // a site whose settings page has never been opened, so the statement is
-        // built for whichever columns are actually there.
+        // brightness_auto and panel_opa are added by settings.php's migration and
+        // may not exist on a site whose settings page has never been opened, so the
+        // statement is built for whichever columns are actually there rather than
+        // for a fixed set.
         $cols = $db->query("PRAGMA table_info(user_theme)")->fetchAll(PDO::FETCH_ASSOC);
         $hasAuto = false;
-        foreach ($cols as $c) { if ($c['name'] === 'brightness_auto') $hasAuto = true; }
+        $hasPanelOpa = false;
+        foreach ($cols as $c) {
+            if ($c['name'] === 'brightness_auto') $hasAuto = true;
+            if ($c['name'] === 'panel_opa')       $hasPanelOpa = true;
+        }
 
         if ($scheme !== '') {
-            if ($hasAuto) {
-                $stmt = $db->prepare("INSERT OR REPLACE INTO user_theme (user_id, scheme, darkness, brightness_auto, updated) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)");
-                $stmt->execute([$user_id, $scheme, $darkness, $auto]);
-            } else {
-                $stmt = $db->prepare("INSERT OR REPLACE INTO user_theme (user_id, scheme, darkness, updated) VALUES (?, ?, ?, CURRENT_TIMESTAMP)");
-                $stmt->execute([$user_id, $scheme, $darkness]);
-            }
+            // Full row: colours plus whichever optional columns exist.
+            $fields = ['user_id', 'scheme', 'darkness'];
+            $values = [$user_id, $scheme, $darkness];
+            if ($hasAuto)                        { $fields[] = 'brightness_auto'; $values[] = $auto; }
+            if ($hasPanelOpa && $panel_opa >= 0) { $fields[] = 'panel_opa';       $values[] = $panel_opa; }
+            $fields[] = 'updated';
+            $sql = "INSERT OR REPLACE INTO user_theme (" . implode(', ', $fields) . ") VALUES ("
+                 . implode(', ', array_fill(0, count($fields) - 1, '?')) . ", CURRENT_TIMESTAMP)";
+            $stmt = $db->prepare($sql);
+            $stmt->execute($values);
         } else {
-            // No scheme supplied: move only the brightness fields, leaving the
+            // No scheme supplied: move only the fields that were sent, leaving the
             // stored colours alone.
-            if ($hasAuto) {
-                $stmt = $db->prepare("UPDATE user_theme SET darkness = ?, brightness_auto = ?, updated = CURRENT_TIMESTAMP WHERE user_id = ?");
-                $stmt->execute([$darkness, $auto, $user_id]);
-            } else {
-                $stmt = $db->prepare("UPDATE user_theme SET darkness = ?, updated = CURRENT_TIMESTAMP WHERE user_id = ?");
-                $stmt->execute([$darkness, $user_id]);
-            }
+            $sets = ['darkness = ?'];
+            $values = [$darkness];
+            if ($hasAuto)                        { $sets[] = 'brightness_auto = ?'; $values[] = $auto; }
+            if ($hasPanelOpa && $panel_opa >= 0) { $sets[] = 'panel_opa = ?';       $values[] = $panel_opa; }
+            $sets[] = 'updated = CURRENT_TIMESTAMP';
+            $values[] = $user_id;
+            $stmt = $db->prepare("UPDATE user_theme SET " . implode(', ', $sets) . " WHERE user_id = ?");
+            $stmt->execute($values);
         }
         header('Content-Type: application/json');
-        echo json_encode(['scheme' => $scheme, 'darkness' => $darkness, 'auto' => (bool)$auto]);
+        echo json_encode(['scheme' => $scheme, 'darkness' => $darkness, 'auto' => (bool)$auto,
+                          'panel_opa' => $panel_opa]);
     } catch (PDOException $e) {
         http_response_code(500);
         echo json_encode(['error' => 'Failed to save theme: ' . $e->getMessage()]);

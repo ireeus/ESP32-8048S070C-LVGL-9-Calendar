@@ -34,6 +34,15 @@ try {
     }
     if (!$have['background_image']) $db->exec("ALTER TABLE users ADD COLUMN background_image TEXT");
     if (!$have['background_mode'])  $db->exec("ALTER TABLE users ADD COLUMN background_mode TEXT NOT NULL DEFAULT 'custom'");
+
+    // Last known weather at a location, so marking "which picture is in use right
+    // now" costs one upstream request per ten minutes rather than one per page
+    // view. Keyed on the coordinates, so accounts in the same place share a row.
+    $db->exec("CREATE TABLE IF NOT EXISTS wx_cache (
+        cache_key TEXT PRIMARY KEY,
+        code INTEGER NOT NULL,
+        fetched_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )");
 } catch (PDOException $e) {
     die('Database Error: ' . htmlspecialchars($e->getMessage()));
 }
@@ -67,6 +76,22 @@ function bg_load_user(PDO $db, int $userId): array
 }
 
 $user = bg_load_user($db, $userId);
+
+// Where this account's device is, and what the sky is doing there. This is the
+// same location the device itself fetches (api.php?weatherLocation=...), so the
+// "in use right now" marker below matches the panel rather than guessing.
+$wxPrefs = [];
+$stmt = $db->prepare("SELECT city_name, latitude, longitude FROM weather_preferences WHERE user_id = ?");
+$stmt->execute([$userId]);
+$wxPrefs = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+$wxNow = null;
+$hasLocation = isset($wxPrefs['latitude'], $wxPrefs['longitude'])
+    && is_numeric($wxPrefs['latitude']) && is_numeric($wxPrefs['longitude']);
+if ($hasLocation) {
+    $wxNow = bg_current_weather($db, (float) $wxPrefs['latitude'], (float) $wxPrefs['longitude']);
+}
+$currentGroup = $wxNow['group'] ?? null;
+$wxPlace = trim((string) ($wxPrefs['city_name'] ?? ''));
 
 // ---------------------------------------------------------------- actions ----
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -219,9 +244,17 @@ $hasPreview = $hasCustom && is_file($customPreview);
         .tile{cursor:pointer;border:2px solid transparent;transition:border-color .2s,transform .2s;}
         .tile:hover{border-color:#34D399;transform:translateY(-2px);}
         .tile-own{border-color:#34D399;}
+        /* The picture the conditions are selecting at this moment. Declared after
+           .tile-own so a picture that is both yours and current keeps the amber
+           "now" outline, with the green owned border still visible behind it. */
+        .tile-current{border-color:#FBBF24;box-shadow:0 0 0 3px rgba(251,191,36,.35);}
+        .now-line{background:rgba(0,0,0,.22);border-left:4px solid #FBBF24;border-radius:.5rem;
+                  padding:.6rem .8rem;font-size:.86rem;margin:.1rem 0 1rem;line-height:1.5;}
+        .now-line a{color:#FBBF24;font-weight:600;}
         .tile-label{font-weight:600;}
         .badge{background:#34D399;color:#064e3b;border-radius:50px;padding:.05rem .4rem;font-size:.62rem;
                font-weight:700;text-transform:uppercase;letter-spacing:.03em;}
+        .badge-now{background:#FBBF24;color:#3b2600;}
         .tile-actions{margin-left:auto;display:flex;gap:.3rem;align-items:center;}
         .tile-actions form{margin:0;display:inline;}
         .tile-btn{background:rgba(255,255,255,.22);border:none;color:#fff;font:inherit;font-size:.72rem;
@@ -325,6 +358,26 @@ $hasPreview = $hasCustom && is_file($customPreview);
                 your own &mdash; yours is then used whenever the conditions call for it. Reset puts the
                 default back.
             </p>
+            <?php if ($currentGroup !== null): ?>
+                <p class="now-line">
+                    <span class="badge badge-now">in use now</span>
+                    <?php echo htmlspecialchars($wxPlace !== '' ? $wxPlace : 'Your location'); ?>:
+                    <strong><?php echo htmlspecialchars($wxNow['description']); ?></strong>
+                    &mdash; so the <strong><?php echo htmlspecialchars(bg_weather_label($currentGroup)); ?></strong>
+                    picture is the one selected<?php
+                        echo $user['mode'] === 'weather'
+                            ? '.'
+                            : ', but you are showing your own background at the moment.'; ?>
+                </p>
+            <?php else: ?>
+                <p class="now-line hint">
+                    <?php if (!$hasLocation): ?>
+                        Add a <a href="settings.php?tab=other">weather location</a> to see which picture is in use right now.
+                    <?php else: ?>
+                        Could not check the weather just now &mdash; which picture is in use will be marked next time this page loads.
+                    <?php endif; ?>
+                </p>
+            <?php endif; ?>
             <div class="gallery">
                 <?php foreach (bg_weather_groups() as $g): ?>
                     <?php
@@ -333,9 +386,10 @@ $hasPreview = $hasCustom && is_file($customPreview);
                     $defPng  = BG_WEATHER_DIR . '/' . $g . '.png';
                     $prevPng = ($hasOvr && is_file($ovrPng)) ? $ovrPng : $defPng;
                     ?>
-                    <figure class="tile<?php echo $hasOvr ? ' tile-own' : ''; ?>"
+                    <?php $isCurrent = ($currentGroup !== null && $g === $currentGroup); ?>
+                    <figure class="tile<?php echo $hasOvr ? ' tile-own' : ''; ?><?php echo $isCurrent ? ' tile-current' : ''; ?>"
                             onclick="pickWeather('<?php echo $g; ?>', '<?php echo htmlspecialchars(bg_weather_label($g), ENT_QUOTES); ?>')"
-                            title="Click to use your own picture for <?php echo htmlspecialchars(bg_weather_label($g)); ?>">
+                            title="Click to use your own picture for <?php echo htmlspecialchars(bg_weather_label($g)); ?><?php echo $isCurrent ? ' (in use right now)' : ''; ?>">
                         <?php if (is_file($prevPng)): ?>
                             <img src="<?php echo htmlspecialchars($prevPng); ?>?v=<?php echo (int) @filemtime($prevPng); ?>"
                                  alt="<?php echo htmlspecialchars(bg_weather_label($g)); ?>">
@@ -344,6 +398,7 @@ $hasPreview = $hasCustom && is_file($customPreview);
                         <?php endif; ?>
                         <figcaption>
                             <span class="tile-label"><?php echo htmlspecialchars(bg_weather_label($g)); ?></span>
+                            <?php if ($isCurrent): ?><span class="badge badge-now">now</span><?php endif; ?>
                             <?php if ($hasOvr): ?><span class="badge">your picture</span><?php endif; ?>
                             <span class="tile-actions">
                                 <span class="tile-btn">Replace</span>

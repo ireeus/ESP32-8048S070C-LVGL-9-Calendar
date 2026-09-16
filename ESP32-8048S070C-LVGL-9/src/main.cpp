@@ -103,6 +103,10 @@ void update_today_highlight(lv_obj_t *cal);
 void brightness_step_cb(lv_event_t *e);           // UI brightness button tapped
 static void brightness_steps_highlight(int active); // repaint the brightness row
 static int  ui_brightness_active_button();      // 0 = Auto, 1..N = preset + 1
+static void opa_step_cb(lv_event_t *e);         // panel opacity button tapped
+static void opa_steps_highlight(int active);    // repaint the opacity row
+static int  opa_active_step();                  // nearest step to the current value
+static void apply_panel_opacity();              // push opacity onto the surfaces
 static void updateAutoBrightness(bool force);   // recompute the level from the sun
 static void apply_ui_darkness_ex(int value, bool persist);
 // Send a local theme choice to the site. `fromSync` is true when a manual Sync
@@ -344,6 +348,17 @@ static lv_obj_t *brightness_step_btns[UI_BRIGHTNESS_BUTTON_COUNT] =
 // brightness_step_btns above.
 static lv_obj_t *brightness_step_labels[UI_BRIGHTNESS_BUTTON_COUNT] =
     {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
+// Panel opacity, as five taps rather than a slider - the same reasoning as the
+// brightness row above, and the same shape so the two read alike. 100 is the
+// solid UI this app has always had, so the default changes nothing; lower values
+// let the background picture show through the calendar, the taskbar and the two
+// panels. The website can set the same value, and this is where the device reads
+// it from at boot.
+#define UI_OPA_PRESET_COUNT 5
+static const int UI_OPA_STEPS[UI_OPA_PRESET_COUNT] = {100, 85, 70, 55, 40};
+// Same lifetime rule as brightness_step_btns: these point into the settings popup.
+static lv_obj_t *opa_step_btns[UI_OPA_PRESET_COUNT] =
+    {nullptr, nullptr, nullptr, nullptr, nullptr};
 // There is deliberately no backlight level global any more. TFT_BL turned out to
 // be an enable pin, so PWM on it blacks the panel out below ~60% (see the note in
 // display.h) - there is nothing between full on and off to store.
@@ -2654,6 +2669,7 @@ static void settings_popup_deleted_cb(lv_event_t *e) {
   // freed memory the next time it ran.
   for (int i = 0; i < UI_BRIGHTNESS_BUTTON_COUNT; i++) brightness_step_btns[i] = nullptr;
   for (int i = 0; i < UI_BRIGHTNESS_BUTTON_COUNT; i++) brightness_step_labels[i] = nullptr;
+  for (int i = 0; i < UI_OPA_PRESET_COUNT; i++) opa_step_btns[i] = nullptr;
 }
 // Internal RAM is the scarce resource on this board - 320KB shared with the WiFi
 // and TLS stacks - while the LVGL draw buffers and the panel framebuffer live in
@@ -2911,6 +2927,35 @@ void show_settings_popup() {
       brightness_step_labels[i] = step_lbl;
     }
     brightness_steps_highlight(ui_brightness_active_button());
+
+    // Panel opacity, directly under the brightness row it mirrors. The calendar,
+    // the taskbar and the two panels are opaque by default and hide almost all of
+    // a background picture; this is how much of it shows through. 100 keeps the
+    // existing solid look.
+    lv_obj_t *opa_card = make_card(right_col, lv_color_hex(0x1e1e1e), lv_color_hex(0x1e1e1e));
+    make_card_title(opa_card, "Panel Opacity  (100 = solid, lower = see-through)");
+    lv_obj_t *opa_row = make_panel(opa_card);
+    lv_obj_set_width(opa_row, LV_PCT(100));
+    lv_obj_set_height(opa_row, LV_SIZE_CONTENT);
+    lv_obj_set_style_pad_column(opa_row, 4, 0);
+    lv_obj_set_flex_flow(opa_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(opa_row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    for (int i = 0; i < UI_OPA_PRESET_COUNT; i++) {
+      lv_obj_t *opa_btn = lv_button_create(opa_row);
+      lv_obj_set_width(opa_btn, 0);
+      lv_obj_set_height(opa_btn, 42);
+      lv_obj_set_flex_grow(opa_btn, 1);   // the five share the row evenly
+      lv_obj_set_style_radius(opa_btn, UI_RADIUS, 0);
+      lv_obj_t *opa_lbl = lv_label_create(opa_btn);
+      lv_label_set_text_fmt(opa_lbl, "%d", UI_OPA_STEPS[i]);
+      lv_obj_center(opa_lbl);
+      lv_obj_set_style_text_font(opa_lbl, &lv_font_montserrat_14, 0);
+      // CLICKED, not PRESSED - a press that turns into a scroll must not change it.
+      lv_obj_add_event_cb(opa_btn, opa_step_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+      opa_step_btns[i] = opa_btn;
+    }
+    opa_steps_highlight(opa_active_step());
 
 
     // ---- memory meters, side by side --------------------------------------
@@ -4494,6 +4539,48 @@ void brightness_step_cb(lv_event_t *e) {
   // itself runs from loop() - see pushThemeToServer().
   themePushPending = true;
 }
+// ---- Panel opacity ----------------------------------------------------------
+// Which step lights up: the nearest one, so a value set on the website (which can
+// be anything 0-100) still marks something sensible rather than nothing.
+static int opa_active_step() {
+  int best = 0;
+  int best_dist = 1000;
+  for (int i = 0; i < UI_OPA_PRESET_COUNT; i++) {
+    int dist = g_panel_opa_pct - UI_OPA_STEPS[i];
+    if (dist < 0) dist = -dist;
+    if (dist < best_dist) { best_dist = dist; best = i; }
+  }
+  return best;
+}
+// Repaint the opacity row: the active step takes the scheme accent with a white
+// ring, the rest stay neutral - exactly the treatment the brightness row gets, so
+// the two read as one family.
+static void opa_steps_highlight(int active) {
+  for (int i = 0; i < UI_OPA_PRESET_COUNT; i++) {
+    lv_obj_t *btn = opa_step_btns[i];
+    if (!btn) continue;
+    const bool on = (i == active);
+    lv_obj_set_style_bg_color(btn, on ? scheme_accent() : lv_color_hex(0x3A3A3A), 0);
+    lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(btn, on ? 2 : 1, 0);
+    lv_obj_set_style_border_color(btn, on ? lv_color_hex(0xFFFFFF) : lv_color_hex(0x555555), 0);
+  }
+}
+static void opa_step_cb(lv_event_t *e) {
+  const intptr_t idx = (intptr_t)lv_event_get_user_data(e);
+  if (idx < 0 || idx >= UI_OPA_PRESET_COUNT) return;
+  g_panel_opa_pct = UI_OPA_STEPS[idx];
+  preferences.begin("ui", false);
+  preferences.putInt("ui_panel_opa", g_panel_opa_pct);
+  preferences.end();
+  apply_panel_opacity();
+  opa_steps_highlight(opa_active_step());
+  // Send it to the site too. That is not just cosmetic: the next theme poll
+  // compares the site's stored value against this one, so without the push it
+  // would see the site's older number as a change and undo the tap. Same route the
+  // colour and brightness rows already use.
+  themePushPending = true;
+}
 // ---- Remote update policy --------------------------------------------------
 // The website publishes update/policy.json:
 //     { "revision": 1, "auto_firmware_update": false, "quiet_start": 2, "quiet_end": 5 }
@@ -4749,12 +4836,18 @@ static bool pushThemeToServer(bool fromSync) {
     preferences.end();
   }
   const String scheme_name = color_schemes[g_ui_scheme].name;
+  // Panel opacity travels with the rest of the theme so the site's copy stays
+  // right. That is not cosmetic: the next poll compares the site's stored value
+  // against this one, so a value left behind on the site would be read as a
+  // change and would undo a tap made on the device.
+  const int opa_to_push = g_panel_opa_pct;
 
   themePushPending = false;
   String url = "https://crontech.uk/api.php?theme=" + URLEncode(apiCode) +
                "&scheme=" + URLEncode(scheme_name) +
                "&darkness=" + String(darkness_to_push) +
-               "&auto=" + String(g_brightness_auto ? 1 : 0);
+               "&auto=" + String(g_brightness_auto ? 1 : 0) +
+               "&panel_opa=" + String(opa_to_push);
   HTTPClient http;
   http.begin(url);
   const int httpCode = http.GET();
@@ -4762,7 +4855,7 @@ static bool pushThemeToServer(bool fromSync) {
     // The site now holds exactly this, so record it as the last server value.
     // Without that the next poll would see a "change" and re-apply it.
     themeSignature = scheme_name + "|" + String(darkness_to_push) + "|" +
-                     (g_brightness_auto ? "1" : "0");
+                     (g_brightness_auto ? "1" : "0") + "|" + String(opa_to_push);
     preferences.begin("ui", false);
     preferences.putString("theme_sig", themeSignature);
     preferences.putInt("ui_web_darkness", darkness_to_push);
