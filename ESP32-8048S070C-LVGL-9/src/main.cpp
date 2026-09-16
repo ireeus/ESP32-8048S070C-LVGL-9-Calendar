@@ -2657,7 +2657,7 @@ void factory_reset_cb(lv_event_t *e);
 // The settings window is destroyed outright rather than hidden, and it is torn
 // down from five different places. Hooking LV_EVENT_DELETE once is safer than
 // remembering to clear this pointer at every one of them (that is exactly the
-// mistake that left ota_ok_btn dangling).
+// mistake that left a freed button dangling once).
 static void settings_popup_deleted_cb(lv_event_t *e) {
   (void)e;
   settings_ram_bar = nullptr;
@@ -3721,22 +3721,17 @@ static unsigned long otaLastUiTick = 0;
 // while updating. ESP-IDF 4.4 has no bounce buffer to decouple the two (that
 // needs IDF 5.x), so instead the picture is taken down to ONE FLAT COLOUR for the
 // whole download. A uniform framebuffer has no contrast for a torn line to show
-// up in, so the artefacts become invisible rather than merely brief. LVGL is not
-// refreshed while that is on screen; the progress bar appears afterwards, once
-// the update has been verified and committed.
-#define OTA_VERIFY_MS 3250UL // finishing bar sweep (2.5s + 30%)
+// up in, so the artefacts become invisible rather than merely brief.
+//
+// Once the image is committed the device restarts itself. There is deliberately
+// no "verifying" sweep and no version announcement here any more: the only build
+// that can truthfully say what is installed is the one now on the flash, so it
+// says so on the way up (see maybe_show_installed_popup()).
 static bool otaBlackout = false;       // screen is flat; LVGL must not repaint
-static bool otaVerifying = false;      // running the finishing bar
-static bool otaAwaitingRestart = false; // finished; waiting for the user to press OK
-// An update started by the quiet-window policy has nobody standing in front of
-// the device, so that one still reboots itself. Only a user-pressed update waits.
-static bool otaAutoTriggered = false;
-static unsigned long otaVerifyStart = 0;
 static lv_obj_t *ota_status_lbl = nullptr;
 static lv_obj_t *ota_bar = nullptr;
 static lv_obj_t *ota_action_btn = nullptr;
 static lv_obj_t *ota_close_btn = nullptr;
-static lv_obj_t *ota_ok_btn = nullptr;  // shown once the update is installed
 static lv_obj_t *ota_ver_lbl = nullptr;  // the "Installed: x.y.z" line
 static lv_obj_t *ota_note_lbl = nullptr; // the "screen will switch off" warning
 
@@ -3744,24 +3739,6 @@ static void ota_set_status(const char *msg, bool is_error) {
   if (!ota_status_lbl) return;
   lv_label_set_text(ota_status_lbl, msg);
   lv_obj_set_style_text_color(ota_status_lbl, lv_color_hex(is_error ? 0xFF5252 : 0xFFFFFF), 0);
-}
-// Collapse the dialog down to the outcome. The dark-screen warning and the
-// progress bar both describe the transfer, which is over, and the "Installed"
-// line still names the version we started from - leaving either on screen would
-// read as though nothing had happened.
-static void ota_show_completed() {
-  if (ota_ver_lbl) {
-    lv_label_set_text_fmt(ota_ver_lbl, "Installed: %s",
-                          latestFirmwareVersion.isEmpty() ? currentFirmwareVersion.c_str()
-                                                          : latestFirmwareVersion.c_str());
-  }
-  if (ota_note_lbl) lv_obj_add_flag(ota_note_lbl, LV_OBJ_FLAG_HIDDEN);
-  if (ota_bar) lv_obj_add_flag(ota_bar, LV_OBJ_FLAG_HIDDEN);
-  // Shrink to fit: with the warning and the bar gone the fixed 350px height left
-  // the remaining three lines floating in an empty box.
-  if (update_popup) lv_obj_set_height(update_popup, LV_SIZE_CONTENT);
-  ota_set_status("Update completed.\nWe need to restart the Crontab", false);
-  if (ota_status_lbl) lv_obj_set_style_text_color(ota_status_lbl, lv_color_hex(0x8BC34A), 0);
 }
 // TFT_BL is set up as an output by setup_display(). On/off only: it is an enable
 // pin, so a duty cycle below full reads as "off" and blanks the panel rather than
@@ -3814,10 +3791,6 @@ static void ota_close_transfer() {
   }
   otaStream = nullptr;
   otaDownloading = false;
-  otaVerifying = false;
-  otaAwaitingRestart = false;
-  otaAutoTriggered = false;
-  if (ota_ok_btn) lv_obj_add_flag(ota_ok_btn, LV_OBJ_FLAG_HIDDEN);
   is_ota_updating = false;
   ota_ui_show(); // a failure or a cancelled transfer must never leave the screen flat
 }
@@ -3846,11 +3819,8 @@ static void ota_show_progress(bool force) {
     lv_label_set_text(ota_status_lbl, buf);
   }
 }
-static void ota_start(bool automatic = false) {
+static void ota_start() {
   if (otaDownloading) return;
-  // Only recorded once the attempt is really going ahead, so a rejected call
-  // cannot stamp its origin onto a transfer that is already in flight.
-  otaAutoTriggered = automatic;
   if (WiFi.status() != WL_CONNECTED) { ota_fail("WiFi is not connected"); return; }
   if (firmwareUrl.isEmpty()) { ota_fail("No update URL was advertised"); return; }
 
@@ -3882,37 +3852,6 @@ static void ota_start(bool automatic = false) {
 }
 // One bounded slice per loop() iteration.
 static void serviceOta() {
-  // ---- finishing sweep -----------------------------------------------------
-  // By the time this runs the update has ALREADY been validated and committed by
-  // Update.end(). The sweep is therefore reassurance that the install completed,
-  // not a measurement of it - and it only ever runs on a confirmed-good update.
-  // Everything is done and the OK button is up. Nothing else happens until the
-  // user presses it - no automatic reboot.
-  if (otaAwaitingRestart) return;
-
-  if (otaVerifying) {
-    unsigned long elapsed = millis() - otaVerifyStart;
-    int pct = (int)((elapsed * 100) / OTA_VERIFY_MS);
-    if (pct > 100) pct = 100;
-    if (ota_bar) lv_bar_set_value(ota_bar, pct, LV_ANIM_OFF);
-    if (elapsed < OTA_VERIFY_MS) return;
-    otaVerifying = false;
-    ota_show_completed();
-    if (otaAutoTriggered) {
-      // Nobody is there to press OK, so this one finishes by itself.
-      ota_set_status("Update completed.\nRestarting...", false);
-      lv_refr_now(NULL);
-      ota_blackout_and_restart(1200);
-      return;
-    }
-    otaAwaitingRestart = true;
-    if (ota_ok_btn) lv_obj_clear_flag(ota_ok_btn, LV_OBJ_FLAG_HIDDEN);
-    lv_refr_now(NULL); // paint the finished state straight away
-    // Deliberately does NOT reboot here. is_ota_updating stays true so loop()
-    // keeps servicing the popup and the OK button remains live.
-    return;
-  }
-
   if (!otaDownloading || !otaStream) return;
 
   // ---- download: every flash write happens while the screen is flat --------
@@ -3942,29 +3881,28 @@ static void serviceOta() {
   if (!Update.end(true)) { ota_fail("Could not finalise the update"); return; }
   preferences.begin("firmware", false);
   preferences.putString("version", latestFirmwareVersion);
+  // Read once by the build that comes up after this restart, so it can announce
+  // what it is. A preference is the only thing that survives the reboot, and this
+  // is written BEFORE it so the flag can never be lost to a power cut mid-restart.
+  preferences.putBool("just_updated", true);
   preferences.end();
 
-  // Only now, with the update confirmed, does the picture come back.
+  // The image is committed by Update.end(), so there is nothing left to verify -
+  // and nothing this build can truthfully say about what is now installed, since
+  // it is about to stop being the running firmware. Bring the picture back just
+  // long enough to say it is restarting, then go. Both a user-pressed update and
+  // a quiet-window one finish here; neither waits for a button any more.
   ota_ui_show();
-  if (ota_bar) lv_bar_set_value(ota_bar, 0, LV_ANIM_OFF);
-  ota_set_status("Verifying the installation...", false);
-  otaVerifying = true;
-  otaVerifyStart = millis();
-}
-// The update is installed and verified. The device deliberately does NOT reboot
-// on its own any more - the user decides when, by pressing OK.
-static void ota_restart_cb(lv_event_t *e) {
-  (void)e;
-  if (!otaAwaitingRestart) return; // stale press from a previous attempt
-  otaAwaitingRestart = false;
-  // Deliberately no "Restarting..." flash and no lv_refr_now() here. The dialog
-  // already asked the question and OK was the answer, so there is nothing left to
-  // say - and every extra repaint is another chance to catch the panel mid-update.
-  ota_blackout_and_restart(0);
+  if (ota_bar) lv_obj_add_flag(ota_bar, LV_OBJ_FLAG_HIDDEN);
+  if (ota_note_lbl) lv_obj_add_flag(ota_note_lbl, LV_OBJ_FLAG_HIDDEN);
+  if (update_popup) lv_obj_set_height(update_popup, LV_SIZE_CONTENT);
+  ota_set_status("Update installed.\nRestarting the Crontab...", false);
+  lv_refr_now(NULL);            // paint that before the screen goes down
+  ota_blackout_and_restart(1500);
 }
 static void ota_action_cb(lv_event_t *e) {
   (void)e;
-  ota_start(false); // user-initiated: finish by waiting for OK
+  ota_start();
 }
 static void ota_close_cb(lv_event_t *e) {
   (void)e;
@@ -3977,9 +3915,78 @@ static void ota_close_cb(lv_event_t *e) {
   ota_bar = nullptr;
   ota_action_btn = nullptr;
   ota_close_btn = nullptr;
-  ota_ok_btn = nullptr; // was missed: left ota_close_transfer() holding freed memory
   ota_ver_lbl = nullptr;
   ota_note_lbl = nullptr;
+}
+// ---- "what this device is running now", once, after an update ---------------
+// The OTA flow restarts the moment the image is committed, because the build that
+// installed it is not the one that can say what is on the flash - it stops being
+// the running firmware at that instant. That job belongs to the build that comes
+// up: setup() reads the just_updated flag the old one left behind, and this raises
+// a one-button notice once the UI is actually on screen.
+static lv_obj_t *installed_popup = nullptr;
+static bool installed_popup_pending = false;  // read from NVS by setup()
+static bool installed_popup_shown = false;    // so it can only ever appear once
+
+static void installed_ok_cb(lv_event_t *e) {
+  (void)e;
+  if (installed_popup) {
+    lv_obj_del(installed_popup);
+    installed_popup = nullptr;
+  }
+}
+
+static void maybe_show_installed_popup() {
+  if (!installed_popup_pending || installed_popup_shown) return;
+  // Waits for the calendar. On a device that has never been set up the WiFi wizard
+  // owns the screen, and a notice about a firmware update is the wrong thing to put
+  // over it - the flag stays set and this runs on a later pass instead.
+  if (!calendar) return;
+  installed_popup_shown = true;
+  installed_popup_pending = false;
+  // Cleared only now, so a reboot before the UI is up does not swallow the notice.
+  preferences.begin("firmware", false);
+  preferences.remove("just_updated");
+  preferences.end();
+
+  installed_popup = lv_obj_create(lv_scr_act());
+  lv_obj_set_size(installed_popup, 460, LV_SIZE_CONTENT);
+  lv_obj_align(installed_popup, LV_ALIGN_CENTER, 0, 0);
+  lv_obj_set_style_bg_color(installed_popup, lv_color_hex(0x1A1A1A), 0);
+  lv_obj_set_style_border_color(installed_popup, scheme_accent(), 0);
+  lv_obj_set_style_border_width(installed_popup, 3, 0);
+  lv_obj_set_style_radius(installed_popup, UI_RADIUS, 0);
+  lv_obj_set_style_pad_all(installed_popup, 16, 0);
+  lv_obj_set_style_pad_row(installed_popup, 12, 0);
+  lv_obj_set_flex_flow(installed_popup, LV_FLEX_FLOW_COLUMN);
+  lv_obj_set_flex_align(installed_popup, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+                        LV_FLEX_ALIGN_CENTER);
+  lv_obj_clear_flag(installed_popup, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scrollbar_mode(installed_popup, LV_SCROLLBAR_MODE_OFF);
+
+  lv_obj_t *title = lv_label_create(installed_popup);
+  lv_label_set_text(title, LV_SYMBOL_OK "  Firmware updated");
+  lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+  lv_obj_set_style_text_color(title, scheme_accent(), 0);
+
+  lv_obj_t *ver = lv_label_create(installed_popup);
+  // The RUNNING build's own version, not the one the previous firmware downloaded:
+  // this binary is what is installed, and it is the only thing that knows for sure.
+  lv_label_set_text_fmt(ver, "Installed version: %s", currentFirmwareVersion.c_str());
+  lv_obj_set_style_text_font(ver, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(ver, lv_color_hex(0xFFFFFF), 0);
+
+  lv_obj_t *btn = lv_button_create(installed_popup);
+  lv_obj_set_size(btn, 140, 46);
+  lv_obj_set_style_bg_color(btn, scheme_accent(), 0);
+  lv_obj_set_style_radius(btn, UI_RADIUS, 0);
+  lv_obj_add_event_cb(btn, installed_ok_cb, LV_EVENT_CLICKED, NULL);
+  lv_obj_t *bl = lv_label_create(btn);
+  lv_label_set_text(bl, "OK");
+  lv_obj_center(bl);
+  lv_obj_set_style_text_font(bl, &lv_font_montserrat_14, 0);
+
+  Serial.println("[OTA] Update confirmed by the new build: running " + currentFirmwareVersion);
 }
 void update_btn_cb(lv_event_t *e) {
   (void)e;
@@ -4012,7 +4019,9 @@ void update_btn_cb(lv_event_t *e) {
   lv_obj_set_style_text_color(ota_title, scheme_accent(), 0);
 
   ota_ver_lbl = lv_label_create(update_popup);
-  lv_label_set_text_fmt(ota_ver_lbl, "Installed: %s      New: %s",
+  // "Running", not "Installed": this line describes the build doing the updating,
+  // and the notice after the restart is the one that names what got installed.
+  lv_label_set_text_fmt(ota_ver_lbl, "Running: %s      New: %s",
                         currentFirmwareVersion.c_str(),
                         latestFirmwareVersion.isEmpty() ? "unknown"
                                                         : latestFirmwareVersion.c_str());
@@ -4023,8 +4032,9 @@ void update_btn_cb(lv_event_t *e) {
   // like the device has died. Say so up front.
   ota_note_lbl = lv_label_create(update_popup);
   lv_label_set_text(ota_note_lbl,
-      "The screen will switch off for about a minute while the update downloads, "
-      "then come back to verify it. Do not turn the device off.");
+      "The screen will switch off for about a minute while the update downloads, then "
+      "the device restarts by itself and tells you what it is running. "
+      "Do not turn the power off.");
   lv_obj_set_style_text_font(ota_note_lbl, &lv_font_montserrat_14, 0);
   lv_obj_set_style_text_color(ota_note_lbl, lv_color_hex(0xFFD166), 0);
   lv_obj_set_width(ota_note_lbl, LV_PCT(100));
@@ -4077,19 +4087,6 @@ void update_btn_cb(lv_event_t *e) {
   lv_label_set_text(ota_cl, "Close");
   lv_obj_center(ota_cl);
   lv_obj_set_style_text_font(ota_cl, &lv_font_montserrat_14, 0);
-
-  // Created hidden. It is revealed only when the update is installed, and it is
-  // the only thing that reboots the device.
-  ota_ok_btn = lv_button_create(ota_row);
-  lv_obj_set_size(ota_ok_btn, 140, 46);
-  lv_obj_set_style_bg_color(ota_ok_btn, lv_color_hex(0x00A86B), 0);
-  lv_obj_set_style_radius(ota_ok_btn, UI_RADIUS, 0);
-  lv_obj_add_event_cb(ota_ok_btn, ota_restart_cb, LV_EVENT_PRESSED, NULL);
-  lv_obj_t *ota_okl = lv_label_create(ota_ok_btn);
-  lv_label_set_text(ota_okl, "OK");
-  lv_obj_center(ota_okl);
-  lv_obj_set_style_text_font(ota_okl, &lv_font_montserrat_14, 0);
-  lv_obj_add_flag(ota_ok_btn, LV_OBJ_FLAG_HIDDEN);
 }
 static int showed_year;
 static int showed_month;
@@ -4197,7 +4194,7 @@ static void maybeAutoUpdate() {
     Serial.println("[OTA] Quiet window open - updating automatically to " + latestFirmwareVersion);
   }
   update_btn_cb(NULL); // build the progress dialog...
-  ota_start(true);         // unattended: finish by rebooting
+  ota_start();             // unattended: nobody is there to answer a dialog
 }
 void updateFirmwareButton() {
   if (versionIsNewer(latestFirmwareVersion, currentFirmwareVersion)) {
@@ -5942,6 +5939,9 @@ void setup() {
   if (preferences.getString("version", "") != currentFirmwareVersion) {
     preferences.putString("version", currentFirmwareVersion);
   }
+  // Left behind by the build that installed THIS one, a moment before it
+  // restarted. Read here, cleared only when the notice is actually shown.
+  installed_popup_pending = preferences.getBool("just_updated", false);
   preferences.end();
   preferences.begin("ui", false);
   g_ui_darkness = preferences.getInt("ui_darkness", 0);
@@ -6079,6 +6079,10 @@ void loop() {
     delay(otaBlackout ? 1 : 5);
     return;
   }
+
+  // One-shot "what this device is running now" notice, raised on the first boot
+  // after an update. A no-op on every other pass.
+  maybe_show_installed_popup();
 
   // loop_display() is the ONLY caller of lv_task_handler(): the OTA code used to
   // call it re-entrantly from inside a button callback, which is what made the
