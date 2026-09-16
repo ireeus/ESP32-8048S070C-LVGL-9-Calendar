@@ -465,6 +465,15 @@ String device_id;
 String last_ignored_notification = "";
 String current_notification_text = "";
 String backgroundFilename = ""; // New: Store the background image filename
+// "custom" or "weather", as reported by background.php. The device needs it to
+// know whether a change in the weather should pull a different background: in
+// custom mode the picture is the owner's own and never follows the sky.
+static String bg_mode = "";
+// True once a forecast has actually landed. The background request carries the
+// weather code, and before the first fetch there is no code to carry - asking for
+// "clear" then would pull a sunny picture on a rainy morning and make the device
+// download a second one the moment the weather arrived.
+static bool g_weather_known = false;
 // OTA variables
 String currentFirmwareVersion = "2.3.0"; // replaced by build_version in setup()
 String latestFirmwareVersion = "";
@@ -992,6 +1001,7 @@ if (httpCode == HTTP_CODE_OK) {
   current_weather.apparent_temperature = current["apparent_temperature"].as<float>();
   current_weather.precipitation = current["precipitation"].as<float>();
   current_weather.weather_code = current["weather_code"].as<int>();
+  g_weather_known = true;
   current_weather.wind_speed_10m = current["wind_speed_10m"].as<float>();
   current_weather.wind_direction_10m = current["wind_direction_10m"].as<int>();
   current_weather.surface_pressure = current["surface_pressure"].as<float>();  // NEW: Parse surface pressure
@@ -1102,6 +1112,20 @@ if (httpCode == HTTP_CODE_OK) {
     if (debug == 1) Serial.println("[APP] Air quality request failed: " + String(aq_httpCode));
   }
   http_aq.end();
+
+  // ---- keep a weather background in step with the sky ------------------------
+  // In weather mode the picture is chosen from the current conditions, so rain
+  // turning to clear needs a different file. Only the small JSON name lookup runs
+  // here; the 768KB picture is pulled down only when the name actually changed,
+  // which is what keeps a 15-minute weather refresh cheap. Custom mode is skipped
+  // entirely - that picture belongs to the owner, not to the weather.
+  if (bg_mode == "weather") {
+    const String bg_before = backgroundFilename;
+    fetchBackgroundFilename();
+    if (backgroundFilename != bg_before && !backgroundFilename.isEmpty()) {
+      fetchAndSetBackgroundImage();
+    }
+  }
 }
 
 void updateWeatherDisplay() {
@@ -6672,7 +6696,11 @@ void fetchBackgroundFilename() {
     return;
   }
   HTTPClient http;
-  String url = "https://crontech.uk/background.php?background_img=" + apiCode;
+  // The weather code lets the site pick the right default picture. Until the
+  // first forecast lands there is no code, so the neutral overcast one is asked
+  // for rather than a "clear" (0) that would be wrong half the time.
+  String url = "https://crontech.uk/background.php?background_img=" + apiCode +
+               "&wx=" + String(g_weather_known ? current_weather.weather_code : 3);
   http.begin(url);
   int httpCode = http.GET();
 
@@ -6684,25 +6712,38 @@ void fetchBackgroundFilename() {
     if (!error) {
       backgroundFilename = doc["filename"].as<String>();
       if (backgroundFilename == "null") backgroundFilename = "";
-      if (debug == 1) Serial.println("[APP] Fetched background filename: " + backgroundFilename);
+      // "custom" or "weather". Weather mode means this picture follows the sky, so
+      // fetchWeather() re-checks it after every forecast.
+      bg_mode = doc["mode"].as<String>();
+      if (bg_mode == "null") bg_mode = "";
+      Serial.println("[BG] " + bg_mode + " background: " +
+                     (backgroundFilename.isEmpty() ? String("(none)") : backgroundFilename));
     } else {
       if (debug == 1) Serial.println("[APP] JSON parsing failed: " + String(error.c_str()));
     }
   } else {
-    if (debug == 1) Serial.println("[APP] HTTP request failed: " + String(httpCode));
+    // Unconditional: a name lookup that stops working leaves the device on a stale
+    // picture forever, which is exactly the sort of thing that was invisible before.
+    Serial.println("[BG] Background name request failed: HTTP " + String(httpCode));
   }
   http.end();
 }
 // New function to fetch and set background image if filename exists
 // ---- Background image: flash cache -----------------------------------------
-// The server serves a 1,152,000-byte RGB888 blob (800*480*3) over HTTPS, and it
-// only ever changes when backgroundFilename does. The last one is therefore kept
-// in the LittleFS partition - that is the "spiffs" partition from default_8MB.csv
-// at 0x670000, 1.5MB, which nothing else in this project uses. Later boots (and
-// the hourly refresh) read it from flash instead of re-downloading it, skipping a
-// TLS handshake AND a 1.1MB transfer every time.
+// The server serves an 800x480 blob of raw RGB565, little-endian, exactly 768,000
+// bytes - the same format the site's upload page writes, so neither end converts
+// anything at runtime and LVGL can be handed a pointer straight at it. It only
+// changes when backgroundFilename does, so the last one is kept in the LittleFS
+// partition - the "spiffs" partition from default_8MB.csv at 0x670000, 1.5MB,
+// which nothing else in this project uses. Later boots (and the hourly refresh)
+// read it from flash instead of re-downloading it, skipping a TLS handshake AND a
+// 768KB transfer every time.
+//
+// The cache holds ONE picture, which is 49% of that partition. In weather mode a
+// change of conditions therefore re-downloads: a few seconds, and only when the
+// sky actually changes.
 #define BG_CACHE_PATH "/bg.rgb"
-#define BG_EXPECTED_SIZE (800 * 480 * 3)
+#define BG_EXPECTED_SIZE (800 * 480 * 2)
 static bool bgFsReady = false;
 // lv_img_set_src() keeps the pointer it is handed, so this descriptor must
 // outlive the call. It used to be a local, which left LVGL reading a stale stack
@@ -6732,40 +6773,22 @@ static void bgApply(uint8_t *buf, size_t len) {
   memset(&bg_dsc, 0, sizeof(bg_dsc));
   bg_dsc.header.w = 800;
   bg_dsc.header.h = 480;
-  // The file is 800x480x3 raw RGB888, and LVGL was handed it as RGB888. That
-  // meant converting three bytes to two for every pixel, on every blit - and the
-  // background is the hottest blit in the app, because LVGL repaints everything
-  // underneath any widget that redraws, so a clock tick in the taskbar re-blits
-  // part of it too. Converting once here (384k pixels, a few ms) halves the
-  // source traffic and removes the per-pixel conversion from every later frame.
+  // The file is already 800x480 RGB565 little-endian, which is exactly what LVGL
+  // wants as a variable image source, so the buffer is handed over unchanged.
   //
-  // LVGL's RGB565 is little-endian, and writing a uint16 natively on this
-  // little-endian chip gives exactly that byte order. The RGB888 buffer is freed
-  // afterwards, so this also drops the retained background from 1.15MB to 768KB.
-  const size_t bg_pixels = (size_t)800 * 480;
-  uint16_t *packed = (uint16_t *)ps_malloc(bg_pixels * sizeof(uint16_t));
-  if (packed && len >= bg_pixels * 3) {
-    for (size_t i = 0; i < bg_pixels; i++) {
-      const uint8_t r = buf[i * 3 + 0];
-      const uint8_t g = buf[i * 3 + 1];
-      const uint8_t b = buf[i * 3 + 2];
-      packed[i] = (uint16_t)(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
-    }
-    free(buf);
-    bg_buffer = (uint8_t *)packed;
-    bg_dsc.header.cf = LV_COLOR_FORMAT_RGB565;
-    bg_dsc.data_size = bg_pixels * sizeof(uint16_t);
-    bg_dsc.data = (const uint8_t *)packed;
-    if (debug == 1) Serial.println("[APP] Background converted to RGB565");
-  } else {
-    // Out of PSRAM, or an unexpected length: keep the old, slower path rather
-    // than lose the background entirely.
-    if (packed) free(packed);
-    bg_dsc.header.cf = LV_COLOR_FORMAT_RGB888;
-    bg_dsc.data_size = len;
-    bg_dsc.data = buf;
-    if (debug == 1) Serial.println("[APP] RGB565 conversion unavailable, using RGB888");
-  }
+  // The RGB888 -> RGB565 conversion that used to sit here is gone. It allocated a
+  // SECOND 768KB buffer while the first was still alive, so a background change
+  // peaked at 1.8MB of PSRAM and then freed the original - and it duplicated work
+  // the server can do once instead of the panel doing it on every change. LVGL
+  // does not copy the pixels either (lv_bin_decoder.c wraps a variable source and
+  // sets use_directly), so nothing is allocated per blit.
+  bg_dsc.header.cf = LV_COLOR_FORMAT_RGB565;
+  bg_dsc.data_size = len;
+  bg_dsc.data = (const uint8_t *)buf;
+  // Printed unconditionally, not only with debug on: this is the one line that
+  // says the picture is actually up, and how much PSRAM was left when it landed.
+  Serial.printf("[BG] Applied 800x480 RGB565, %u bytes, free PSRAM %uKB\n",
+                (unsigned)len, (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
   bg_img = lv_img_create(lv_scr_act());
   lv_img_set_src(bg_img, &bg_dsc);
   lv_obj_set_size(bg_img, LV_PCT(100), LV_PCT(100));
@@ -6841,14 +6864,24 @@ void fetchAndSetBackgroundImage() {
   }
   int contentLength = http.getSize();
   if (contentLength != BG_EXPECTED_SIZE) {
-    if (debug == 1) Serial.println("[APP] Invalid background size: " + String(contentLength) + " bytes (expected " + String(BG_EXPECTED_SIZE) + ")");
+    // Unconditional: a size mismatch means the server is serving something this
+    // firmware cannot read (a leftover file from the old RGB888 format, say), and
+    // silently keeping the previous picture made that look like "nothing happened".
+    Serial.printf("[BG] Invalid background size: %d bytes (expected %d) - check the site is serving 800x480 RGB565\n",
+                  contentLength, (int)BG_EXPECTED_SIZE);
     http.end();
     return;
   }
-  if (debug == 1) Serial.println("[APP] Background size validated: " + String(contentLength) + " bytes");
+  // The free-PSRAM figure is printed BEFORE the buffer is asked for, so a failed
+  // allocation is a number to read rather than a guess.
+  Serial.printf("[BG] Downloading %d bytes; free PSRAM %uKB, free internal %uKB\n",
+                contentLength,
+                (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024),
+                (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) / 1024));
   uint8_t* imageBuffer = (uint8_t*)ps_malloc(contentLength);
   if (!imageBuffer) {
-    if (debug == 1) Serial.println("[APP] Failed to allocate PSRAM for background image (" + String(contentLength) + " bytes)");
+    Serial.printf("[BG] FAILED to allocate %d bytes of PSRAM for the background (free: %uKB)\n",
+                  contentLength, (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
     http.end();
     return;
   }
@@ -6868,7 +6901,7 @@ void fetchAndSetBackgroundImage() {
     }
   }
   if (totalRead != contentLength) {
-    if (debug == 1) Serial.println("[APP] Incomplete background image download: " + String(totalRead) + "/" + String(contentLength) + " bytes");
+    Serial.printf("[BG] Incomplete background download: %u/%d bytes\n", (unsigned)totalRead, contentLength);
     free(imageBuffer);
     http.end();
     return;

@@ -1,0 +1,132 @@
+<?php
+/**
+ * bg_common.php - shared helpers for the device background picture.
+ *
+ * The device blits one fixed thing: an 800x480 image in raw RGB565,
+ * little-endian, exactly 768000 bytes, with no header. LVGL is handed a pointer
+ * straight at it, and the ESP32-S3 is little-endian, so the file on the server is
+ * byte-for-byte what the panel shows. Nothing on either side has to convert
+ * anything at runtime.
+ *
+ * Both the upload page and the device-facing background.php include this, so the
+ * size and the weather mapping live in exactly one place.
+ */
+
+// A library, not a page. Requesting it directly (rather than including it) does
+// nothing useful, so say so instead of answering 200 with an empty body.
+if (isset($_SERVER['SCRIPT_FILENAME']) && realpath($_SERVER['SCRIPT_FILENAME']) === __FILE__) {
+    http_response_code(403);
+    exit('This file is included by other pages; it is not meant to be opened directly.');
+}
+
+define('BG_W', 800);
+define('BG_H', 480);
+define('BG_BYTES', BG_W * BG_H * 2);          // 768000
+define('BG_WEATHER_DIR', 'uploads/weather');  // holds <group>.bin and <group>.png
+
+/**
+ * WMO weather code -> background group.
+ *
+ * The device sends its current code; the mapping lives here rather than in the
+ * firmware so the artwork can be re-grouped without a reflash. The codes are the
+ * ones Open-Meteo returns, which is also what the device already stores.
+ */
+function bg_weather_group($code): string
+{
+    $code = (int) $code;
+    if ($code === 0)                          return 'clear';   // clear sky
+    if ($code === 1 || $code === 2)           return 'partly';  // mainly clear, partly cloudy
+    if ($code === 3)                          return 'cloudy';  // overcast
+    if ($code === 45 || $code === 48)         return 'fog';
+    if ($code >= 51 && $code <= 67)           return 'rain';    // drizzle, rain, freezing
+    if ($code >= 71 && $code <= 77)           return 'snow';
+    if ($code >= 80 && $code <= 82)           return 'rain';    // rain showers
+    if ($code === 85 || $code === 86)         return 'snow';    // snow showers
+    if ($code >= 95 && $code <= 99)           return 'storm';   // thunderstorm, with hail
+    return 'unknown';
+}
+
+/**
+ * The weather file as the DEVICE should ask for it: relative to uploads/, which
+ * is the base the firmware prepends. Leading "uploads/" here would be doubled on
+ * the device into uploads/uploads/...
+ */
+function bg_weather_filename(string $group): string
+{
+    return 'weather/' . $group . '.bin';
+}
+
+/** Groups that make-weather-backgrounds.php generates, in gallery order. */
+function bg_weather_groups(): array
+{
+    return ['clear', 'partly', 'cloudy', 'fog', 'rain', 'snow', 'storm', 'unknown'];
+}
+
+/** Human label for a group, for the preview gallery. */
+function bg_weather_label(string $group): string
+{
+    $labels = [
+        'clear' => 'Clear', 'partly' => 'Partly cloudy', 'cloudy' => 'Overcast',
+        'fog' => 'Fog', 'rain' => 'Rain', 'snow' => 'Snow',
+        'storm' => 'Thunderstorm', 'unknown' => 'Unknown',
+    ];
+    return $labels[$group] ?? ucfirst($group);
+}
+
+/**
+ * A GD image as the device's exact byte stream: resampled to 800x480, then
+ * packed as RGB565 little-endian. Resampling here rather than trusting the
+ * caller means a blob of the wrong length can never be written.
+ *
+ * @return string BG_BYTES bytes
+ */
+function bg_rgb565_bytes($img, int $srcW, int $srcH): string
+{
+    $canvas = imagecreatetruecolor(BG_W, BG_H);
+    // A PNG with transparency would otherwise composite onto black; the panel
+    // has no alpha, so flatten onto black deliberately rather than by accident.
+    imagealphablending($canvas, false);
+    imagefill($canvas, 0, 0, imagecolorallocate($canvas, 0, 0, 0));
+    imagecopyresampled($canvas, $img, 0, 0, 0, 0, BG_W, BG_H, $srcW, $srcH);
+
+    $out = '';
+    for ($y = 0; $y < BG_H; $y++) {
+        $row = '';
+        for ($x = 0; $x < BG_W; $x++) {
+            $c = imagecolorat($canvas, $x, $y);
+            $v = ((($c >> 16) & 0xF8) << 8) | ((($c >> 8) & 0xFC) << 3) | (($c & 0xFF) >> 3);
+            $row .= chr($v & 0xFF) . chr(($v >> 8) & 0xFF);   // low byte first
+        }
+        $out .= $row;
+    }
+    imagedestroy($canvas);
+    return $out;
+}
+
+/**
+ * Write <base>.bin (the device blob) and <base>.png (the web preview).
+ * Returns false if either write fails, so callers can report it honestly rather
+ * than leaving the database pointing at a file that is not there.
+ */
+function bg_write_pair(string $base, $img, int $srcW, int $srcH): bool
+{
+    $bin = bg_rgb565_bytes($img, $srcW, $srcH);
+    if (strlen($bin) !== BG_BYTES) {
+        return false;
+    }
+    if (file_put_contents($base . '.bin', $bin) === false) {
+        return false;
+    }
+    $preview = imagecreatetruecolor(BG_W, BG_H);
+    imagecopyresampled($preview, $img, 0, 0, 0, 0, BG_W, BG_H, $srcW, $srcH);
+    $ok = imagepng($preview, $base . '.png');
+    imagedestroy($preview);
+    return (bool) $ok;
+}
+
+/** True when the group's generated default exists on disk. Anchored on __DIR__
+ *  so it holds even if a caller changes the working directory. */
+function bg_weather_file_exists(string $group): bool
+{
+    return is_file(__DIR__ . '/' . BG_WEATHER_DIR . '/' . $group . '.bin');
+}

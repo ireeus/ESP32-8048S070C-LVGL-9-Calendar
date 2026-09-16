@@ -1289,6 +1289,9 @@ if (!array_key_exists($active_tab, $TABS)) { $active_tab = 'themes'; }
                                 </p>
                             <?php endif; ?>
                             <p class="autosave-hint">Saves automatically.</p>
+                            <p class="autosave-hint">
+                                Background: <a href="image_converter.php" style="color:var(--primary);font-weight:600;">weather pictures, or upload your own &rarr;</a>
+                            </p>
                         </form>
                     </div>
 
