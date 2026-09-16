@@ -18,8 +18,8 @@ extern const lv_font_t lv_font_montserrat_14_bold;
 // Build version
 // Must be HIGHER than whatever update/version.json currently advertises, or the
 // device will keep offering (and auto-installing) a build that is not actually
-// newer. The site advertised 2.3.3 when this was bumped to 2.3.4.
-const String build_version = "2.3.4";
+// newer. The site advertised 2.3.4 when this was bumped to 2.3.5.
+const String build_version = "2.3.5";
 int debug =0; // Change to 1 to enable serial prints
 // Firmware check interval variable
 // Was 100000UL, which is 100 SECONDS, not the 5 minutes the comment claimed - so
