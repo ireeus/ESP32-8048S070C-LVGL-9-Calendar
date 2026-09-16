@@ -19,9 +19,10 @@ extern const lv_font_t lv_font_montserrat_14_bold;
 // Must be HIGHER than whatever update/version.json currently advertises, or the
 // device will keep offering (and auto-installing) a build that is not actually
 // newer. The site advertised 2.3.1 when this was bumped to 2.3.2, and still did
-// when this was bumped to 2.3.3 (one handshake at a time) and to 2.3.4 (internal-RAM
-// watchdog, and LVGL no longer taking 75KB of internal SRAM unless there is room).
-const String build_version = "2.3.4";
+// when this was bumped to 2.3.3 (one handshake at a time), 2.3.4 (internal-RAM
+// watchdog, LVGL no longer taking 75KB of internal SRAM unless there is room) and
+// 2.3.5 (the background picture is double-buffered, so a change allocates nothing).
+const String build_version = "2.3.5";
 int debug =0; // Change to 1 to enable serial prints
 // Firmware check interval variable
 // Was 100000UL, which is 100 SECONDS, not the 5 minutes the comment claimed - so
@@ -510,7 +511,7 @@ static String bg_mode = "";
 // download a second one the moment the weather arrived.
 static bool g_weather_known = false;
 // OTA variables
-String currentFirmwareVersion = "2.3.4"; // replaced by build_version in setup()
+String currentFirmwareVersion = "2.3.5"; // replaced by build_version in setup()
 String latestFirmwareVersion = "";
 String firmwareUrl = "";
 WiFiClientSecure client;
@@ -6992,7 +6993,8 @@ void fetchBackgroundFilename() {
 // that pays three times over: a quarter of the download, a quarter of the flash
 // erase+program job that has to happen behind the blackout, and room for about
 // fifty pictures in the cache instead of thirteen. The price is a softer picture,
-// which behind a full-screen UI is hard to notice; bgUpscale() stretches it back
+// which behind a full-screen UI is hard to notice; bgUpscaleInto() stretches it
+// back
 // to 800x480 once per change so LVGL still blits a full-size image and the render
 // path is exactly what it was.
 //
@@ -7020,9 +7022,19 @@ static bool bgFsReady = false;
 // outlive the call. It used to be a local, which left LVGL reading a stale stack
 // frame as soon as the function returned.
 static lv_image_dsc_t bg_dsc;
-// The buffer LVGL is currently drawing from, so it can be released when a new
-// background replaces it (the old code leaked one 1.1MB buffer per change).
-static uint8_t *bg_buffer = nullptr;
+// The two full-size pictures LVGL is handed, allocated once and then written into
+// alternately. This used to be a single buffer that was ps_malloc()'d and free()'d
+// on every change - 750KB in and 750KB out, each operation walking the PSRAM heap
+// with the global heap spinlock held. That lock is shared with core 0, where the
+// WiFi task lives, and holding it long enough starves core 0's idle task: the
+// watchdog then panics inside ppTask with a PC in spinlock_acquire, which is
+// exactly the "Core 0 ... esf_buf_recycle ... multi_heap_free" dump. Two buffers
+// held for the life of the program mean a picture change allocates nothing at all.
+// The cost is 1.5MB of PSRAM, of which 6MB is free. bg_full_now is -1 until the
+// first picture, so both are NULL at boot.
+static uint8_t *bg_full[2] = { nullptr, nullptr };
+static int bg_full_now = -1;
+#define BG_FULL_BYTES ((size_t)BG_PANEL_W * BG_PANEL_H * 2)
 
 // How much room there is, in pictures. Printed on every boot: "why is it fetching
 // that one again" is otherwise a question with no visible answer.
@@ -7149,9 +7161,10 @@ static void bgWriteScreenUp() {
 // change rather than per frame: handing LVGL the half-size image and letting it
 // scale on every blit would put a per-pixel transform in the hottest draw path in
 // the app, because the background is repainted underneath anything that redraws.
-static uint16_t *bgUpscale(const uint16_t *src) {
-  uint16_t *dst = (uint16_t *)ps_malloc((size_t)BG_PANEL_W * BG_PANEL_H * 2);
-  if (!dst) return nullptr;
+//
+// Writes INTO a caller-supplied buffer (see bg_full[]) so that a picture change
+// performs no allocation: see the note on bg_full for why that matters.
+static void bgUpscaleInto(uint16_t *dst, const uint16_t *src) {
   const float stepX = (float)BG_STORE_W / (float)BG_PANEL_W;
   const float stepY = (float)BG_STORE_H / (float)BG_PANEL_H;
   for (int y = 0; y < BG_PANEL_H; y++) {
@@ -7185,7 +7198,6 @@ static uint16_t *bgUpscale(const uint16_t *src) {
       out[x] = (uint16_t)(((int)(r + 0.5f) << 11) | ((int)(g + 0.5f) << 5) | (int)(b + 0.5f));
     }
   }
-  return dst;
 }
 static void bgApply(uint8_t *buf, size_t len) {
   if (len != (size_t)BG_EXPECTED_SIZE) {
@@ -7194,23 +7206,26 @@ static void bgApply(uint8_t *buf, size_t len) {
     free(buf);
     return;
   }
-  // Stretch first: if this fails the current picture is left alone rather than
-  // tearing down something that is working.
-  uint16_t *full = bgUpscale((const uint16_t *)buf);
-  if (!full) {
-    Serial.println("[BG] No PSRAM for the full-size background - keeping the current one");
-    free(buf);
-    return;
+  // Stretch into whichever full-size buffer is NOT the one on screen. If this
+  // fails the picture already showing is left alone rather than tearing down
+  // something that is working.
+  const int next = (bg_full_now == 0) ? 1 : 0;
+  if (!bg_full[next]) {
+    bg_full[next] = (uint8_t *)ps_malloc(BG_FULL_BYTES);
+    if (!bg_full[next]) {
+      Serial.printf("[BG] No PSRAM for the full-size background (%uKB free) - keeping the current one\n",
+                    (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
+      free(buf);
+      return;
+    }
   }
+  bgUpscaleInto((uint16_t *)bg_full[next], (const uint16_t *)buf);
   if (bg_img) {
     lv_obj_del(bg_img);
     bg_img = nullptr;
   }
-  // Safe to release the old buffer only now: the object that referenced it is
-  // gone and LVGL is not mid-render here (this runs from loop()).
-  if (bg_buffer) free(bg_buffer);
   free(buf);                    // the half-size copy has done its job
-  bg_buffer = (uint8_t *)full;
+  bg_full_now = next;
   memset(&bg_dsc, 0, sizeof(bg_dsc));
   bg_dsc.header.w = BG_PANEL_W;
   bg_dsc.header.h = BG_PANEL_H;
@@ -7218,8 +7233,8 @@ static void bgApply(uint8_t *buf, size_t len) {
   // source, so the buffer is handed over unchanged and nothing is allocated per
   // blit (lv_bin_decoder.c wraps a variable source and sets use_directly).
   bg_dsc.header.cf = LV_COLOR_FORMAT_RGB565;
-  bg_dsc.data_size = (size_t)BG_PANEL_W * BG_PANEL_H * 2;
-  bg_dsc.data = (const uint8_t *)full;
+  bg_dsc.data_size = BG_FULL_BYTES;
+  bg_dsc.data = (const uint8_t *)bg_full[next];
   // Printed unconditionally, not only with debug on: this is the one line that
   // says the picture is actually up.
   Serial.printf("[BG] Applied %dx%d RGB565 from a %dx%d source, free PSRAM %uKB\n",
