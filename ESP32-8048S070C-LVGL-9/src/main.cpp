@@ -18,8 +18,9 @@ extern const lv_font_t lv_font_montserrat_14_bold;
 // Build version
 // Must be HIGHER than whatever update/version.json currently advertises, or the
 // device will keep offering (and auto-installing) a build that is not actually
-// newer. The site advertised 2.3.1 when this was bumped to 2.3.2.
-const String build_version = "2.3.2";
+// newer. The site advertised 2.3.1 when this was bumped to 2.3.2, and still did
+// when this was bumped to 2.3.3 (the one-handshake-at-a-time boot/poll changes).
+const String build_version = "2.3.3";
 int debug =0; // Change to 1 to enable serial prints
 // Firmware check interval variable
 // Was 100000UL, which is 100 SECONDS, not the 5 minutes the comment claimed - so
@@ -109,6 +110,7 @@ static int  opa_active_step();                  // nearest step to the current v
 static void apply_panel_opacity();              // push opacity onto the surfaces
 static void bgFetchService();                   // one slice of a picture transfer
 static void bgFetchAbort(const char *why);      // drop a picture transfer in flight
+static bool bgTransferInFlight();               // is a picture transfer holding TLS?
 static void updateAutoBrightness(bool force);   // recompute the level from the sun
 static void apply_ui_darkness_ex(int value, bool persist);
 // Send a local theme choice to the site. `fromSync` is true when a manual Sync
@@ -506,7 +508,7 @@ static String bg_mode = "";
 // download a second one the moment the weather arrived.
 static bool g_weather_known = false;
 // OTA variables
-String currentFirmwareVersion = "2.3.2"; // replaced by build_version in setup()
+String currentFirmwareVersion = "2.3.3"; // replaced by build_version in setup()
 String latestFirmwareVersion = "";
 String firmwareUrl = "";
 WiFiClientSecure client;
@@ -5879,32 +5881,51 @@ static unsigned long lastBootFetchStep = 0;
 // between two blocking requests.
 #define BOOT_FETCH_GAP_MS 50
 
+// One boot-queue step. Each one is a single blocking request; loop() runs one per
+// pass so LVGL draws in between.
+//
+// Every step also stamps the periodic timer that would otherwise run the SAME
+// request again moments later. Without that, the boot queue finished at ~15s and
+// then the periodic block fired theme, events, notifications and the rest a second
+// time back to back - one long burst of TLS handshakes, which is the pressure that
+// makes the IDF SHA driver fail to find DMA-capable internal RAM ("esp-sha: Failed
+// to allocate buf memory") and costs a whole polling interval. Now each subject is
+// refreshed once and not looked at again until its own interval is up.
 static void runBootFetchStep(int step) {
   switch (step) {
     case BOOT_STEP_THEME:
       fetchThemeConfig();
+      lastThemeCheck = millis();
       break;
     case BOOT_STEP_PARCELBOX:
       fetchParcelBoxCredentials();
+      lastCredentialsCheck = millis();
       break;
     case BOOT_STEP_WEATHER_LOCATION:
       fetchWeatherLocation();
+      lastWeatherLocationCheck = millis();
       break;
     case BOOT_STEP_EVENTS:
       fetchEvents();
       updateEventDisplay(calendar);
+      lastRefreshTime = millis();
       break;
     case BOOT_STEP_WEATHER:
       fetchWeather();
       updateWeatherDisplay();
+      lastWeatherUpdate = millis();
       break;
     case BOOT_STEP_FIRMWARE:
       checkFirmwareUpdate();
       fetchUpdatePolicy();
       updateFirmwareButton();
+      lastFirmwareCheck = millis();
       break;
     case BOOT_STEP_BACKGROUND_NAME:
       fetchBackgroundFilename();
+      // The step below downloads the picture straight away, so this is the moment
+      // the hourly clock starts rather than the moment its step first ran.
+      lastBackgroundUpdate = millis();
       break;
     case BOOT_STEP_BACKGROUND_IMAGE:
       fetchAndSetBackgroundImage();
@@ -5922,6 +5943,10 @@ static void runBootFetchStep(int step) {
 static void serviceBootFetchQueue() {
   if (bootFetchStep >= BOOT_STEP_COUNT) return;
   if (is_ota_updating) return;
+  // A picture transfer owns one TLS session for as long as it runs (see
+  // bgTransferInFlight). Waiting for it here keeps the boot sequence to one
+  // handshake at a time instead of stacking the next step on top of it.
+  if (bgTransferInFlight()) return;
   if (millis() - lastBootFetchStep < BOOT_FETCH_GAP_MS) return;
   // Never start a request that blocks for a second or more while a finger is
   // down: the tap would be swallowed and the screen would look dead. Wait for
@@ -6133,26 +6158,32 @@ void loop() {
   // Post-UI fetch queue: one blocking request per iteration, with LVGL drawing
   // in between, instead of the whole sequence in one go.
   { StallTimerSlow st("boot queue");  serviceBootFetchQueue(); }
+  // One TLS session at a time. A picture transfer holds its connection open across
+  // loop passes; starting a handshake for anything else on top of it means two sets
+  // of mbedTLS buffers in internal RAM at once, which is what makes the SHA driver
+  // fail to allocate and loses the request for a whole polling interval. Read after
+  // the boot queue, because that is what may just have started a transfer.
+  const bool netBusy = bgTransferInFlight();
   // A theme picked on the device, on its way to the site. Not done inside the tap
   // callback because the request blocks for about a second.
-  { StallTimerSlow st("theme push");  pushThemeToServer(); }
+  if (!netBusy) { StallTimerSlow st("theme push");  pushThemeToServer(); }
   // A manual Sync from the settings popup: push the theme, then pull theme, parcel
   // box and location back. One request per pass, for the same reason.
-  { StallTimerSlow st("sync queue");  serviceSyncQueue(); }
+  if (!netBusy) { StallTimerSlow st("sync queue");  serviceSyncQueue(); }
   // WiFi wizard: finishes the async scan and the in-progress connection attempt.
   serviceWifiSetup();
 
   unsigned long currentTime = millis();
-  if (currentTime - lastRefreshTime >= refreshInterval && calendar && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
+  if (!netBusy && currentTime - lastRefreshTime >= refreshInterval && calendar && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
     { StallTimer st("events fetch");  fetchEvents(); }
     { StallTimer st("events redraw"); updateEventDisplay(calendar); updateMonthLabel(calendar); }
     lastRefreshTime = currentTime;
   }
-  if (currentTime - lastThemeCheck >= themeUpdateInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
+  if (!netBusy && currentTime - lastThemeCheck >= themeUpdateInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
     { StallTimer st("theme fetch"); fetchThemeConfig(); }
     lastThemeCheck = currentTime;
   }
-  if (currentTime - lastFirmwareCheck >= firmwareCheckInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
+  if (!netBusy && currentTime - lastFirmwareCheck >= firmwareCheckInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
     { StallTimer st("firmware check"); checkFirmwareUpdate(); fetchUpdatePolicy(); updateFirmwareButton(); maybeAutoUpdate(); }
     lastFirmwareCheck = currentTime;
   }
@@ -6176,7 +6207,7 @@ void loop() {
     lastAutoBrightnessCheck = currentTime;
     updateAutoBrightness(false);
   }
-  if (currentTime - lastNotificationCheck >= notificationInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
+  if (!netBusy && currentTime - lastNotificationCheck >= notificationInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
     { StallTimer st("notify fetch"); fetchNotifications(); }
     lastNotificationCheck = currentTime;
   }
@@ -6186,11 +6217,11 @@ void loop() {
     }
     lastWifiUpdate = currentTime;
   }
-  if (currentTime - lastCredentialsCheck >= credentialsInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
+  if (!netBusy && currentTime - lastCredentialsCheck >= credentialsInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
     { StallTimer st("parcel creds"); fetchParcelBoxCredentials(); }
     lastCredentialsCheck = currentTime;
   }
-  if (currentTime - lastWeatherLocationCheck >= weatherLocationInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
+  if (!netBusy && currentTime - lastWeatherLocationCheck >= weatherLocationInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
     { StallTimer st("location fetch"); fetchWeatherLocation(); }
     lastWeatherLocationCheck = currentTime;
   }
@@ -6221,19 +6252,19 @@ void loop() {
     }
     lastDateTimeUpdate = currentTime;
   }
-  if (currentTime - lastWeatherUpdate >= weatherUpdateInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
+  if (!netBusy && currentTime - lastWeatherUpdate >= weatherUpdateInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
     { StallTimer st("weather fetch");  fetchWeather(); }
     { StallTimer st("weather redraw"); updateWeatherDisplay(); }
     lastWeatherUpdate = currentTime;
   }
-  if (currentTime - lastBackgroundUpdate >= backgroundUpdateInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
+  if (!netBusy && currentTime - lastBackgroundUpdate >= backgroundUpdateInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
     { StallTimer st("background fetch"); fetchBackgroundFilename(); }
     // Named for what it now is: this only opens the connection. The transfer itself
     // is carried on by bgFetchService() across later loop() passes.
     { StallTimer st("background fetch start"); fetchAndSetBackgroundImage(); }
     lastBackgroundUpdate = currentTime;
   }
-  if (currentTime - lastHolidayUpdate >= holidayUpdateInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
+  if (!netBusy && currentTime - lastHolidayUpdate >= holidayUpdateInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
     { StallTimer st("holidays fetch");  fetchBankHolidays(); }
     { StallTimer st("holidays redraw"); updateHolidayLabel(); }
     lastHolidayUpdate = currentTime;
@@ -6970,6 +7001,21 @@ static uint8_t *bg_buffer = nullptr;
 
 // How much room there is, in pictures. Printed on every boot: "why is it fetching
 // that one again" is otherwise a question with no visible answer.
+// Where the memory that keeps a TLS handshake alive actually is. Every large
+// buffer this firmware owns is deliberately in PSRAM, so the number that decides
+// whether a connection can be made is the INTERNAL heap, and in particular the
+// largest free block of DMA-capable internal RAM: mbedTLS allocates there, and the
+// IDF SHA driver needs a small DMA buffer of its own, which is the allocation that
+// fails as "esp-sha: Failed to allocate buf memory" when internal RAM is tight.
+// Printed as internal KB (largest DMA block KB) / PSRAM KB.
+static void bgHeapReport(const char *when) {
+  Serial.printf("[MEM] %-22s internal %uKB (largest DMA %uKB), PSRAM %uKB free\n",
+                when,
+                (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
+                (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_DMA) / 1024),
+                (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
+}
+
 static void bgCacheReport() {
   const size_t total = LittleFS.totalBytes();
   const size_t used  = LittleFS.usedBytes();
@@ -6980,6 +7026,7 @@ static void bgCacheReport() {
                 (unsigned)(total / 1024), (unsigned)(freeb / 1024), fits,
                 (unsigned)(BG_EXPECTED_SIZE / 1024),
                 (unsigned)(ESP.getFlashChipSize() / (1024 * 1024)));
+  bgHeapReport("at boot");
 }
 static bool bgCacheMount() {
   if (bgFsReady) return true;
@@ -7012,7 +7059,12 @@ static bool bgCacheMount() {
 // the TLS handshake in a single call that cannot be split. That is a second or so,
 // once per picture change, rather than the ten the whole transfer used to take.
 #define BG_FETCH_SLICE      8192          // bytes read per loop() pass
-#define BG_FETCH_TIMEOUT_MS 20000UL       // give up if the transfer stalls
+// Give up if the transfer stalls. Kept well below the 20s it first was: while a
+// picture is in flight every other network fetch is held off (see bgTransferInFlight
+// and the netBusy guard in loop()), so this timeout is also the longest the calendar,
+// the theme and the notifications can go unrefreshed. Data arrives continuously even
+// on a slow link, so a gap this long means the connection is dead.
+#define BG_FETCH_TIMEOUT_MS 8000UL
 enum BgFetchState { BG_FETCH_IDLE, BG_FETCH_RUNNING, BG_FETCH_STORE };
 static BgFetchState bgFetchState = BG_FETCH_IDLE;
 static HTTPClient    bgFetchHttp;         // kept alive across loop() passes
@@ -7306,6 +7358,7 @@ void fetchAndSetBackgroundImage() {
 
   const String url = "https://crontech.uk/uploads/" + backgroundFilename;
   Serial.println("[BG] Fetching " + backgroundFilename + " in the background");
+  bgHeapReport("before picture fetch");
   bgFetchHttp.begin(url);
   // The only blocking part left: DNS, TCP and the TLS handshake in one call. There
   // is no way to split it with this client, and it is a second rather than ten.
@@ -7346,6 +7399,16 @@ void fetchAndSetBackgroundImage() {
   bgFetchName = backgroundFilename;
   bgFetchState = BG_FETCH_RUNNING;   // the rest happens in bgFetchService()
 }
+// True while a picture transfer owns a TLS session. Its connection is held open
+// across many loop() passes, so anything else that opens one at the same time is a
+// second full set of mbedTLS buffers in internal RAM - the state in which the IDF
+// SHA driver fails ("esp-sha: Failed to allocate buf memory") and the handshake,
+// and with it the whole polling interval, is lost. Callers use this to keep to one
+// handshake at a time; a picture takes about a second, so nothing waits long.
+static bool bgTransferInFlight() {
+  return bgFetchState != BG_FETCH_IDLE;
+}
+
 // Carry the transfer on a slice at a time. Called from loop(), so LVGL runs between
 // passes and the UI stays live for the whole download.
 static void bgFetchService() {
@@ -7403,6 +7466,7 @@ static void bgFetchService() {
     bgWriteScreenUp();
     Serial.printf("[BG] %s ready: %u bytes, stored in %lums\n",
                   name.c_str(), (unsigned)total, millis() - storeStart);
+    bgHeapReport("after a picture");
     bgFetchTotal = 0;
     bgFetchGot = 0;
     bgFetchName = "";
