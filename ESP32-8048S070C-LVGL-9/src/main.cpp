@@ -7017,6 +7017,27 @@ static void bgProgressSet(int pct) {
   lv_refr_now(NULL);
 }
 
+// ---- hiding the cache write -------------------------------------------------
+// Putting a picture INTO the flash is the part that cannot be shown on screen.
+// 768KB means erasing and programming roughly 190 sectors, and on this board the
+// flash shares its bus with the RGB panel's DMA, so every one of those writes
+// starves the panel and the picture tears or drops sync. loop() is blocked for the
+// whole write as well, so LVGL cannot repaint over the damage - which is why it
+// looks like a crash rather than a pause.
+//
+// This is exactly the situation the OTA download is in and it gets the same
+// answer: take the screen down to one flat colour first, do the write, then bring
+// it back - by which time the new picture is in place and the full invalidate
+// redraws it. ota_backlight() is used because the backlight is the only part of
+// this panel that software can switch (see display.h).
+static void bgWriteScreenDown() {
+  ota_backlight(false);
+  gfx.fillScreen(0x0000);
+}
+static void bgWriteScreenUp() {
+  ota_backlight(true);
+  if (lv_scr_act()) lv_obj_invalidate(lv_scr_act());
+}
 static void bgApply(uint8_t *buf, size_t len) {
   if (bg_img) {
     lv_obj_del(bg_img);
@@ -7143,6 +7164,7 @@ static bool bgLoadFromCache() {
   }
   uint8_t *buf = (uint8_t *)ps_malloc(BG_EXPECTED_SIZE);
   if (!buf) { f.close(); return false; }
+  const unsigned long readStart = millis();
   const size_t got = f.read(buf, BG_EXPECTED_SIZE);
   f.close();
   if (got != (size_t)BG_EXPECTED_SIZE) {
@@ -7152,7 +7174,10 @@ static bool bgLoadFromCache() {
     return false;
   }
   bgCacheSetIndex(bgIndexAdd(bgCacheIndex(), backgroundFilename));
-  Serial.println("[BG] " + backgroundFilename + " from flash cache (no download)");
+  // Timed as well as logged: a read is far cheaper than a write (no erase), and
+  // this is the number that says whether it needs hiding too.
+  Serial.printf("[BG] %s from flash cache in %lums (no download)\n",
+                backgroundFilename.c_str(), millis() - readStart);
   bgApply(buf, BG_EXPECTED_SIZE);
   return true;
 }
@@ -7258,13 +7283,23 @@ void fetchAndSetBackgroundImage() {
   }
   if (debug == 1) Serial.println("[APP] Download complete: " + String(totalRead) + " bytes");
   bgProgressSet(100);
-  // Apply BEFORE caching. The flash write blocks for another second or two, and
-  // doing it first kept the screen frozen for that long after the download had
-  // already finished. A power cut mid-write now costs the cached copy rather than
-  // the picture: the size check simply re-downloads it on the next boot.
-  bgApply(imageBuffer, contentLength);
+  // The picture is in PSRAM. Getting it INTO the flash is the part that cannot be
+  // shown: 768KB means erasing and programming ~190 sectors, the ESP32-S3 shares
+  // the flash bus with the RGB panel's DMA so every one of those writes starves the
+  // panel, and loop() is blocked for the whole thing so LVGL cannot repaint over
+  // the damage. That is what made a weather change look like a crash.
+  //
+  // Same problem as the OTA download, same answer: take the screen to one flat
+  // colour, do the write, then bring it back with the new picture already in place.
   bgProgressHide();
+  bgWriteScreenDown();
+  const unsigned long cacheStart = millis();
   bgSaveToCache(imageBuffer, contentLength);
+  bgApply(imageBuffer, contentLength);
+  bgWriteScreenUp();
+  // Printed unconditionally: this is the number that explains the black gap, and
+  // whether it is worth attacking.
+  Serial.printf("[BG] Cache write took %lums\n", millis() - cacheStart);
   if (debug == 1) Serial.println("[APP] Background image set successfully via LVGL");
   http.end();
 }
