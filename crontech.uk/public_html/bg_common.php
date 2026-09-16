@@ -6,12 +6,13 @@
  * with no header. LVGL is handed a pointer straight at it, and the ESP32-S3 is
  * little-endian, so the file on the server is byte-for-byte what the panel shows.
  *
- * The file is STORED and SENT at half the panel resolution. A quarter of the bytes
- * means a quarter of the download, a quarter of the flash write on the device (the
- * slow part, which has to happen behind a blacked-out screen), and room for about
- * fifty cached pictures instead of thirteen. The firmware stretches it back to
- * 800x480 once on arrival, so nothing else changes. Keep BG_STORE_W/H in step with
- * the same constants in main.cpp.
+ * The file is STORED and SENT at a fraction of the panel resolution. A sixteenth of
+ * the bytes means a sixteenth of the download, a sixteenth of the flash write on the
+ * device (the slow part, which has to happen behind a blacked-out screen), and room
+ * for a few hundred cached pictures instead of thirteen. The firmware stretches it
+ * back to 800x480 once on arrival, so nothing else changes. Keep BG_STORE_W/H in step
+ * with the same constants in main.cpp: a mismatch means the device refuses every
+ * picture as the wrong length.
  *
  * Both the upload page and the device-facing background.php include this, so the
  * size and the weather mapping live in exactly one place.
@@ -26,9 +27,9 @@ if (isset($_SERVER['SCRIPT_FILENAME']) && realpath($_SERVER['SCRIPT_FILENAME']) 
 
 define('BG_W', 800);                          // the panel, and the preview size
 define('BG_H', 480);
-define('BG_STORE_W', 400);                    // what is downloaded and cached
-define('BG_STORE_H', 240);
-define('BG_BYTES', BG_STORE_W * BG_STORE_H * 2);  // 192000
+define('BG_STORE_W', 200);                    // what is downloaded and cached
+define('BG_STORE_H', 120);
+define('BG_BYTES', BG_STORE_W * BG_STORE_H * 2);  // 48000
 define('BG_WEATHER_DIR', 'uploads/weather');  // holds <group>.bin and <group>.png
 
 /**

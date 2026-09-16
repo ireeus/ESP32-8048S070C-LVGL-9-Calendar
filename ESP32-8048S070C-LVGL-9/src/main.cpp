@@ -6910,14 +6910,21 @@ void fetchBackgroundFilename() {
 // upload page writes, so neither end converts anything at runtime and LVGL can be
 // handed a pointer straight at it.
 //
-// It travels and is cached at HALF the panel resolution (400x240 = 192,000 bytes
-// instead of 800x480 = 768,000). Halving each axis is a quarter of the bytes, and
-// that pays three times over: a quarter of the download, a quarter of the flash
-// erase+program job that has to happen behind the blackout, and room for about
-// fifty pictures in the cache instead of thirteen. The price is a softer picture,
-// which behind a full-screen UI is hard to notice; bgUpscale() stretches it back
-// to 800x480 once per change so LVGL still blits a full-size image and the render
-// path is exactly what it was.
+// It travels and is cached at a FRACTION of the panel resolution (200x120 =
+// 48,000 bytes instead of 800x480 = 768,000 - one sixteenth). Shrinking each axis
+// by four is a sixteenth of the bytes, and that pays three times over: a sixteenth
+// of the download, a sixteenth of the flash erase+program job that has to happen
+// behind the blackout, and room for a few hundred pictures in the cache. The price
+// is a softer picture, which behind a full-screen UI - and under the panel opacity
+// above it - is hard to notice; bgUpscaleInto() stretches it back to 800x480 once
+// per change so LVGL still blits a full-size image and the render path is exactly
+// what it was. The ratio is a whole 4x so the bilinear pass lands on exact pixel
+// boundaries, which is why this size was chosen over a marginally larger one.
+//
+// Kept in step with BG_STORE_W/BG_STORE_H in the site's bg_common.php. Changing it
+// here alone would make every download the wrong length and the device would refuse
+// them all; the site re-encodes its stored .bin files from the full-size preview
+// PNGs, so deploying the matching pair is all that is needed.
 //
 // EVERY picture the device has seen is kept in the LittleFS partition, so going
 // back to one - a weather change, or the owner swapping backgrounds - is served
@@ -6933,11 +6940,11 @@ void fetchBackgroundFilename() {
 #define BG_CACHE_INDEX_KEY   "bg_mru"         // names, most recently used first
 #define BG_CACHE_RESERVE     (160 * 1024)     // kept free for the filesystem
 #define BG_CACHE_MAX         32               // index length cap
-#define BG_STORE_W 400                        // what is downloaded and cached
-#define BG_STORE_H 240
+#define BG_STORE_W 200                        // what is downloaded and cached
+#define BG_STORE_H 120
 #define BG_PANEL_W 800                        // what LVGL is handed
 #define BG_PANEL_H 480
-#define BG_EXPECTED_SIZE (BG_STORE_W * BG_STORE_H * 2)   // 192000
+#define BG_EXPECTED_SIZE (BG_STORE_W * BG_STORE_H * 2)   // 48000
 static bool bgFsReady = false;
 // lv_img_set_src() keeps the pointer it is handed, so this descriptor must
 // outlive the call. It used to be a local, which left LVGL reading a stale stack

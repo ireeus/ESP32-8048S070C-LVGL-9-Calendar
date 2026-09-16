@@ -3,7 +3,8 @@
  * image_converter.php - the device background page.
  *
  * Upload a picture, crop it to the panel's 5:3 shape, and it is stored as the
- * exact blob the ESP32 blits: 800x480 raw RGB565, little-endian, 768000 bytes
+ * exact blob the ESP32 blits: raw RGB565, little-endian, downscaled to
+ * BG_STORE_W x BG_STORE_H and stretched back up on the device
  * (see bg_common.php for why that format).
  *
  * Two sorts of background exist:
