@@ -357,7 +357,9 @@ static lv_obj_t *brightness_step_labels[UI_BRIGHTNESS_BUTTON_COUNT] =
 // panels. The website can set the same value, and this is where the device reads
 // it from at boot.
 #define UI_OPA_PRESET_COUNT 5
-static const int UI_OPA_STEPS[UI_OPA_PRESET_COUNT] = {100, 85, 70, 55, 40};
+// Ascending, left to right, to match the brightness row above it: most see-through
+// on the left, solid on the right.
+static const int UI_OPA_STEPS[UI_OPA_PRESET_COUNT] = {40, 55, 70, 85, 100};
 // Same lifetime rule as brightness_step_btns: these point into the settings popup.
 static lv_obj_t *opa_step_btns[UI_OPA_PRESET_COUNT] =
     {nullptr, nullptr, nullptr, nullptr, nullptr};
@@ -541,9 +543,14 @@ const unsigned long credentialsInterval = 1800000UL; // 30 minutes
 // Debounce for touch events
 static unsigned long lastEventTime = 0;
 const unsigned long debounceDelay = 200;
-// New: Timer for background image update (e.g., every hour)
+// How long between background polls. The site sets this: how often the owner's
+// own pictures rotate is chosen on the upload page and nowhere else, and the
+// device is told how long to wait (refresh_s in background.php). It is clamped on
+// arrival, so a missing or silly value cannot become a poll storm.
 static unsigned long lastBackgroundUpdate = 0;
-const unsigned long backgroundUpdateInterval = 3600000UL; // 1 hour
+#define BG_REFRESH_MIN_MS 60000UL      // 1 minute - the shortest rotation offered
+#define BG_REFRESH_MAX_MS 3600000UL    // 1 hour - and the longest wait the device uses
+static unsigned long backgroundUpdateInterval = BG_REFRESH_MAX_MS;
 static unsigned long lastWeatherLocationCheck = 0;
 // Remote theme (colours controlled from crontech.uk). Re-applied only when the
 // server's value actually changes, so a colour picked on the device is not
@@ -2859,16 +2866,8 @@ void show_settings_popup() {
     lv_obj_set_style_pad_row(right_col, 8, 0);
     lv_obj_set_flex_flow(right_col, LV_FLEX_FLOW_COLUMN);
 
-    // Left column, top to bottom: the firmware version, the QR box, the memory
-    // meters. The version is a SIBLING of the card rather than a child of it, so
-    // moving it above the code cannot make the box itself any taller.
-    lv_obj_t *version_settings_label = lv_label_create(left_col);
-    lv_label_set_text(version_settings_label, ("Firmware: " + currentFirmwareVersion).c_str());
-    lv_obj_set_style_text_font(version_settings_label, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(version_settings_label, lv_color_hex(0xBBBBBB), 0);
-    lv_obj_set_width(version_settings_label, LV_PCT(100));
-    lv_obj_set_style_text_align(version_settings_label, LV_TEXT_ALIGN_CENTER, 0);
-
+    // Left column: the QR box, then the memory meters. Nothing sits above the box -
+    // anything added there pushes the whole column down.
     lv_obj_t *qr_card = make_card(left_col, lv_color_hex(0x151515), lv_color_hex(0x151515));
     lv_obj_set_flex_align(qr_card, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     // Pinned to its content, explicitly: the box hugs the code and its caption and
@@ -2968,7 +2967,7 @@ void show_settings_popup() {
     //   button 0      = Auto (follows daylight)
     //   buttons 1..5  = 0, 25, 50, 75, 100 % brightness, darkest to brightest
     lv_obj_t *brightness_card = make_card(right_col, lv_color_hex(0x1e1e1e), lv_color_hex(0x1e1e1e));
-    make_card_title(brightness_card, "UI Brightness  (0 = dark, 100 = bright)");
+    make_card_title(brightness_card, "UI Brightness");
     lv_obj_t *step_row = make_panel(brightness_card);
     lv_obj_set_width(step_row, LV_PCT(100));
     lv_obj_set_height(step_row, LV_SIZE_CONTENT);
@@ -3003,7 +3002,7 @@ void show_settings_popup() {
     // a background picture; this is how much of it shows through. 100 keeps the
     // existing solid look.
     lv_obj_t *opa_card = make_card(right_col, lv_color_hex(0x1e1e1e), lv_color_hex(0x1e1e1e));
-    make_card_title(opa_card, "Panel Opacity  (100 = solid, lower = see-through)");
+    make_card_title(opa_card, "Panel Opacity");
     lv_obj_t *opa_row = make_panel(opa_card);
     lv_obj_set_width(opa_row, LV_PCT(100));
     lv_obj_set_height(opa_row, LV_SIZE_CONTENT);
@@ -3026,6 +3025,16 @@ void show_settings_popup() {
       opa_step_btns[i] = opa_btn;
     }
     opa_steps_highlight(opa_active_step());
+
+    // The firmware version sits at the bottom of the right column, under the
+    // opacity card. It used to live under the QR code, where putting it above the
+    // box pushed the whole left column down the popup.
+    lv_obj_t *version_settings_label = lv_label_create(right_col);
+    lv_label_set_text(version_settings_label, ("Firmware: " + currentFirmwareVersion).c_str());
+    lv_obj_set_style_text_font(version_settings_label, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(version_settings_label, lv_color_hex(0xBBBBBB), 0);
+    lv_obj_set_width(version_settings_label, LV_PCT(100));
+    lv_obj_set_style_text_align(version_settings_label, LV_TEXT_ALIGN_CENTER, 0);
 
 
     // ---- footer buttons ---------------------------------------------------
@@ -6890,6 +6899,22 @@ void fetchBackgroundFilename() {
       if (bg_mode == "null") bg_mode = "";
       Serial.println("[BG] " + bg_mode + " background: " +
                      (backgroundFilename.isEmpty() ? String("(none)") : backgroundFilename));
+      // How long until the next look. The rotation interval is set on the website
+      // (image_converter.php) rather than on the panel, so the device only has to
+      // obey what it is told here. Clamped both ways: too small would mean a TLS
+      // request every few seconds, too large - or a value missing because the site
+      // is older than this firmware - would leave a changed picture unseen.
+      const long refreshS = doc["refresh_s"] | 0L;
+      unsigned long want = BG_REFRESH_MAX_MS;
+      if (refreshS > 0) {
+        want = (unsigned long)refreshS * 1000UL;
+        if (want < BG_REFRESH_MIN_MS) want = BG_REFRESH_MIN_MS;
+        if (want > BG_REFRESH_MAX_MS) want = BG_REFRESH_MAX_MS;
+      }
+      if (want != backgroundUpdateInterval) {
+        backgroundUpdateInterval = want;
+        Serial.printf("[BG] Next background check in %lus (server)\n", backgroundUpdateInterval / 1000UL);
+      }
     } else {
       if (debug == 1) Serial.println("[APP] JSON parsing failed: " + String(error.c_str()));
     }

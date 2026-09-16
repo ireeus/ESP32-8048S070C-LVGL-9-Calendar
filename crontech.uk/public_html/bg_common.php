@@ -312,3 +312,199 @@ function bg_current_weather(PDO $db, float $lat, float $lon): ?array
     }
     return $finish($code);
 }
+
+/* ===========================================================================
+ * The owner's own pictures, and how often the device swaps between them
+ * ===========================================================================
+ *
+ * Several pictures per account, kept in uploads/ beside the weather ones and
+ * listed in user_backgrounds. Which one the device gets is decided by the wall
+ * clock, not by stored state: the set is walked in order on a timer, so every
+ * device on the account agrees and nothing has to be updated when one is served.
+ *
+ * The interval lives ONLY here on the website. The device is told how long to
+ * wait before asking again (see bg_custom_choice) and obeys, so anyone with the
+ * upload page can set the cadence without needing the panel.
+ */
+
+/** How many of the owner's own pictures are kept. The device caches roughly 50
+ *  pictures in the 9.875MB flash partition and the weather set shares that space,
+ *  so this leaves room for both. */
+define('BG_MAX_CUSTOM', 32);
+
+/** What the device is told to wait when there is nothing to rotate (the weather
+ *  set, a single picture): the standard hourly poll. */
+define('BG_REFRESH_DEFAULT', 3600);
+
+/** The slowest the device is ever asked to ask again, and the fastest. A daily
+ *  rotation still refreshes hourly so a replacement is noticed the same day. */
+define('BG_REFRESH_MAX', 3600);
+define('BG_REFRESH_MIN', 60);
+
+/** The rotation choices, in seconds. 0 means "always the same picture". Keys are
+ *  what gets stored and what the device is told to wait for. */
+function bg_rotate_options(): array
+{
+    return [
+        0     => 'Off - always the same picture',
+        60    => 'Every minute',
+        300   => 'Every 5 minutes',
+        1800  => 'Every 30 minutes',
+        3600  => 'Every hour',
+        86400 => 'Every day',
+    ];
+}
+
+function bg_rotate_valid(int $seconds): bool
+{
+    return array_key_exists($seconds, bg_rotate_options());
+}
+
+/** Create the gallery table and the rotation column if the site has never had
+ *  them. Called by the upload page; background.php reads them defensively
+ *  instead, because it runs on every device poll. */
+function bg_gallery_ensure(PDO $db): void
+{
+    $db->exec("CREATE TABLE IF NOT EXISTS user_backgrounds (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        filename TEXT NOT NULL,
+        added DATETIME DEFAULT CURRENT_TIMESTAMP
+    )");
+    $cols = $db->query("PRAGMA table_info(users)")->fetchAll(PDO::FETCH_ASSOC);
+    $has = false;
+    foreach ($cols as $c) {
+        if ($c['name'] === 'bg_rotate_s') $has = true;
+    }
+    if (!$has) {
+        $db->exec("ALTER TABLE users ADD COLUMN bg_rotate_s INTEGER NOT NULL DEFAULT 0");
+    }
+}
+
+/** This account's pictures, oldest first. Empty when the table is missing, so a
+ *  site that has never opened the upload page still works. */
+function bg_gallery_list(PDO $db, int $userId): array
+{
+    try {
+        $stmt = $db->prepare("SELECT id, filename FROM user_backgrounds WHERE user_id = ? ORDER BY id ASC");
+        $stmt->execute([$userId]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    } catch (PDOException $e) {
+        return [];
+    }
+}
+
+function bg_gallery_count(PDO $db, int $userId): int
+{
+    return count(bg_gallery_list($db, $userId));
+}
+
+/** Adds a picture to the gallery. Returns false when the gallery is full. */
+function bg_gallery_add(PDO $db, int $userId, string $filename): bool
+{
+    if (bg_gallery_count($db, $userId) >= BG_MAX_CUSTOM) {
+        return false;
+    }
+    $stmt = $db->prepare("INSERT INTO user_backgrounds (user_id, filename) VALUES (?, ?)");
+    $stmt->execute([$userId, $filename]);
+    return true;
+}
+
+/** Removes one entry and returns its filename so the caller can unlink it, or
+ *  null when the id is not this account's. */
+function bg_gallery_remove(PDO $db, int $userId, int $id): ?string
+{
+    $stmt = $db->prepare("SELECT filename FROM user_backgrounds WHERE id = ? AND user_id = ?");
+    $stmt->execute([$id, $userId]);
+    $file = $stmt->fetchColumn();
+    if ($file === false) {
+        return null;
+    }
+    $stmt = $db->prepare("DELETE FROM user_backgrounds WHERE id = ? AND user_id = ?");
+    $stmt->execute([$id, $userId]);
+    return (string) $file;
+}
+
+/** Deletes one stored picture - the .bin the device downloads and the .png the
+ *  page previews - given the filename stored in the gallery. */
+function bg_delete_pair(string $dir, string $filename): void
+{
+    $stem = pathinfo($filename, PATHINFO_FILENAME);
+    if ($stem === '') {
+        return;
+    }
+    @unlink($dir . '/' . $stem . '.bin');
+    @unlink($dir . '/' . $stem . '.png');
+}
+
+/** Moves the pre-gallery single picture into the gallery, once. The record of
+ *  what an account uploaded before there was a gallery is just a filename in
+ *  users.background_image; this promotes it to an entry so it rotates with the
+ *  rest instead of being stranded. Safe to call on every page load: it returns
+ *  immediately unless the gallery is empty and the file is really there. */
+function bg_gallery_import_legacy(PDO $db, int $userId, string $legacyFile): void
+{
+    $legacyFile = basename(trim($legacyFile));
+    if ($legacyFile === '' || bg_gallery_count($db, $userId) > 0) {
+        return;
+    }
+    if (!is_file(__DIR__ . '/uploads/' . $legacyFile)) {
+        return;
+    }
+    bg_gallery_add($db, $userId, $legacyFile);
+}
+
+/** The stored rotation interval in seconds; 0 when unset or unreadable. */
+function bg_rotate_seconds(PDO $db, int $userId): int
+{
+    try {
+        $stmt = $db->prepare("SELECT bg_rotate_s FROM users WHERE user_id = ?");
+        $stmt->execute([$userId]);
+        $s = (int) $stmt->fetchColumn();
+        return bg_rotate_valid($s) ? $s : 0;
+    } catch (PDOException $e) {
+        return 0;   // column not there yet: rotation simply is off
+    }
+}
+
+/**
+ * Which picture the device should be shown, and how long it should wait before
+ * asking again.
+ *
+ * The rotation is a function of the clock - floor(now / interval) picks the slot -
+ * so no state is stored, every device on the account agrees, and restarting
+ * nothing changes. $legacyFile is the old single-picture column, used as a
+ * fallback for an account that has not opened the upload page since the gallery
+ * arrived.
+ *
+ * @return array{file:string,refresh:int}|null
+ */
+function bg_custom_choice(PDO $db, int $userId, string $legacyFile = '', ?int $now = null): ?array
+{
+    if ($now === null) $now = time();
+    $rows = bg_gallery_list($db, $userId);
+
+    if (!$rows) {
+        $safe = basename($legacyFile);
+        if ($safe !== '' && is_file(__DIR__ . '/uploads/' . $safe)) {
+            // Pre-gallery account: its one picture behaves as a set of one.
+            return ['file' => $safe, 'refresh' => BG_REFRESH_DEFAULT];
+        }
+        return null;
+    }
+
+    $count = count($rows);
+    $interval = bg_rotate_seconds($db, $userId);
+    if ($interval <= 0) {
+        $file = (string) $rows[$count - 1]['filename'];   // the most recent
+        $refresh = BG_REFRESH_DEFAULT;
+    } else {
+        $slot = intdiv($now, $interval);
+        $file = (string) $rows[$slot % $count]['filename'];
+        // Never faster than the device can usefully ask, and never slower than an
+        // hour, so a change made here is picked up reasonably soon even when the
+        // picture itself only turns over once a day.
+        $refresh = max(BG_REFRESH_MIN, min($interval, BG_REFRESH_MAX));
+    }
+    return ['file' => basename($file), 'refresh' => $refresh];
+}
