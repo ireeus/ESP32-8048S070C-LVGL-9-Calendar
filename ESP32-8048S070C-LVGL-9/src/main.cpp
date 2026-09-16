@@ -107,6 +107,8 @@ static void opa_step_cb(lv_event_t *e);         // panel opacity button tapped
 static void opa_steps_highlight(int active);    // repaint the opacity row
 static int  opa_active_step();                  // nearest step to the current value
 static void apply_panel_opacity();              // push opacity onto the surfaces
+static void bgFetchService();                   // one slice of a picture transfer
+static void bgFetchAbort(const char *why);      // drop a picture transfer in flight
 static void updateAutoBrightness(bool force);   // recompute the level from the sun
 static void apply_ui_darkness_ex(int value, bool persist);
 // Send a local theme choice to the site. `fromSync` is true when a manual Sync
@@ -2857,12 +2859,21 @@ void show_settings_popup() {
     lv_obj_set_style_pad_row(right_col, 8, 0);
     lv_obj_set_flex_flow(right_col, LV_FLEX_FLOW_COLUMN);
 
-    // Left column: the QR code on its own, then the memory meters and the version
-    // line UNDER it as siblings. The meters used to be inside this card, which made
-    // the QR box grow downwards towards the footer buttons; outside it, the card
-    // hugs the code and the column keeps its own spacing.
+    // Left column, top to bottom: the firmware version, the QR box, the memory
+    // meters. The version is a SIBLING of the card rather than a child of it, so
+    // moving it above the code cannot make the box itself any taller.
+    lv_obj_t *version_settings_label = lv_label_create(left_col);
+    lv_label_set_text(version_settings_label, ("Firmware: " + currentFirmwareVersion).c_str());
+    lv_obj_set_style_text_font(version_settings_label, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(version_settings_label, lv_color_hex(0xBBBBBB), 0);
+    lv_obj_set_width(version_settings_label, LV_PCT(100));
+    lv_obj_set_style_text_align(version_settings_label, LV_TEXT_ALIGN_CENTER, 0);
+
     lv_obj_t *qr_card = make_card(left_col, lv_color_hex(0x151515), lv_color_hex(0x151515));
     lv_obj_set_flex_align(qr_card, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    // Pinned to its content, explicitly: the box hugs the code and its caption and
+    // never stretches to fill the column, whatever moves in or out of it.
+    lv_obj_set_height(qr_card, LV_SIZE_CONTENT);
     // Tighter than a default card: this box is almost entirely picture, and every
     // pixel it gives back is one the popup does not have to find elsewhere.
     lv_obj_set_style_pad_top(qr_card, 4, 0);
@@ -2926,16 +2937,6 @@ void show_settings_popup() {
     make_mem_meter("RAM", &settings_ram_bar, &settings_ram_val);
     make_mem_meter("PSRAM", &settings_psram_bar, &settings_psram_val);
     update_settings_memory_meters(); // fill both before the first tick
-
-    // The firmware version sits under the meters, which is under the code. Full
-    // width and centred: left_col aligns its children to the left, while the card
-    // above centres everything inside itself.
-    lv_obj_t *version_settings_label = lv_label_create(left_col);
-    lv_label_set_text(version_settings_label, ("Firmware: " + currentFirmwareVersion).c_str());
-    lv_obj_set_style_text_font(version_settings_label, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(version_settings_label, lv_color_hex(0xBBBBBB), 0);
-    lv_obj_set_width(version_settings_label, LV_PCT(100));
-    lv_obj_set_style_text_align(version_settings_label, LV_TEXT_ALIGN_CENTER, 0);
 
     // Right column: weather location, ParcelBox, brightness.
     lv_obj_t *weather_cont = make_card(right_col, scheme_accent(), scheme_accent_dark());
@@ -3828,6 +3829,8 @@ static void ota_show_progress(bool force) {
 }
 static void ota_start() {
   if (otaDownloading) return;
+  // The update wants the socket, the PSRAM and an undisturbed loop to itself.
+  bgFetchAbort("a firmware update is starting");
   if (WiFi.status() != WL_CONNECTED) { ota_fail("WiFi is not connected"); return; }
   if (firmwareUrl.isEmpty()) { ota_fail("No update URL was advertised"); return; }
 
@@ -6091,6 +6094,11 @@ void loop() {
   // after an update. A no-op on every other pass.
   maybe_show_installed_popup();
 
+  // A slice of any background picture transfer in progress. Doing it here rather
+  // than inside fetchAndSetBackgroundImage() is what keeps the UI live while a
+  // picture downloads.
+  bgFetchService();
+
   // loop_display() is the ONLY caller of lv_task_handler(): the OTA code used to
   // call it re-entrantly from inside a button callback, which is what made the
   // display jump.
@@ -6211,7 +6219,9 @@ void loop() {
   }
   if (currentTime - lastBackgroundUpdate >= backgroundUpdateInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
     { StallTimer st("background fetch"); fetchBackgroundFilename(); }
-    { StallTimer st("background blit");  fetchAndSetBackgroundImage(); }
+    // Named for what it now is: this only opens the connection. The transfer itself
+    // is carried on by bgFetchService() across later loop() passes.
+    { StallTimer st("background fetch start"); fetchAndSetBackgroundImage(); }
     lastBackgroundUpdate = currentTime;
   }
   if (currentTime - lastHolidayUpdate >= holidayUpdateInterval && WiFi.status() == WL_CONNECTED && !is_ota_updating) {
@@ -6967,64 +6977,43 @@ static bool bgCacheMount() {
   bgCacheReport();
   return true;
 }
-// ---- progress card for the blocking background transfer ---------------------
-// Downloading the picture over TLS and writing it to flash happens inside loop(), so
-// nothing else runs while it does and the panel used to sit frozen for about ten
-// seconds with no sign of why. This paints a small card first and repaints it as
-// the bytes arrive.
+// ---- background picture fetch, driven from loop() ---------------------------
+// This used to be one blocking function: loop() stopped dead for the whole
+// transfer, so a progress card had to be painted to explain the frozen screen. It
+// is a small state machine now, serviced once per loop() pass a slice at a time, so
+// LVGL keeps running and the picture simply appears when it is ready.
 //
-// lv_refr_now() only REDRAWS - it does not run timers - so no timer can re-enter
-// the network code from inside the transfer. That is what makes it safe here;
-// fetchAndSetBackgroundImage() always runs from loop(), never from inside
-// lv_timer_handler(), which is why calling it directly is allowed at all.
-static lv_obj_t *bg_progress = nullptr;
-static lv_obj_t *bg_progress_bar = nullptr;
+// The one part that is still blocking is HTTPClient::GET(), which does DNS, TCP and
+// the TLS handshake in a single call that cannot be split. That is a second or so,
+// once per picture change, rather than the ten the whole transfer used to take.
+#define BG_FETCH_SLICE      8192          // bytes read per loop() pass
+#define BG_FETCH_TIMEOUT_MS 20000UL       // give up if the transfer stalls
+enum BgFetchState { BG_FETCH_IDLE, BG_FETCH_RUNNING, BG_FETCH_STORE };
+static BgFetchState bgFetchState = BG_FETCH_IDLE;
+static HTTPClient    bgFetchHttp;         // kept alive across loop() passes
+static WiFiClient   *bgFetchStream = nullptr;
+static uint8_t      *bgFetchBuf = nullptr;
+static size_t        bgFetchTotal = 0;
+static size_t        bgFetchGot = 0;
+static unsigned long bgFetchLastData = 0;
+static String        bgFetchName = "";
 
-static void bgProgressHide() {
-  if (bg_progress) {
-    lv_obj_del(bg_progress);
-    bg_progress = nullptr;
-    bg_progress_bar = nullptr;
-    lv_obj_invalidate(lv_scr_act());
+// Drop the transfer in flight (if any) and release everything it holds: the socket,
+// the PSRAM buffer and the name it was working on. Needed when a different picture
+// becomes the wanted one mid-download, and when an OTA starts and wants the socket
+// and a quiet loop to itself.
+static void bgFetchAbort(const char *why) {
+  if (bgFetchState == BG_FETCH_IDLE && bgFetchBuf == nullptr) return;
+  if (!bgFetchName.isEmpty()) {
+    Serial.println("[BG] Abandoning " + bgFetchName + ": " + why);
   }
-}
-
-static void bgProgressShow(const char *text) {
-  bgProgressHide();
-  bg_progress = lv_obj_create(lv_scr_act());
-  if (!bg_progress) return;
-  lv_obj_set_size(bg_progress, 380, 118);
-  lv_obj_align(bg_progress, LV_ALIGN_CENTER, 0, 0);
-  lv_obj_set_style_bg_color(bg_progress, lv_color_hex(0x000000), 0);
-  lv_obj_set_style_bg_opa(bg_progress, LV_OPA_90, 0);
-  lv_obj_set_style_border_color(bg_progress, scheme_accent(), 0);
-  lv_obj_set_style_border_width(bg_progress, 2, 0);
-  lv_obj_set_style_radius(bg_progress, UI_RADIUS, 0);
-  lv_obj_set_style_pad_all(bg_progress, 12, 0);
-  lv_obj_clear_flag(bg_progress, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_t *lbl = lv_label_create(bg_progress);
-  lv_label_set_text(lbl, text);
-  lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(lbl, lv_color_white(), 0);
-  lv_obj_align(lbl, LV_ALIGN_TOP_MID, 0, 0);
-  bg_progress_bar = lv_bar_create(bg_progress);
-  lv_obj_set_size(bg_progress_bar, 340, 14);
-  lv_obj_align(bg_progress_bar, LV_ALIGN_BOTTOM_MID, 0, 0);
-  lv_bar_set_range(bg_progress_bar, 0, 100);
-  lv_bar_set_value(bg_progress_bar, 0, LV_ANIM_OFF);
-  lv_obj_set_style_bg_color(bg_progress_bar, scheme_accent(), LV_PART_INDICATOR);
-  lv_refr_now(NULL);   // paint it BEFORE the blocking part starts
-}
-
-static void bgProgressSet(int pct) {
-  if (!bg_progress_bar) return;
-  if (pct < 0) pct = 0;
-  if (pct > 100) pct = 100;
-  // Repaint only when the whole percent changes: the download loop runs hundreds
-  // of times and each repaint costs a render.
-  if (pct == (int)lv_bar_get_value(bg_progress_bar)) return;
-  lv_bar_set_value(bg_progress_bar, pct, LV_ANIM_OFF);
-  lv_refr_now(NULL);
+  if (bgFetchState != BG_FETCH_IDLE) bgFetchHttp.end();
+  bgFetchStream = nullptr;
+  if (bgFetchBuf) { free(bgFetchBuf); bgFetchBuf = nullptr; }
+  bgFetchTotal = 0;
+  bgFetchGot = 0;
+  bgFetchName = "";
+  bgFetchState = BG_FETCH_IDLE;
 }
 
 // ---- hiding the cache write -------------------------------------------------
@@ -7273,95 +7262,124 @@ static void bgSaveToCache(const uint8_t *buf, size_t len) {
                 backgroundFilename.c_str(), (unsigned)(len / 1024),
                 (unsigned)(freeb / 1024), more);
 }
+// Start fetching the wanted picture. Returns almost immediately: the transfer
+// itself is carried on by bgFetchService(), one slice per loop() pass, so this no
+// longer holds the UI down.
 void fetchAndSetBackgroundImage() {
   if (backgroundFilename.isEmpty()) {
     if (debug == 1) Serial.println("[APP] No background filename, skipping image fetch");
     return;
   }
-  // Fast path: same file as last time and it is already on flash.
+  // Already on flash: the fast path that makes going back to a picture the device
+  // has seen before immediate.
   if (bgLoadFromCache()) return;
 
-  if (debug == 1) Serial.println("[APP] Fetching background image: " + backgroundFilename);
-  HTTPClient http;
-  String url = "https://crontech.uk/uploads/" + backgroundFilename;
-  http.begin(url);
-  int httpCode = http.GET();
+  if (bgFetchState != BG_FETCH_IDLE) {
+    if (bgFetchName == backgroundFilename) return;   // already on it
+    bgFetchAbort("a different picture is wanted now");
+  }
+
+  const String url = "https://crontech.uk/uploads/" + backgroundFilename;
+  Serial.println("[BG] Fetching " + backgroundFilename + " in the background");
+  bgFetchHttp.begin(url);
+  // The only blocking part left: DNS, TCP and the TLS handshake in one call. There
+  // is no way to split it with this client, and it is a second rather than ten.
+  const int httpCode = bgFetchHttp.GET();
   if (httpCode != HTTP_CODE_OK) {
-    if (debug == 1) Serial.println("[APP] Failed to download background image: HTTP " + String(httpCode));
-    http.end();
+    Serial.println("[BG] Background request failed: HTTP " + String(httpCode));
+    bgFetchHttp.end();
     return;
   }
-  int contentLength = http.getSize();
+  const int contentLength = bgFetchHttp.getSize();
   if (contentLength != BG_EXPECTED_SIZE) {
-    // Unconditional: a size mismatch means the server is serving something this
-    // firmware cannot read (a leftover file from the old RGB888 format, say), and
-    // silently keeping the previous picture made that look like "nothing happened".
-    Serial.printf("[BG] Invalid background size: %d bytes (expected %d) - check the site is serving 800x480 RGB565\n",
-                  contentLength, (int)BG_EXPECTED_SIZE);
-    http.end();
+    // A size mismatch means the server is serving something this firmware cannot
+    // read (a picture written before the stored size changed, say), and silently
+    // keeping the previous one made that look like "nothing happened".
+    Serial.printf("[BG] Invalid background size: %d bytes (expected %d) - is the site serving %dx%d RGB565?\n",
+                  contentLength, (int)BG_EXPECTED_SIZE, BG_STORE_W, BG_STORE_H);
+    bgFetchHttp.end();
     return;
   }
-  // The free-PSRAM figure is printed BEFORE the buffer is asked for, so a failed
-  // allocation is a number to read rather than a guess.
-  Serial.printf("[BG] Downloading %d bytes; free PSRAM %uKB, free internal %uKB\n",
-                contentLength,
-                (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024),
-                (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) / 1024));
-  // Put something on screen before the blocking part: this function holds loop()
-  // for the whole transfer, so without it the panel just froze.
-  bgProgressShow("Downloading background picture");
-  uint8_t* imageBuffer = (uint8_t*)ps_malloc(contentLength);
-  if (!imageBuffer) {
-    Serial.printf("[BG] FAILED to allocate %d bytes of PSRAM for the background (free: %uKB)\n",
+  bgFetchBuf = (uint8_t *)ps_malloc(contentLength);
+  if (!bgFetchBuf) {
+    Serial.printf("[BG] FAILED to allocate %d bytes of PSRAM (free: %uKB)\n",
                   contentLength, (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
-    bgProgressHide();
-    http.end();
+    bgFetchHttp.end();
     return;
   }
-  if (debug == 1) Serial.println("[APP] PSRAM allocated successfully");
-  WiFiClient *stream = http.getStreamPtr();
-  size_t totalRead = 0;
-  while (http.connected() && totalRead < contentLength) {
-    size_t available = stream->available();
-    if (available) {
-      size_t read = stream->readBytes(imageBuffer + totalRead, min(available, (size_t)(contentLength - totalRead)));
-      totalRead += read;
-    } else {
-      // Nothing buffered: yield so the WiFi stack, the idle task and LVGL can
-      // run. The old code delayed 1ms on EVERY pass, which threw away time while
-      // data was flowing; a bare spin would instead starve the WiFi task.
-      delay(1);
+  bgFetchStream = bgFetchHttp.getStreamPtr();
+  if (!bgFetchStream) {
+    Serial.println("[BG] No HTTP stream for the background");
+    bgFetchHttp.end();
+    free(bgFetchBuf);
+    bgFetchBuf = nullptr;
+    return;
+  }
+  bgFetchTotal = (size_t)contentLength;
+  bgFetchGot = 0;
+  bgFetchLastData = millis();
+  bgFetchName = backgroundFilename;
+  bgFetchState = BG_FETCH_RUNNING;   // the rest happens in bgFetchService()
+}
+// Carry the transfer on a slice at a time. Called from loop(), so LVGL runs between
+// passes and the UI stays live for the whole download.
+static void bgFetchService() {
+  if (bgFetchState == BG_FETCH_RUNNING) {
+    if (!bgFetchStream || !bgFetchBuf) { bgFetchAbort("the transfer lost its buffers"); return; }
+    const size_t left = bgFetchTotal - bgFetchGot;
+    const size_t avail = bgFetchStream->available();
+    if (avail) {
+      // Read only what is already buffered, and never more than one slice, so this
+      // pass stays short. readBytes() would otherwise wait for a full buffer.
+      size_t want = avail < left ? avail : left;
+      if (want > BG_FETCH_SLICE) want = BG_FETCH_SLICE;
+      const int c = bgFetchStream->readBytes(bgFetchBuf + bgFetchGot, want);
+      if (c > 0) {
+        bgFetchGot += (size_t)c;
+        bgFetchLastData = millis();
+      }
     }
-    // Show the transfer advancing instead of leaving a dead screen. Only the
-    // whole-percent changes repaint, so this costs a render at most 100 times.
-    bgProgressSet((int)((totalRead * 100) / (size_t)contentLength));
-  }
-  if (totalRead != contentLength) {
-    Serial.printf("[BG] Incomplete background download: %u/%d bytes\n", (unsigned)totalRead, contentLength);
-    bgProgressHide();
-    free(imageBuffer);
-    http.end();
+    if (bgFetchGot >= bgFetchTotal) {
+      bgFetchState = BG_FETCH_STORE;
+    } else if (millis() - bgFetchLastData > BG_FETCH_TIMEOUT_MS) {
+      bgFetchAbort("stalled");
+    }
     return;
   }
-  if (debug == 1) Serial.println("[APP] Download complete: " + String(totalRead) + " bytes");
-  bgProgressSet(100);
-  // The picture is in PSRAM. Getting it INTO the flash is the part that cannot be
-  // shown: even at half resolution that is ~48 flash sectors, the ESP32-S3 shares
-  // the flash bus with the RGB panel's DMA so every one of those writes starves the
-  // panel, and loop() is blocked for the whole thing so LVGL cannot repaint over
-  // the damage. That is what made a weather change look like a crash.
-  //
-  // Same problem as the OTA download, same answer: take the screen to one flat
-  // colour, do the write, then bring it back with the new picture already in place.
-  bgProgressHide();
-  bgWriteScreenDown();
-  const unsigned long cacheStart = millis();
-  bgSaveToCache(imageBuffer, contentLength);
-  bgApply(imageBuffer, contentLength);
-  bgWriteScreenUp();
-  // Printed unconditionally: this is the number that explains the black gap, and
-  // whether it is worth attacking.
-  Serial.printf("[BG] Cache write took %lums\n", millis() - cacheStart);
-  if (debug == 1) Serial.println("[APP] Background image set successfully via LVGL");
-  http.end();
+
+  if (bgFetchState == BG_FETCH_STORE) {
+    // The whole picture is in PSRAM. Getting it into the flash is the one part that
+    // cannot be done quietly - see bgWriteScreenDown() - so the screen goes flat for
+    // it, and comes back showing the new picture.
+    const String name = bgFetchName;
+    const size_t total = bgFetchTotal;
+    // Cached and shown under the CURRENT name, so if that changed while this was in
+    // flight the download is thrown away rather than stored against the wrong one.
+    if (name != backgroundFilename) {
+      Serial.println("[BG] Discarding " + name + ": it is no longer the wanted picture");
+      free(bgFetchBuf);
+      bgFetchBuf = nullptr;
+      bgFetchState = BG_FETCH_IDLE;
+      bgFetchHttp.end();
+      bgFetchStream = nullptr;
+      bgFetchTotal = 0;
+      bgFetchGot = 0;
+      bgFetchName = "";
+      return;
+    }
+    bgFetchState = BG_FETCH_IDLE;
+    bgFetchHttp.end();
+    bgFetchStream = nullptr;
+    bgWriteScreenDown();
+    const unsigned long storeStart = millis();
+    bgSaveToCache(bgFetchBuf, total);
+    bgApply(bgFetchBuf, total);          // takes ownership of the buffer
+    bgFetchBuf = nullptr;
+    bgWriteScreenUp();
+    Serial.printf("[BG] %s ready: %u bytes, stored in %lums\n",
+                  name.c_str(), (unsigned)total, millis() - storeStart);
+    bgFetchTotal = 0;
+    bgFetchGot = 0;
+    bgFetchName = "";
+  }
 }
