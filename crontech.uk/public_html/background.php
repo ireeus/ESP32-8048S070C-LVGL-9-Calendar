@@ -114,11 +114,17 @@ if (!$row) {
     bg_reply($logCtx, ['error' => 'unknown access code'], 404);
 }
 
+// The poll cadence is a property of the ACCOUNT's rotation setting, not of the
+// mode, and it is worked out once here so that every answer below carries the same
+// number. See bg_poll_interval() for why that matters: a mode change cannot reach
+// a device that has been told to sleep for an hour.
 $mode = ($row['background_mode'] ?? 'custom') === 'weather' ? 'weather' : 'custom';
 $custom = trim((string) ($row['background_image'] ?? ''));
 $userId = (int) ($row['user_id'] ?? 0);
-$logCtx = sprintf('user=%d code=%s wx=%s fw=%s last=%s mode=%s %s', $userId, bg_log_code($accessCode),
-                  $wx === null ? '-' : (string) $wx, $fw, $last, $mode, bg_log_who());
+$pollRefresh = bg_poll_interval($db, $userId);
+$logCtx = sprintf('user=%d code=%s wx=%s fw=%s last=%s mode=%s refresh=%d %s',
+                  $userId, bg_log_code($accessCode), $wx === null ? '-' : (string) $wx,
+                  $fw, $last, $mode, $pollRefresh, bg_log_who());
 
 // The trap that made "the pictures never change, whatever interval I pick" look
 // like a broken rotation: the rotation belongs to the owner's OWN pictures, so
@@ -158,7 +164,7 @@ if ($mode === 'custom') {
                 'mode'      => 'custom',
                 'group'     => null,
                 // Obeyed by the device, so the cadence is set entirely from here.
-                'refresh_s' => (int) $choice['refresh'],
+                'refresh_s' => (int) $pollRefresh,
             ]);
         }
         bg_log('ERROR', $logCtx . ' | chose ' . $safe . ' but it could not be healed (missing preview PNG?) - '
@@ -179,7 +185,7 @@ if (!bg_weather_file_exists($group)) {
 }
 
 if ($group === null) {
-    bg_reply($logCtx, ['filename' => null, 'mode' => 'none', 'group' => null, 'refresh_s' => BG_REFRESH_DEFAULT]);
+    bg_reply($logCtx, ['filename' => null, 'mode' => 'none', 'group' => null, 'refresh_s' => (int) $pollRefresh]);
 }
 
 // This account's own replacement for the chosen group wins over the generated
@@ -195,8 +201,10 @@ if ($userId > 0 && bg_heal_bin($overrideBase)) {
         'filename'  => bg_versioned($overrideRel, $overrideAbs),
         'mode'      => 'weather',
         'group'     => $group,
-        // The weather set does not rotate, so this is just the standard poll.
-        'refresh_s' => BG_REFRESH_DEFAULT,
+        // The picture does not rotate, but the DEVICE still polls on the account's
+        // rotation interval - that is what lets a switch back to "My own pictures"
+        // be noticed within a minute instead of an hour.
+        'refresh_s' => (int) $pollRefresh,
     ]);
 }
 
@@ -211,5 +219,5 @@ bg_reply($logCtx, [
     'filename'  => bg_versioned($defaultRel, __DIR__ . '/uploads/' . $defaultRel),
     'mode'      => 'weather',
     'group'     => $group,
-    'refresh_s' => BG_REFRESH_DEFAULT,
+    'refresh_s' => (int) $pollRefresh,
 ]);

@@ -20,7 +20,7 @@ extern const lv_font_t lv_font_montserrat_14_bold;
 // device will keep offering (and auto-installing) a build that is not actually
 // newer. Each build reports its own version to the site on every background poll,
 // so the number in the log identifies the binary exactly - never reuse one.
-const String build_version = "2.3.7";
+const String build_version = "2.3.8";
 int debug =0; // Change to 1 to enable serial prints
 // Firmware check interval variable
 // Was 100000UL, which is 100 SECONDS, not the 5 minutes the comment claimed - so
@@ -525,7 +525,7 @@ static String bg_url_safe(const String &in) {
 // download a second one the moment the weather arrived.
 static bool g_weather_known = false;
 // OTA variables
-String currentFirmwareVersion = "2.3.7"; // replaced by build_version in setup()
+String currentFirmwareVersion = "2.3.8"; // replaced by build_version in setup()
 String latestFirmwareVersion = "";
 String firmwareUrl = "";
 WiFiClientSecure client;
@@ -569,7 +569,11 @@ const unsigned long debounceDelay = 200;
 static unsigned long lastBackgroundUpdate = 0;
 #define BG_REFRESH_MIN_MS 60000UL      // 1 minute - the shortest rotation offered
 #define BG_REFRESH_MAX_MS 3600000UL    // 1 hour - and the longest wait the device uses
-static unsigned long backgroundUpdateInterval = BG_REFRESH_MAX_MS;
+// Starts at the SHORT end, not the long one. Until a poll has been answered there is
+// no interval to obey, and starting at an hour meant a boot whose first request
+// failed - no DNS yet, a handshake timeout - parked the panel on a stale picture for
+// an hour, which looks exactly like the rotation having broken.
+static unsigned long backgroundUpdateInterval = BG_REFRESH_MIN_MS;
 static unsigned long lastWeatherLocationCheck = 0;
 // Remote theme (colours controlled from crontech.uk). Re-applied only when the
 // server's value actually changes, so a colour picked on the device is not
@@ -6946,12 +6950,17 @@ void fetchBackgroundFilename() {
         Serial.println("[BG] No refresh_s in the answer - keeping the current interval");
       }
     } else {
-      if (debug == 1) Serial.println("[APP] JSON parsing failed: " + String(error.c_str()));
+      // A body we cannot parse is no better than no body: retry soon.
+      Serial.println("[BG] Background answer did not parse as JSON - retrying in a minute");
+      backgroundUpdateInterval = BG_REFRESH_MIN_MS;
     }
   } else {
     // Unconditional: a name lookup that stops working leaves the device on a stale
     // picture forever, which is exactly the sort of thing that was invisible before.
     Serial.println("[BG] Background name request failed: HTTP " + String(httpCode));
+    // Retry at the shortest interval rather than the one we happen to hold: a blip
+    // should cost a minute, not a whole cycle.
+    backgroundUpdateInterval = BG_REFRESH_MIN_MS;
   }
   http.end();
 }

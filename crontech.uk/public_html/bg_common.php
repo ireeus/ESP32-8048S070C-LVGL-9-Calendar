@@ -415,6 +415,32 @@ define('BG_REFRESH_DEFAULT', 3600);
 define('BG_REFRESH_MAX', 3600);
 define('BG_REFRESH_MIN', 60);
 
+/** How often the device is asked to look when NOTHING is rotating. Short enough
+ *  that a change made here - a fresh upload, or switching the panel back to "My
+ *  own pictures" - is picked up in a few minutes rather than in an hour, and long
+ *  enough that an idle account is not chatting to the server all day. */
+define('BG_REFRESH_QUIET', 600);
+
+/**
+ * How long the device should wait before asking again.
+ *
+ * This follows the account's ROTATION SETTING, deliberately not the mode. That
+ * distinction is the whole point: the mode lives on the server and only the device
+ * can act on it, so if the interval collapsed to the hourly default whenever the
+ * account was on the weather set, then going weather-and-back would leave the
+ * panel parked for an hour with no way for the site to reach it - and "the
+ * pictures stopped changing, whatever interval I pick" is exactly that. The mode
+ * now changes what the device is sent, never how often it asks.
+ */
+function bg_poll_interval(PDO $db, int $userId): int
+{
+    $rot = bg_rotate_seconds($db, $userId);
+    if ($rot > 0) {
+        return max(BG_REFRESH_MIN, min($rot, BG_REFRESH_MAX));
+    }
+    return BG_REFRESH_QUIET;
+}
+
 /** The rotation choices, in seconds. 0 means "always the same picture". Keys are
  *  what gets stored and what the device is told to wait for. */
 function bg_rotate_options(): array
@@ -562,7 +588,7 @@ function bg_custom_choice(PDO $db, int $userId, string $legacyFile = '', ?int $n
         $safe = basename($legacyFile);
         if ($safe !== '' && is_file(__DIR__ . '/uploads/' . $safe)) {
             // Pre-gallery account: its one picture behaves as a set of one.
-            return ['file' => $safe, 'refresh' => BG_REFRESH_DEFAULT];
+            return ['file' => $safe, 'refresh' => bg_poll_interval($db, $userId)];
         }
         return null;
     }
@@ -571,14 +597,11 @@ function bg_custom_choice(PDO $db, int $userId, string $legacyFile = '', ?int $n
     $interval = bg_rotate_seconds($db, $userId);
     if ($interval <= 0) {
         $file = (string) $rows[$count - 1]['filename'];   // the most recent
-        $refresh = BG_REFRESH_DEFAULT;
     } else {
         $slot = intdiv($now, $interval);
         $file = (string) $rows[$slot % $count]['filename'];
-        // Never faster than the device can usefully ask, and never slower than an
-        // hour, so a change made here is picked up reasonably soon even when the
-        // picture itself only turns over once a day.
-        $refresh = max(BG_REFRESH_MIN, min($interval, BG_REFRESH_MAX));
     }
-    return ['file' => basename($file), 'refresh' => $refresh];
+    // The cadence comes from the rotation setting alone, whatever the count, so
+    // that the device's polling rate never depends on which picture is due.
+    return ['file' => basename($file), 'refresh' => bg_poll_interval($db, $userId)];
 }
