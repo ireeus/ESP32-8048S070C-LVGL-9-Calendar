@@ -20,7 +20,7 @@ extern const lv_font_t lv_font_montserrat_14_bold;
 // device will keep offering (and auto-installing) a build that is not actually
 // newer. Each build reports its own version to the site on every background poll,
 // so the number in the log identifies the binary exactly - never reuse one.
-const String build_version = "2.3.9";
+const String build_version = "2.3.10";
 int debug =0; // Change to 1 to enable serial prints
 // Firmware check interval variable
 // Was 100000UL, which is 100 SECONDS, not the 5 minutes the comment claimed - so
@@ -86,6 +86,10 @@ void show_new_event_popup(lv_calendar_date_t *selected_date = nullptr);
 void new_event_submit_cb(lv_event_t *e);
 void new_event_cancel_cb(lv_event_t *e);
 void checkFirmwareUpdate();
+// Called from the background poll as well as the five-minute check, so a new build
+// reaches the panel in under a minute.
+static void maybeAutoUpdate();
+static bool offerFirmwareUpdate();
 // Dotted-numeric version compare, used by the update check and by the state it
 // reports to the website. Declared here because its definition sits far below.
 static bool versionIsNewer(const String &candidate, const String &current);
@@ -536,7 +540,7 @@ static String bg_url_safe(const String &in) {
 // download a second one the moment the weather arrived.
 static bool g_weather_known = false;
 // OTA variables
-String currentFirmwareVersion = "2.3.9"; // replaced by build_version in setup()
+String currentFirmwareVersion = "2.3.10"; // replaced by build_version in setup()
 String latestFirmwareVersion = "";
 String firmwareUrl = "";
 WiFiClientSecure client;
@@ -6968,6 +6972,27 @@ void fetchBackgroundFilename() {
         }
       } else {
         Serial.println("[BG] No refresh_s in the answer - keeping the current interval");
+      }
+
+      // The firmware the site is offering, whenever it is newer than this build.
+      // Its own check for that runs every five minutes, which is a long blind spot
+      // when it is already talking to the site once a minute - so the offer rides
+      // along on this answer and is acted on at once. Advisory only: an answer
+      // without these fields (an older site, a feed that cannot be read) is simply
+      // ignored, and the five-minute check still runs.
+      const String fwLatest = doc["fw_latest"].as<String>();
+      const String fwUrl = doc["fw_url"].as<String>();
+      if (fwLatest.length() && fwUrl.length()) {
+        latestFirmwareVersion = fwLatest;
+        firmwareUrl = fwUrl;
+        const bool newer = versionIsNewer(fwLatest, currentFirmwareVersion);
+        ota_state = (newer ? "new:" : "none:") + fwLatest;
+        if (newer) {
+          // Both are no-ops unless the situation calls for them: auto-install only
+          // inside the quiet window, the prompt only outside it.
+          maybeAutoUpdate();
+          offerFirmwareUpdate();
+        }
       }
     } else {
       // A body we cannot parse is no better than no body: retry soon.

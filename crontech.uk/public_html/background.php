@@ -41,6 +41,18 @@ bg_log_install_handlers();
  */
 function bg_reply(string $ctx, array $payload, int $status = 200): void
 {
+    // Piggyback the firmware the site is offering on every good answer. The device
+    // polls this once a minute anyway, so a new build reaches it in under a minute
+    // instead of waiting for its own five-minute check, at no extra request. Purely
+    // advisory: the fields are absent when the feed cannot be read, and the device
+    // carries on with its own check.
+    if ($status === 200 && !isset($payload['error'])) {
+        $feed = bg_update_feed();
+        if ($feed !== null) {
+            $payload['fw_latest'] = $feed['version'];
+            $payload['fw_url'] = $feed['url'];
+        }
+    }
     http_response_code($status);
     echo json_encode($payload);
     $out = [];

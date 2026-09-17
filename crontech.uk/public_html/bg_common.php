@@ -432,6 +432,30 @@ define('BG_REFRESH_QUIET', 600);
  * pictures stopped changing, whatever interval I pick" is exactly that. The mode
  * now changes what the device is sent, never how often it asks.
  */
+/**
+ * The firmware the site currently offers, from update/version.json.
+ *
+ * The device's own check for this runs every five minutes, which is a long blind
+ * spot when the only other thing it does is poll THIS endpoint once a minute. So
+ * the answer carries the offer as well: a new build is noticed within one poll,
+ * with no extra request. Null when the feed is missing or unreadable, which simply
+ * leaves the device to its own slower check rather than breaking the answer.
+ *
+ * @return array{version:string,url:string}|null
+ */
+function bg_update_feed(): ?array
+{
+    $path = __DIR__ . '/update/version.json';
+    if (!is_file($path)) {
+        return null;
+    }
+    $j = json_decode((string) @file_get_contents($path), true);
+    if (!is_array($j) || empty($j['version']) || empty($j['url'])) {
+        return null;
+    }
+    return ['version' => (string) $j['version'], 'url' => (string) $j['url']];
+}
+
 function bg_poll_interval(PDO $db, int $userId): int
 {
     $rot = bg_rotate_seconds($db, $userId);
