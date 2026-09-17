@@ -74,11 +74,15 @@ function bg_log_field(string $key, int $max = 64): string
     if (strlen($v) > $max) $v = substr($v, 0, $max) . '..';
     return $v === '' ? '-' : $v;
 }
-$fw   = bg_log_field('fw', 24);        // firmware version, e.g. 2.3.7
+$fw   = bg_log_field('fw', 24);        // firmware version, e.g. 2.3.9
 $last = bg_log_field('last', 48);      // outcome of the previous picture
+// What the device knows about firmware updates. "none:2.3.1" means the feed
+// advertised 2.3.1 to a panel running something newer, so it correctly did
+// nothing - the silent no-op that looks like updates being broken.
+$upd  = bg_log_field('upd', 56);
 
-$logCtx = sprintf('code=%s wx=%s fw=%s last=%s %s', bg_log_code($accessCode),
-                  $wx === null ? '-' : (string) $wx, $fw, $last, bg_log_who());
+$logCtx = sprintf('code=%s wx=%s fw=%s last=%s upd=%s %s', bg_log_code($accessCode),
+                  $wx === null ? '-' : (string) $wx, $fw, $last, $upd, bg_log_who());
 
 try {
     $db = new PDO('sqlite:access.db');
@@ -122,9 +126,9 @@ $mode = ($row['background_mode'] ?? 'custom') === 'weather' ? 'weather' : 'custo
 $custom = trim((string) ($row['background_image'] ?? ''));
 $userId = (int) ($row['user_id'] ?? 0);
 $pollRefresh = bg_poll_interval($db, $userId);
-$logCtx = sprintf('user=%d code=%s wx=%s fw=%s last=%s mode=%s refresh=%d %s',
+$logCtx = sprintf('user=%d code=%s wx=%s fw=%s last=%s upd=%s mode=%s refresh=%d %s',
                   $userId, bg_log_code($accessCode), $wx === null ? '-' : (string) $wx,
-                  $fw, $last, $mode, $pollRefresh, bg_log_who());
+                  $fw, $last, $upd, $mode, $pollRefresh, bg_log_who());
 
 // The trap that made "the pictures never change, whatever interval I pick" look
 // like a broken rotation: the rotation belongs to the owner's OWN pictures, so

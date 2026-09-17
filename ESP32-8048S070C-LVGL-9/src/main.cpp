@@ -20,7 +20,7 @@ extern const lv_font_t lv_font_montserrat_14_bold;
 // device will keep offering (and auto-installing) a build that is not actually
 // newer. Each build reports its own version to the site on every background poll,
 // so the number in the log identifies the binary exactly - never reuse one.
-const String build_version = "2.3.8";
+const String build_version = "2.3.9";
 int debug =0; // Change to 1 to enable serial prints
 // Firmware check interval variable
 // Was 100000UL, which is 100 SECONDS, not the 5 minutes the comment claimed - so
@@ -86,6 +86,9 @@ void show_new_event_popup(lv_calendar_date_t *selected_date = nullptr);
 void new_event_submit_cb(lv_event_t *e);
 void new_event_cancel_cb(lv_event_t *e);
 void checkFirmwareUpdate();
+// Dotted-numeric version compare, used by the update check and by the state it
+// reports to the website. Declared here because its definition sits far below.
+static bool versionIsNewer(const String &candidate, const String &current);
 void update_btn_cb(lv_event_t *e);
 void printMemoryUsage();
 void updateDateTimeLabel(); // New function to update date-time label
@@ -506,6 +509,14 @@ static String bg_mode = "";
 // show; with it, a device that goes quiet mid-apply says so on the way past, and
 // "the picture did not change" becomes "it asked for X and then reported Y".
 static String bg_last_result = "start";
+// What the panel knows about firmware updates, reported on every background poll as
+// &upd=. Without it an update that decides NOT to run is completely silent: no
+// prompt (the quiet window suppresses those), no install, no dialog, nothing on
+// screen. This is the difference between "the feed is older than what I am running",
+// "I am installing" and "the download failed", and it costs one query field.
+//   unchecked | none:<advertised> | new:<advertised> | auto:<v> | offer:<v>
+//   installing:<v> | fail:<reason>
+static String ota_state = "unchecked";
 /** bg_last_result travels in a query string, and the abort reasons are free text
  *  ("a different picture is wanted now"), so anything that is not a bare token
  *  becomes a dash. The site only needs to tell two outcomes apart, not to read
@@ -525,7 +536,7 @@ static String bg_url_safe(const String &in) {
 // download a second one the moment the weather arrived.
 static bool g_weather_known = false;
 // OTA variables
-String currentFirmwareVersion = "2.3.8"; // replaced by build_version in setup()
+String currentFirmwareVersion = "2.3.9"; // replaced by build_version in setup()
 String latestFirmwareVersion = "";
 String firmwareUrl = "";
 WiFiClientSecure client;
@@ -3731,6 +3742,11 @@ void checkFirmwareUpdate() {
   // Extract version and URL
   latestFirmwareVersion = doc["version"].as<String>();
   firmwareUrl = doc["url"].as<String>();
+  // The two versions side by side, every check. A feed advertising a version that is
+  // not HIGHER than the one running is the silent no-op this records: nothing to
+  // install, so nothing happens and nothing is shown.
+  ota_state = (versionIsNewer(latestFirmwareVersion, currentFirmwareVersion) ? "new:" : "none:")
+              + latestFirmwareVersion;
   if (debug == 1) Serial.println("[OTA] Current firmware version: " + currentFirmwareVersion);
   if (debug == 1) Serial.println("[OTA] Latest firmware version: " + latestFirmwareVersion);
   if (debug == 1) Serial.println("[OTA] Firmware URL: " + firmwareUrl);
@@ -3836,6 +3852,7 @@ static void ota_close_transfer() {
 }
 // Back to a state the user can retry from, with the reason on screen.
 static void ota_fail(const char *msg) {
+  ota_state = String("fail:") + msg;
   ota_close_transfer();
   ota_set_status(msg, true);
   if (ota_bar) lv_bar_set_value(ota_bar, 0, LV_ANIM_OFF);
@@ -4232,6 +4249,7 @@ static void maybeAutoUpdate() {
   if (indev && lv_indev_get_state(indev) == LV_INDEV_STATE_PRESSED) return;
   if (millis() - lastAutoUpdateAttempt < autoUpdateRetryInterval) return;
   lastAutoUpdateAttempt = millis();
+  ota_state = "auto:" + latestFirmwareVersion;
   if (debug == 1) {
     Serial.println("[OTA] Quiet window open - updating automatically to " + latestFirmwareVersion);
   }
@@ -4318,6 +4336,7 @@ static bool offerFirmwareUpdate() {
                    currentFirmwareVersion + ")");
   }
 
+  ota_state = "offer:" + latestFirmwareVersion;
   update_offer_popup = lv_obj_create(lv_scr_act());
   lv_obj_set_width(update_offer_popup, 600);
   lv_obj_set_height(update_offer_popup, LV_SIZE_CONTENT);
@@ -6908,7 +6927,8 @@ void fetchBackgroundFilename() {
                // Who we are and how the last picture went. The site records both in
                // logs/bg-error.log, which is the only window onto a panel with no
                // serial console attached.
-               "&fw=" + bg_url_safe(currentFirmwareVersion) + "&last=" + bg_url_safe(bg_last_result);
+               "&fw=" + bg_url_safe(currentFirmwareVersion) + "&last=" + bg_url_safe(bg_last_result) +
+               "&upd=" + bg_url_safe(ota_state);
   http.begin(url);
   int httpCode = http.GET();
 
