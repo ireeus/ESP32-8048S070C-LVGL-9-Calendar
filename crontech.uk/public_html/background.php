@@ -59,7 +59,26 @@ if (!isset($_GET['background_img'])) {
 
 $accessCode = trim((string) $_GET['background_img']);
 $wx = isset($_GET['wx']) && $_GET['wx'] !== '' ? (int) $_GET['wx'] : null;
-$logCtx = sprintf('code=%s wx=%s %s', bg_log_code($accessCode), $wx === null ? '-' : (string) $wx, bg_log_who());
+
+/**
+ * Optional fields the firmware sends to say who it is and how the LAST picture
+ * went. They are what turns "the device stopped polling" into "the device stopped
+ * polling, and the last thing it told us was that it was about to apply X". Not
+ * trusted: newlines and control characters are stripped so nothing can forge log
+ * lines, and the length is bounded.
+ */
+function bg_log_field(string $key, int $max = 64): string
+{
+    $v = isset($_GET[$key]) ? (string) $_GET[$key] : '';
+    $v = preg_replace('/[^\x20-\x7E]/', '', $v);          // printable ASCII only
+    if (strlen($v) > $max) $v = substr($v, 0, $max) . '..';
+    return $v === '' ? '-' : $v;
+}
+$fw   = bg_log_field('fw', 24);        // firmware version, e.g. 2.3.7
+$last = bg_log_field('last', 48);      // outcome of the previous picture
+
+$logCtx = sprintf('code=%s wx=%s fw=%s last=%s %s', bg_log_code($accessCode),
+                  $wx === null ? '-' : (string) $wx, $fw, $last, bg_log_who());
 
 try {
     $db = new PDO('sqlite:access.db');
@@ -98,8 +117,8 @@ if (!$row) {
 $mode = ($row['background_mode'] ?? 'custom') === 'weather' ? 'weather' : 'custom';
 $custom = trim((string) ($row['background_image'] ?? ''));
 $userId = (int) ($row['user_id'] ?? 0);
-$logCtx = sprintf('user=%d code=%s wx=%s mode=%s %s', $userId, bg_log_code($accessCode),
-                  $wx === null ? '-' : (string) $wx, $mode, bg_log_who());
+$logCtx = sprintf('user=%d code=%s wx=%s fw=%s last=%s mode=%s %s', $userId, bg_log_code($accessCode),
+                  $wx === null ? '-' : (string) $wx, $fw, $last, $mode, bg_log_who());
 
 // The trap that made "the pictures never change, whatever interval I pick" look
 // like a broken rotation: the rotation belongs to the owner's OWN pictures, so

@@ -18,9 +18,9 @@ extern const lv_font_t lv_font_montserrat_14_bold;
 // Build version
 // Must be HIGHER than whatever update/version.json currently advertises, or the
 // device will keep offering (and auto-installing) a build that is not actually
-// newer. The site advertised 2.3.1 when this was bumped past it; this one carries
-// the multi-picture background gallery and the rotation interval it obeys.
-const String build_version = "2.3.6";
+// newer. Each build reports its own version to the site on every background poll,
+// so the number in the log identifies the binary exactly - never reuse one.
+const String build_version = "2.3.7";
 int debug =0; // Change to 1 to enable serial prints
 // Firmware check interval variable
 // Was 100000UL, which is 100 SECONDS, not the 5 minutes the comment claimed - so
@@ -501,13 +501,31 @@ String backgroundFilename = ""; // New: Store the background image filename
 // know whether a change in the weather should pull a different background: in
 // custom mode the picture is the owner's own and never follows the sky.
 static String bg_mode = "";
+// What happened to the LAST picture the site asked for, reported back on the next
+// poll as &last=. Without it the log can only show what the device was TOLD to
+// show; with it, a device that goes quiet mid-apply says so on the way past, and
+// "the picture did not change" becomes "it asked for X and then reported Y".
+static String bg_last_result = "start";
+/** bg_last_result travels in a query string, and the abort reasons are free text
+ *  ("a different picture is wanted now"), so anything that is not a bare token
+ *  becomes a dash. The site only needs to tell two outcomes apart, not to read
+ *  prose. */
+static String bg_url_safe(const String &in) {
+  String out;
+  for (size_t i = 0; i < in.length() && out.length() < 40; i++) {
+    const char c = in[i];
+    out += ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+            c == '.' || c == '-') ? c : '-';
+  }
+  return out.length() ? out : String("-");
+}
 // True once a forecast has actually landed. The background request carries the
 // weather code, and before the first fetch there is no code to carry - asking for
 // "clear" then would pull a sunny picture on a rainy morning and make the device
 // download a second one the moment the weather arrived.
 static bool g_weather_known = false;
 // OTA variables
-String currentFirmwareVersion = "2.3.6"; // replaced by build_version in setup()
+String currentFirmwareVersion = "2.3.7"; // replaced by build_version in setup()
 String latestFirmwareVersion = "";
 String firmwareUrl = "";
 WiFiClientSecure client;
@@ -6882,7 +6900,11 @@ void fetchBackgroundFilename() {
   // first forecast lands there is no code, so the neutral overcast one is asked
   // for rather than a "clear" (0) that would be wrong half the time.
   String url = "https://crontech.uk/background.php?background_img=" + apiCode +
-               "&wx=" + String(g_weather_known ? current_weather.weather_code : 3);
+               "&wx=" + String(g_weather_known ? current_weather.weather_code : 3) +
+               // Who we are and how the last picture went. The site records both in
+               // logs/bg-error.log, which is the only window onto a panel with no
+               // serial console attached.
+               "&fw=" + bg_url_safe(currentFirmwareVersion) + "&last=" + bg_url_safe(bg_last_result);
   http.begin(url);
   int httpCode = http.GET();
 
@@ -6903,18 +6925,25 @@ void fetchBackgroundFilename() {
       // How long until the next look. The rotation interval is set on the website
       // (image_converter.php) rather than on the panel, so the device only has to
       // obey what it is told here. Clamped both ways: too small would mean a TLS
-      // request every few seconds, too large - or a value missing because the site
-      // is older than this firmware - would leave a changed picture unseen.
+      // request every few seconds, too large would leave a changed picture unseen.
+      //
+      // ONLY a value that is actually present may change the interval. Treating
+      // "absent" as "the maximum" was a real fault: an error response, a truncated
+      // body or an older site carries no refresh_s, and one such poll would drop a
+      // healthy device from a one-minute rotation to an hour-long wait - which from
+      // the panel is indistinguishable from the rotation having broken. No news
+      // means "carry on as you were".
       const long refreshS = doc["refresh_s"] | 0L;
-      unsigned long want = BG_REFRESH_MAX_MS;
       if (refreshS > 0) {
-        want = (unsigned long)refreshS * 1000UL;
+        unsigned long want = (unsigned long)refreshS * 1000UL;
         if (want < BG_REFRESH_MIN_MS) want = BG_REFRESH_MIN_MS;
         if (want > BG_REFRESH_MAX_MS) want = BG_REFRESH_MAX_MS;
-      }
-      if (want != backgroundUpdateInterval) {
-        backgroundUpdateInterval = want;
-        Serial.printf("[BG] Next background check in %lus (server)\n", backgroundUpdateInterval / 1000UL);
+        if (want != backgroundUpdateInterval) {
+          backgroundUpdateInterval = want;
+          Serial.printf("[BG] Next background check in %lus (server)\n", backgroundUpdateInterval / 1000UL);
+        }
+      } else {
+        Serial.println("[BG] No refresh_s in the answer - keeping the current interval");
       }
     } else {
       if (debug == 1) Serial.println("[APP] JSON parsing failed: " + String(error.c_str()));
@@ -7057,6 +7086,7 @@ static void bgFetchAbort(const char *why) {
     Serial.println("[BG] Abandoning " + bgFetchName + ": " + why);
   }
   if (bgFetchState != BG_FETCH_IDLE) bgFetchHttp.end();
+  bg_last_result = "abort:" + String(why);
   bgFetchStream = nullptr;
   if (bgFetchBuf) { free(bgFetchBuf); bgFetchBuf = nullptr; }
   bgFetchTotal = 0;
@@ -7175,6 +7205,9 @@ static void bgApply(uint8_t *buf, size_t len) {
   lv_obj_align(bg_img, LV_ALIGN_CENTER, 0, 0);
   lv_obj_move_background(bg_img);
   lv_obj_invalidate(lv_scr_act());
+  // Reported back on the next poll: the one line that proves the picture actually
+  // reached the screen rather than merely being downloaded.
+  bg_last_result = "applied";
 }
 // ---- picture cache: many files, least-recently-used eviction ----------------
 // The index is a newline-separated list of picture names, most recently used
@@ -7338,6 +7371,7 @@ void fetchAndSetBackgroundImage() {
   // is no way to split it with this client, and it is a second rather than ten.
   const int httpCode = bgFetchHttp.GET();
   if (httpCode != HTTP_CODE_OK) {
+    bg_last_result = "http" + String(httpCode);
     Serial.println("[BG] Background request failed: HTTP " + String(httpCode));
     bgFetchHttp.end();
     return;
@@ -7347,6 +7381,7 @@ void fetchAndSetBackgroundImage() {
     // A size mismatch means the server is serving something this firmware cannot
     // read (a picture written before the stored size changed, say), and silently
     // keeping the previous one made that look like "nothing happened".
+    bg_last_result = "bad-size";
     Serial.printf("[BG] Invalid background size: %d bytes (expected %d) - is the site serving %dx%d RGB565?\n",
                   contentLength, (int)BG_EXPECTED_SIZE, BG_STORE_W, BG_STORE_H);
     bgFetchHttp.end();
@@ -7354,6 +7389,7 @@ void fetchAndSetBackgroundImage() {
   }
   bgFetchBuf = (uint8_t *)ps_malloc(contentLength);
   if (!bgFetchBuf) {
+    bg_last_result = "no-ram";
     Serial.printf("[BG] FAILED to allocate %d bytes of PSRAM (free: %uKB)\n",
                   contentLength, (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
     bgFetchHttp.end();
