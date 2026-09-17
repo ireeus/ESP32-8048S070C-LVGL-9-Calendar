@@ -28,25 +28,45 @@
 
 require __DIR__ . '/bg_common.php';
 
+// Timestamps in the log are the site's local time, matching the rest of the site
+// rather than whatever PHP defaults to, so they can be read next to the device's
+// own serial output without mental arithmetic.
+date_default_timezone_set('Europe/London');
+bg_log_install_handlers();
+
+/**
+ * Answer the device and write that answer down in one step, so the log can never
+ * drift from what actually went out. TAG is REQ for a normal answer and DENY for
+ * a refusal, which makes `grep -v DENY` the device's real poll history.
+ */
+function bg_reply(string $ctx, array $payload, int $status = 200): void
+{
+    http_response_code($status);
+    echo json_encode($payload);
+    $out = [];
+    foreach ($payload as $k => $v) {
+        $out[] = $k . '=' . (is_null($v) ? 'null' : (string) $v);
+    }
+    bg_log($status === 200 ? 'REQ' : 'DENY', $ctx . ' -> ' . implode(' ', $out));
+    exit;
+}
+
 header('Content-Type: application/json');
 
 if (!isset($_GET['background_img'])) {
-    http_response_code(400);
-    echo json_encode(['error' => 'background_img parameter is required']);
-    exit;
+    bg_reply(bg_log_who(), ['error' => 'background_img parameter is required'], 400);
 }
 
 $accessCode = trim((string) $_GET['background_img']);
 $wx = isset($_GET['wx']) && $_GET['wx'] !== '' ? (int) $_GET['wx'] : null;
+$logCtx = sprintf('code=%s wx=%s %s', bg_log_code($accessCode), $wx === null ? '-' : (string) $wx, bg_log_who());
 
 try {
     $db = new PDO('sqlite:access.db');
     $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     $db->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
 } catch (PDOException $e) {
-    http_response_code(500);
-    echo json_encode(['error' => 'database error']);
-    exit;
+    bg_reply($logCtx, ['error' => 'database error: ' . $e->getMessage()], 500);
 }
 
 // background_mode is added by image_converter.php and may not exist on a site
@@ -66,19 +86,35 @@ try {
         $row = $stmt->fetch();
         if ($row) $row['background_mode'] = 'custom';
     } catch (PDOException $e2) {
+        bg_log('ERROR', $logCtx . ' users lookup failed: ' . $e2->getMessage());
         $row = null;
     }
 }
 
 if (!$row) {
-    http_response_code(404);
-    echo json_encode(['error' => 'unknown access code']);
-    exit;
+    bg_reply($logCtx, ['error' => 'unknown access code'], 404);
 }
 
 $mode = ($row['background_mode'] ?? 'custom') === 'weather' ? 'weather' : 'custom';
 $custom = trim((string) ($row['background_image'] ?? ''));
 $userId = (int) ($row['user_id'] ?? 0);
+$logCtx = sprintf('user=%d code=%s wx=%s mode=%s %s', $userId, bg_log_code($accessCode),
+                  $wx === null ? '-' : (string) $wx, $mode, bg_log_who());
+
+// The trap that made "the pictures never change, whatever interval I pick" look
+// like a broken rotation: the rotation belongs to the owner's OWN pictures, so
+// with the account on the weather set no interval can ever change what the device
+// is sent - it follows the sky, and refresh_s is the plain hourly poll. The site
+// cannot switch the mode on the user's behalf, but it can say so, with numbers.
+if ($mode === 'weather') {
+    $galleryCount = bg_gallery_count($db, $userId);
+    $rotate = bg_rotate_seconds($db, $userId);
+    if ($galleryCount > 0 && $rotate > 0) {
+        bg_log('WARN', sprintf('%s | rotation=%ds and %d own picture(s) are set up, but the mode is "weather": '
+                             . 'the device follows the weather and will NEVER rotate. Switch to "My own pictures" '
+                             . 'on image_converter.php', $logCtx, $rotate, $galleryCount));
+    }
+}
 
 // Every filename goes out with a ?v=<mtime> on it: the device caches one picture
 // and re-downloads only when the NAME changes, and a replacement is written to
@@ -94,19 +130,23 @@ if ($mode === 'custom') {
         $safe = (string) $choice['file'];
         // bg_heal_bin() re-encodes the .bin from its preview PNG when the stored one
         // is missing or was written at an older size - the stored size has changed
-        // once already (full panel -> half), and a stale file would simply be refused
-        // by the device. It is a no-op when the .bin is already correct.
+        // before now, and a stale file would simply be refused by the device. It is
+        // a no-op when the .bin is already correct.
         if (bg_heal_bin('uploads/' . pathinfo($safe, PATHINFO_FILENAME))) {
             $path = __DIR__ . '/uploads/' . $safe;
-            echo json_encode([
+            bg_reply($logCtx, [
                 'filename'  => bg_versioned($safe, $path),
                 'mode'      => 'custom',
                 'group'     => null,
                 // Obeyed by the device, so the cadence is set entirely from here.
                 'refresh_s' => (int) $choice['refresh'],
             ]);
-            exit;
         }
+        bg_log('ERROR', $logCtx . ' | chose ' . $safe . ' but it could not be healed (missing preview PNG?) - '
+                                  . 'falling back to the weather set');
+    } else {
+        bg_log('WARN', $logCtx . ' | mode is custom but there is no usable picture '
+                               . '(no gallery rows and no legacy file) - falling back to the weather set');
     }
     // Nothing usable on the account: fall through to the weather set rather than
     // leaving the device with no background.
@@ -115,12 +155,12 @@ if ($mode === 'custom') {
 // Weather set. No wx (an older firmware) means the neutral cloud picture.
 $group = $wx === null ? 'cloudy' : bg_weather_group($wx);
 if (!bg_weather_file_exists($group)) {
+    bg_log('WARN', $logCtx . ' | no picture for group "' . $group . '" - trying "unknown"');
     $group = bg_weather_file_exists('unknown') ? 'unknown' : null;
 }
 
 if ($group === null) {
-    echo json_encode(['filename' => null, 'mode' => 'none', 'group' => null, 'refresh_s' => BG_REFRESH_DEFAULT]);
-    exit;
+    bg_reply($logCtx, ['filename' => null, 'mode' => 'none', 'group' => null, 'refresh_s' => BG_REFRESH_DEFAULT]);
 }
 
 // This account's own replacement for the chosen group wins over the generated
@@ -132,21 +172,23 @@ $overrideRel = 'weather/' . basename(bg_weather_override_base($userId, $group)) 
 $overrideBase = BG_WEATHER_DIR . '/' . basename(bg_weather_override_base($userId, $group));
 if ($userId > 0 && bg_heal_bin($overrideBase)) {
     $overrideAbs = __DIR__ . '/uploads/' . $overrideRel;
-    echo json_encode([
+    bg_reply($logCtx, [
         'filename'  => bg_versioned($overrideRel, $overrideAbs),
         'mode'      => 'weather',
         'group'     => $group,
         // The weather set does not rotate, so this is just the standard poll.
         'refresh_s' => BG_REFRESH_DEFAULT,
     ]);
-    exit;
 }
 
 $defaultRel = bg_weather_filename($group);
 // Same repair for the shipped default: if the deployed .bin predates the current
 // stored size, rebuild it from the preview PNG beside it.
-bg_heal_bin(BG_WEATHER_DIR . '/' . $group);
-echo json_encode([
+if (!bg_heal_bin(BG_WEATHER_DIR . '/' . $group)) {
+    bg_log('ERROR', $logCtx . ' | shipped default ' . $group . '.bin could not be healed - '
+                            . 'the device will likely refuse it as the wrong size');
+}
+bg_reply($logCtx, [
     'filename'  => bg_versioned($defaultRel, __DIR__ . '/uploads/' . $defaultRel),
     'mode'      => 'weather',
     'group'     => $group,

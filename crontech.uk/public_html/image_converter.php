@@ -492,6 +492,18 @@ $galleryFull = count($gallery) >= BG_MAX_CUSTOM;
             <?php if (!$gallery): ?>
                 <p class="opacity-90">Nothing uploaded yet. The first picture you add appears here.</p>
             <?php else: ?>
+                <?php if ($user['mode'] === 'weather'): ?>
+                    <!-- The rotation belongs to the owner's own pictures, so while the device is
+                         following the weather this control cannot do anything. Saying so here is the
+                         difference between "the interval is broken" and "the interval does not apply
+                         in this mode" - and the mode switch is one radio up the page. -->
+                    <p class="msg-error" style="color:#FDE68A;">
+                        Your device is set to <strong>Weather pictures (automatic)</strong>, so it is
+                        following the weather and these pictures are <strong>not being shown or
+                        rotated</strong>, whatever interval you pick. Choose
+                        <strong>My own pictures</strong> in the "Currently showing" card above to use them.
+                    </p>
+                <?php endif; ?>
                 <form method="POST" class="mb-4">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf_token']); ?>">
                     <label class="block mb-2 text-sm opacity-95" for="rotateSel">
@@ -508,6 +520,8 @@ $galleryFull = count($gallery) >= BG_MAX_CUSTOM;
                     <p class="hint mt-2" style="margin-bottom:0;">
                         The device asks for the next picture when the interval is up. Short intervals mean it
                         polls more often; "every minute" is the busiest and may make the panel hitch briefly.
+                        This only applies in <strong>My own pictures</strong> mode - the weather set follows
+                        the sky instead.
                     </p>
                 </form>
                 <div class="gallery">

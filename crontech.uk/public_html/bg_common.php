@@ -32,6 +32,79 @@ define('BG_STORE_H', 180);
 define('BG_BYTES', BG_STORE_W * BG_STORE_H * 2);  // 108000
 define('BG_WEATHER_DIR', 'uploads/weather');  // holds <group>.bin and <group>.png
 
+/* ===========================================================================
+ * Diagnostics: one log file, outside the web root
+ * ===========================================================================
+ *
+ * The device is a black box on the other end of a TLS connection: when it stops
+ * doing what the site says, the only evidence is what it asked for and when. This
+ * writes that down, plus anything PHP or the page itself trips over, to
+ * logs/error.log - one level up from public_html, so it cannot be fetched over
+ * HTTP, and readable over FTP for exactly the sort of "why is it not rotating?"
+ * question that is otherwise guesswork.
+ *
+ * Every line is "timestamp  TAG  message", so `grep REQ` gives the poll history,
+ * `grep -E 'ERROR|FATAL|PHP'` gives the problems, and the gaps between REQ lines
+ * are the device's real polling interval - which is how you tell whether the
+ * firmware you flashed is the one honouring refresh_s.
+ *
+ * Nothing here may ever break the endpoint: a log that cannot be written is
+ * silence, not an error.
+ */
+define('BG_LOG_FILE', dirname(__DIR__) . '/logs/bg-error.log');
+define('BG_LOG_MAX_BYTES', 512 * 1024);
+
+function bg_log(string $tag, string $message): void
+{
+    $line = sprintf("%s  %-6s %s\n", date('Y-m-d H:i:s'), $tag, $message);
+    clearstatcache(true, BG_LOG_FILE);
+    $size = @filesize(BG_LOG_FILE);
+    if ($size !== false && $size > BG_LOG_MAX_BYTES) {
+        // One generation is enough: the previous 512KB stays as .1 while the new
+        // file starts empty, so the tail is never lost to the cap.
+        @rename(BG_LOG_FILE, BG_LOG_FILE . '.1');
+    }
+    @file_put_contents(BG_LOG_FILE, $line, FILE_APPEND | LOCK_EX);
+}
+
+/** Who is asking. The access code is the device's API key, so only enough of it
+ *  to tell two devices apart is ever written down. */
+function bg_log_who(): string
+{
+    $ip = (string) ($_SERVER['REMOTE_ADDR'] ?? '?');
+    $ua = (string) ($_SERVER['HTTP_USER_AGENT'] ?? '');
+    if (strlen($ua) > 70) $ua = substr($ua, 0, 70) . '...';
+    return sprintf('ip=%s ua="%s"', $ip, $ua);
+}
+
+function bg_log_code(string $code): string
+{
+    if ($code === '') return '(none)';
+    return strlen($code) > 4 ? substr($code, 0, 4) . '...' : $code;
+}
+
+/**
+ * PHP's own complaints, into the same file. Returning true keeps them out of the
+ * response body as well: a warning printed before the JSON would otherwise make
+ * the device fail to parse it, which looks exactly like "the picture did not
+ * change" from the panel's side.
+ */
+function bg_log_install_handlers(): void
+{
+    set_error_handler(function ($no, $str, $file, $line) {
+        if (!(error_reporting() & $no)) return true;    // respect @suppression
+        bg_log('PHP', sprintf('%s in %s:%d', $str, basename((string) $file), (int) $line));
+        return true;
+    });
+    register_shutdown_function(function () {
+        $e = error_get_last();
+        if ($e && in_array($e['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) {
+            bg_log('FATAL', sprintf('%s in %s:%d', $e['message'],
+                                    basename((string) $e['file']), (int) $e['line']));
+        }
+    });
+}
+
 /**
  * WMO weather code -> background group.
  *
