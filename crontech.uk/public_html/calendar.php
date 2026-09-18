@@ -410,6 +410,40 @@ if (isset($_SESSION['user_id'])) {
     $stmt->execute([$_SESSION['user_id']]);
     $events = $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
+
+// The same events again, shaped for FullCalendar, to be handed over as JSON rather
+// than written out as hand-made JavaScript.
+//
+// The old version emitted every field into a single-quoted JS string literal escaped
+// with addslashes(htmlspecialchars(...)), and NEITHER of those escapes a newline. A
+// multi-line description - a postal address, which the form actively invites because
+// the field is a textarea - therefore closed the string in the middle of a line:
+//
+//     description: 'London School of Hygiene &amp; Tropical MedicinePhase 3b
+//     Keppel Street
+//
+// That is a SyntaxError, so the ENTIRE <script> block failed to parse, FullCalendar
+// never initialised, and the page came up with a blank calendar and dead buttons -
+// with no PHP error anywhere, because PHP was perfectly happy. json_encode() escapes
+// newlines, quotes, backslashes and unicode properly, which is the whole job.
+$calendarEvents = [];
+foreach ($events as $e) {
+    $tint = ($e['source'] ?? 'local') === 'ics' ? 'var(--primary)' : 'var(--primary-hover)';
+    $calendarEvents[] = [
+        'id'     => (string) $e['event_id'],
+        'title'  => (string) ($e['summary'] ?? ''),
+        'start'  => (string) ($e['start_time'] ?? ''),
+        'end'    => (string) ($e['end_time'] ?? ''),
+        'allDay' => (bool) ($e['all_day'] ?? false),
+        'extendedProps' => [
+            'description'   => (string) ($e['description'] ?? ''),
+            'remind_before' => (string) ($e['remind_before'] ?? ''),
+        ],
+        'backgroundColor' => $tint,
+        'borderColor'     => $tint,
+        'editable'        => true,
+    ];
+}
 // Incoming events this month (for sidebar)
 $month_events = [];
 if (isset($_SESSION['user_id'])) {
@@ -1049,24 +1083,14 @@ if (!isset($_SESSION['user_id'])) {
                 },
                 selectable: true,
                 selectMirror: true,
-                events: [
-                    <?php foreach ($events as $event): ?>
-                    {
-                        id: '<?php echo $event['event_id']; ?>',
-                        title: '<?php echo addslashes(htmlspecialchars($event['summary'])); ?>',
-                        start: '<?php echo $event['start_time']; ?>',
-                        end: '<?php echo $event['end_time']; ?>',
-                        allDay: <?php echo $event['all_day'] ? 'true' : 'false'; ?>,
-                        extendedProps: {
-                            description: '<?php echo addslashes(htmlspecialchars($event['description'] ?? '')); ?>',
-                            remind_before: '<?php echo addslashes(htmlspecialchars($event['remind_before'] ?? '')); ?>'
-                        },
-                        backgroundColor: '<?php echo ($event['source'] ?? 'local') === 'ics' ? 'var(--primary)' : 'var(--primary-hover)'; ?>',
-                        borderColor: '<?php echo ($event['source'] ?? 'local') === 'ics' ? 'var(--primary)' : 'var(--primary-hover)'; ?>',
-                        editable: true
-                    },
-                    <?php endforeach; ?>
-                ],
+                events: <?php
+                    // JSON_HEX_* keeps it safe inside a <script> element: no value can
+                    // contain "</script>", and the output is plain ASCII whatever the
+                    // description holds. Do NOT htmlspecialchars() this - entities
+                    // inside a JSON string would reach the user as literal "&amp;".
+                    echo json_encode($calendarEvents,
+                                     JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+                ?>,
                 select: function(info) {
                     document.getElementById('eventPopup').style.display = 'block';
                     document.getElementById('eventPopupOverlay').style.display = 'block';
